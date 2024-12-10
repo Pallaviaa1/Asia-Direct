@@ -766,11 +766,7 @@ const Addfreight = (req, res) => {
             supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments
         } = req.body;
-console.log("hii");
 
-        console.log(req.body);
-        console.log(req.files);
-        
         // Generate the freight number
         generateFreightNumber((err, freightNumber) => {
             if (err) {
@@ -817,7 +813,7 @@ console.log("hii");
 
                 if (req.files && req.files.supplier_invoice) {
                     // Iterate over all uploaded files for 'supplier_invoice'
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
                     req.files.supplier_invoice.forEach((file) => {
                         con.query(docsInsertQuery, [insertResult.insertId, "Supplier Invoice", file.filename], (err, result) => {
@@ -826,7 +822,7 @@ console.log("hii");
                     })
                 }
                 if (req.files && req.files.packing_list) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
                     req.files.packing_list.forEach((file) => {
                         con.query(docsInsertQuery, [insertResult.insertId, "Packing List", file.filename], (err, result) => {
@@ -835,7 +831,7 @@ console.log("hii");
                     })
                 }
                 if (req.files && req.files.licenses) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
                     req.files.licenses.forEach((file) => {
                         con.query(docsInsertQuery, [insertResult.insertId, "Licenses", file.filename], (err, result) => {
@@ -844,7 +840,7 @@ console.log("hii");
                     })
                 }
                 if (req.files && req.files.other_documents) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
                     req.files.other_documents.forEach((file) => {
                         con.query(docsInsertQuery, [insertResult.insertId, "Other Documents", file.filename], (err, result) => {

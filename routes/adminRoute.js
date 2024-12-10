@@ -10,7 +10,7 @@ const multer = require('multer');
 
 var storage = multer.diskStorage({
     destination: function (err, file, cb) {
-        if (file.fieldname === "quote_document" || file.fieldname === "Supplier_Quote_Attachment" || file.fieldname === "document") {
+        if (file.fieldname === "licenses" || file.fieldname === "other_documents" || file.fieldname === "document" || file.fieldname === "supplier_invoice" || file.fieldname === "packing_list") {
             cb(null, path.join(__dirname, '../public/documents'));
         }
         if (file.fieldname === "profile") {
