@@ -85,4 +85,7 @@ customer_route.post("/CleranceOrderList", customerController.CleranceOrderList)
 customer_route.post("/addQueries", customerController.addQueries)
 customer_route.get("/getQueries", customerController.getQueries)
 customer_route.post("/deleteQueries", customerController.deleteQueries)
+customer_route.post("/addCommodity", customerController.addCommodity)
+customer_route.get("/getCommodities", customerController.getCommodities)
+
 module.exports = customer_route;

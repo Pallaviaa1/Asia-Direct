@@ -10,7 +10,7 @@ const multer = require('multer');
 
 var storage = multer.diskStorage({
     destination: function (err, file, cb) {
-        if (file.fieldname === "quote_document" || file.fieldname === "Supplier_Quote_Attachment" || file.fieldname === "document")  {
+        if (file.fieldname === "quote_document" || file.fieldname === "Supplier_Quote_Attachment" || file.fieldname === "document") {
             cb(null, path.join(__dirname, '../public/documents'));
         }
         if (file.fieldname === "profile") {
@@ -41,10 +41,10 @@ admin_route.get('/get-privacy', adminController.GetPrivacy);
 admin_route.post('/term-condition', Privacy_TermValidation, adminController.TermCondition);
 admin_route.get('/get-terms', adminController.GetTerms);
 
-admin_route.post('/add-freight', upload.single('document'), adminController.Addfreight);
+admin_route.post('/add-freight', upload.fields([{ name: 'supplier_invoice', maxCount: 5 }, { name: 'packing_list', maxCount: 5 }, { name: 'licenses', maxCount: 5 }, { name: 'other_documents', maxCount: 5 }]), adminController.Addfreight);
 admin_route.post('/freight-list', adminController.GetFreightAdmin);
 admin_route.post('/new-freight-list', adminController.GetFreightCustomer);
-admin_route.post('/edit-freight', upload.single('document'), adminController.EditFreight);
+admin_route.post('/edit-freight', upload.fields([{ name: 'supplier_invoice', maxCount: 5 }, { name: 'packing_list', maxCount: 5 }, { name: 'licenses', maxCount: 5 }, { name: 'other_documents', maxCount: 5 }]), adminController.EditFreight);
 admin_route.post('/get-freight', adminController.GetFreightById);
 admin_route.post('/delete-freight', adminController.DeleteFreight);
 

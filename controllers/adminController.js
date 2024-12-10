@@ -682,7 +682,7 @@ const GetFreightAdmin = async (req, res) => {
             tbl_freight.id as freight_id,  tbl_freight.fcl_lcl, tbl_users.*, tbl_users.id as user_id, tbl_users.full_name as client_name, tbl_users.email as client_email, tbl_freight.product_desc,
                 tbl_freight.client_ref, tbl_freight.date, tbl_freight.type, tbl_freight.freight, tbl_freight.incoterm, tbl_freight.dimension, tbl_freight.weight,
                 tbl_freight.quote_received, tbl_freight.client_quoted, tbl_freight.status, tbl_freight.comment, tbl_freight.no_of_packages, tbl_freight.package_type,
-                tbl_freight.commodity, tbl_freight.shipper_name, tbl_freight.hazardous, tbl_freight.collection_from, tbl_freight.delivery_to, tbl_freight.supplier_address, tbl_freight.shipment_origin, tbl_freight.shipment_des,
+                tbl_freight.commodity, cm.name as commodity_name, tbl_freight.shipper_name, tbl_freight.hazardous, tbl_freight.collection_from, tbl_freight.delivery_to, tbl_freight.supplier_address, tbl_freight.shipment_origin, tbl_freight.shipment_des,
                 tbl_freight.port_of_loading, tbl_freight.post_of_discharge, tbl_freight.place_of_delivery, tbl_freight.ready_for_collection,
                 tbl_freight.transit_time, tbl_freight.priority, tbl_freight.added_by, tbl_freight.freight_number, tbl_freight.shipment_details,
                 tbl_freight.nature_of_hazard, tbl_freight.volumetric_weight, tbl_freight.assign_for_estimate, tbl_freight.assign_to_transporter,
@@ -731,6 +731,7 @@ const GetFreightAdmin = async (req, res) => {
             LEFT JOIN countries AS c ON c.id = tbl_freight.delivery_to
             LEFT JOIN countries AS co ON co.id = tbl_freight.collection_from
             LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_freight.id
+            LEFT JOIN tbl_commodity  AS cm ON cm.id = tbl_freight.commodity
             ${condition}
             GROUP BY tbl_freight.id
             ORDER BY tbl_freight.created_at DESC`;
@@ -765,8 +766,11 @@ const Addfreight = (req, res) => {
             supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments
         } = req.body;
+console.log("hii");
 
-        // console.log(req.body);
+        console.log(req.body);
+        console.log(req.files);
+        
         // Generate the freight number
         generateFreightNumber((err, freightNumber) => {
             if (err) {
@@ -797,14 +801,8 @@ const Addfreight = (req, res) => {
             ];
 
             con.query(insertQuery, insertParams, (err, insertResult) => {
-                if (err) {
-                    // console.error('Error inserting freight data:', err);
-                    return res.status(500).json({
-                        success: false,
-                        message: "Internal Server Error"
-                    });
-                }
-                if (req.file && req.file.filename) {
+                if (err) throw err;
+                /* if (req.file && req.file.filename) {
                     const docsInsertQuery = `update tbl_freight set add_attachments='${add_attachments}', add_attachment_file='${req.file.filename}' where id='${insertResult.insertId}'`;
                     con.query(docsInsertQuery, (err, result) => {
                         if (err) {
@@ -815,6 +813,44 @@ const Addfreight = (req, res) => {
                             });
                         }
                     });
+                } */
+
+                if (req.files && req.files.supplier_invoice) {
+                    // Iterate over all uploaded files for 'supplier_invoice'
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+                    req.files.supplier_invoice.forEach((file) => {
+                        con.query(docsInsertQuery, [insertResult.insertId, "Supplier Invoice", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.packing_list) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+                    req.files.packing_list.forEach((file) => {
+                        con.query(docsInsertQuery, [insertResult.insertId, "Packing List", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.licenses) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+                    req.files.licenses.forEach((file) => {
+                        con.query(docsInsertQuery, [insertResult.insertId, "Licenses", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.other_documents) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+                    req.files.other_documents.forEach((file) => {
+                        con.query(docsInsertQuery, [insertResult.insertId, "Other Documents", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
                 }
                 return res.status(200).json({
                     success: true,
@@ -828,7 +864,7 @@ const Addfreight = (req, res) => {
         // console.error('Error in Addfreight function:', error);
         return res.status(500).json({
             success: false,
-            message: "Internal Server Error"
+            message: error.message
         });
     }
 };
@@ -899,7 +935,8 @@ const GetFreightCustomer = async (req, res) => {
                    tbl_freight.client_ref as client_id, 
                    tbl_freight.product_desc, 
                    tbl_freight.collection_from, 
-                   tbl_freight.commodity, 
+                   tbl_freight.commodity,
+                   cm.name as commodity_name,
                    tbl_freight.freight, 
                    tbl_freight.freight_type, 
                    tbl_freight.shipment_origin, 
@@ -975,6 +1012,7 @@ const GetFreightCustomer = async (req, res) => {
             LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
             LEFT JOIN countries AS co ON co.id = tbl_freight.delivery_to
             LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_freight.id
+            LEFT JOIN tbl_commodity  AS cm ON cm.id = tbl_freight.commodity
             ${condition}
             GROUP BY tbl_freight.id
             ORDER BY tbl_freight.created_at DESC`;
@@ -1058,7 +1096,7 @@ const EditFreight = async (req, res) => {
             });
         }
 
-        if (req.file && req.file.filename) {
+        /* if (req.file && req.file.filename) {
             const docsInsertQuery = `update tbl_freight set add_attachments='${add_attachments}', add_attachment_file='${req.file.filename}' where id='${id}'`;
             con.query(docsInsertQuery, (err, result) => {
                 if (err) {
@@ -1069,8 +1107,68 @@ const EditFreight = async (req, res) => {
                     });
                 }
             });
-        }
+        } */
+        if (req.files && req.files.supplier_invoice) {
+            // Iterate over all uploaded files for 'supplier_invoice'
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
 
+            req.files.supplier_invoice.forEach((file) => {
+                con.query(docsInsertQuery, [insertResult.insertId, "Supplier Invoice", file.filename], (err, result) => {
+                    if (err) {
+                        console.error('Error inserting document data:', err);
+                        return res.status(500).json({
+                            success: false,
+                            message: "Internal Server Error"
+                        });
+                    }
+                });
+            })
+        }
+        if (req.files && req.files.packing_list) {
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+            req.files.packing_list.forEach((file) => {
+                con.query(docsInsertQuery, [insertResult.insertId, "Packing List", file.filename], (err, result) => {
+                    if (err) {
+                        console.error('Error inserting document data:', err);
+                        return res.status(500).json({
+                            success: false,
+                            message: "Internal Server Error"
+                        });
+                    }
+                });
+            })
+        }
+        if (req.files && req.files.licenses) {
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+            req.files.licenses.forEach((file) => {
+                con.query(docsInsertQuery, [insertResult.insertId, "Licenses", file.filename], (err, result) => {
+                    if (err) {
+                        console.error('Error inserting document data:', err);
+                        return res.status(500).json({
+                            success: false,
+                            message: "Internal Server Error"
+                        });
+                    }
+                });
+            })
+        }
+        if (req.files && req.files.other_documents) {
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+
+            req.files.other_documents.forEach((file) => {
+                con.query(docsInsertQuery, [insertResult.insertId, "Other Documents", file.filename], (err, result) => {
+                    if (err) {
+                        console.error('Error inserting document data:', err);
+                        return res.status(500).json({
+                            success: false,
+                            message: "Internal Server Error"
+                        });
+                    }
+                });
+            })
+        }
         res.status(200).json({
             success: true,
             message: "Freight updated successfully"
@@ -1099,7 +1197,9 @@ const GetFreightById = async (req, res) => {
             })
         }
         else {
-            const selectQuery = `select * from tbl_freight where id=?`;
+            const selectQuery = `select f.*, c.name as commodity_name  from tbl_freight asf
+            LEFT JOIN tbl_commodity  AS c ON c.id = f.commodity
+            where f.id=?`;
             await con.query(selectQuery, [freight_id], (err, data) => {
                 if (err) throw err;
                 if (data.length > 0) {
@@ -2330,7 +2430,7 @@ const order_Details = async (req, res) => {
         con.query(`SELECT tbl_orders.*, 
     tbl_orders.dimensions AS order_dimensions,
     tbl_orders.created_at as order_created_date,
-    f.*, 
+    f.*, cm.name as commodity_name,
     tbl_orders.weight AS order_weight, 
     tbl_orders.id AS order_id, 
     tbl_users.*, 
@@ -2412,6 +2512,7 @@ LEFT JOIN countries AS co ON co.id = f.delivery_to
 LEFT JOIN countries AS c ON c.id = f.collection_from
 LEFT JOIN countries AS u ON u.id = tbl_users.country
 LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_orders.freight_id
+LEFT JOIN tbl_commodity  AS cm ON cm.id = f.commodity
 GROUP BY tbl_orders.id
         ORDER BY tbl_orders.id DESC`, async (err, data) => {
             if (err) {

@@ -382,7 +382,7 @@ const GetClientFreights = async (req, res) => {
             }
 
             const selectQuery = `
-                SELECT tbl_freight.*, 
+                SELECT tbl_freight.*, cm.name as commodity_name,
                        tbl_users.full_name AS client_name, 
                        tbl_users.profile,  tbl_users.email,  tbl_users.client_ref,  tbl_users.contact_person,  tbl_users.cellphone, 
                        tbl_users.telephone,  tbl_users.address_1,  tbl_users.address_2,  tbl_users.city,  tbl_users.province, 
@@ -395,6 +395,7 @@ const GetClientFreights = async (req, res) => {
                 LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
                 LEFT JOIN countries AS co ON co.id = tbl_freight.delivery_to
                 LEFT JOIN tbl_users AS u ON u.id = tbl_freight.shipment_ref
+                LEFT JOIN tbl_commodity  AS cm ON cm.id = tbl_freight.commodity
                 ${condition}
                 ORDER BY tbl_freight.created_at DESC`;
 
@@ -2077,14 +2078,15 @@ const orderDetails = async (req, res) => {
             })
         }
         await con.query(`select tbl_orders.*, CONCAT('OR000', tbl_orders.id) as order_id, tbl_freight.*, tbl_freight.id as freight_id, tbl_users.*, c.name AS collection_from_country, 
-    co.name AS delivery_to_country, 
+    co.name AS delivery_to_country, cm.name as commodity_name,
     c.flag_url AS collection_from_country_flag_url, 
     co.flag_url AS delivery_to_country_flag_url
             from tbl_orders
         INNER JOIN tbl_freight on tbl_freight.id=tbl_orders.freight_id
         INNER JOIN tbl_users on tbl_users.id=tbl_orders.client_id
         LEFT JOIN countries AS co ON co.id = tbl_freight.delivery_to
-LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
+        LEFT JOIN tbl_commodity  AS cm ON cm.id = tbl_freight.commodity
+        LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
         where client_id='${user_id}'`, (err, data) => {
             if (err) throw err;
             if (data.length > 0) {
@@ -2539,11 +2541,74 @@ const deleteQueries = async (req, res) => {
     }
 }
 
+const addCommodity = async (req, res) => {
+    try {
+        const { name } = req.body;
+
+        // Check if the name already exists in a case-insensitive manner
+        con.query(`SELECT * FROM tbl_commodity WHERE LOWER(name) = LOWER(?)`, [name], (err, result) => {
+            if (err) {
+                throw err;
+            }
+
+            if (result.length > 0) {
+                // Name already exists, return an error response
+                return res.status(400).send({
+                    success: false,
+                    message: "Commodity name already exists"
+                });
+            }
+
+            // Insert the new name into the table
+            con.query(`INSERT INTO tbl_commodity (name) VALUES (?)`, [name], (err, result) => {
+                if (err) {
+                    throw err;
+                }
+
+                res.status(200).send({
+                    success: true,
+                    message: "Commodity added successfully"
+                });
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+const getCommodities = async (req, res) => {
+    try {
+        // Fetch all commodities
+        con.query(`SELECT * FROM tbl_commodity ORDER BY created_at DESC`, (err, result) => {
+            if (err) {
+                throw err;
+            }
+
+            // Send the fetched data
+            res.status(200).send({
+                success: true,
+                data: result,
+                message: "Commodities fetched successfully"
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
 module.exports = {
     AddCustomer, GetClientList, updateClient, GetClientById, DeleteClient, GetClientFreights, AddClearing,
     EditClearing, GetClearingList, GetClearingById, Deleteclearance, customerRegister, CustomerLogin,
     AddfreightByCustomer, UpdatefreightByCustomer, GetNotificationUser, updateNotificationSeen, deleteOneNotification,
     DeleteAllNotification, UpdateClientProfile, AddClearingByCustomer, GetClearingClient, AcceptQuotation,
     GetShipEstimate, RejectQuotation, orderDetails, UserforgotPassword, UserResetPassword, findHsCode, getListClearanceQuotation,
-    uploadClrearanceDOC, CleranceOrderList, addQueries, getQueries, deleteQueries
+    uploadClrearanceDOC, CleranceOrderList, addQueries, getQueries, deleteQueries, addCommodity, getCommodities
 }
