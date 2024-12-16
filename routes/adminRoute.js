@@ -123,4 +123,8 @@ admin_route.post("/RevertOrder", adminController.RevertOrder)
 admin_route.post("/addWarehouseProduct", adminController.addWarehouseProduct)
 admin_route.post("/getWarehouseOrderProduct", adminController.getWarehouseOrderProduct)
 
+admin_route.post("/GetFreightImages", adminController.GetFreightImages)
+admin_route.post("/DeleteDocument", adminController.DeleteDocument)
+admin_route.get("/GetDeliveredOrder", adminController.GetDeliveredOrder)
+
 module.exports = admin_route;

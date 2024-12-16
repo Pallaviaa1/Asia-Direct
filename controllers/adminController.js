@@ -769,13 +769,7 @@ const Addfreight = (req, res) => {
 
         // Generate the freight number
         generateFreightNumber((err, freightNumber) => {
-            if (err) {
-                // console.error('Error generating freight number:', err);
-                return res.status(500).json({
-                    success: false,
-                    message: "Internal Server Error"
-                });
-            }
+            if (err) throw err;
 
             // Insert into the database
             let insertQuery;
@@ -1043,7 +1037,7 @@ const GetFreightCustomer = async (req, res) => {
 const EditFreight = async (req, res) => {
     try {
         // Extracting data from req.body
-        // console.log(req.body);
+        console.log(req.body);
         const {
             id, // Assuming you will pass the ID of the freight to be updated
             client_ref, date, type, freight, fcl_lcl, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
@@ -1106,62 +1100,38 @@ const EditFreight = async (req, res) => {
         } */
         if (req.files && req.files.supplier_invoice) {
             // Iterate over all uploaded files for 'supplier_invoice'
-            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
             req.files.supplier_invoice.forEach((file) => {
-                con.query(docsInsertQuery, [insertResult.insertId, "Supplier Invoice", file.filename], (err, result) => {
-                    if (err) {
-                        console.error('Error inserting document data:', err);
-                        return res.status(500).json({
-                            success: false,
-                            message: "Internal Server Error"
-                        });
-                    }
+                con.query(docsInsertQuery, [id, "Supplier Invoice", file.filename], (err, result) => {
+                    if (err) throw err;
                 });
             })
         }
         if (req.files && req.files.packing_list) {
-            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
             req.files.packing_list.forEach((file) => {
-                con.query(docsInsertQuery, [insertResult.insertId, "Packing List", file.filename], (err, result) => {
-                    if (err) {
-                        console.error('Error inserting document data:', err);
-                        return res.status(500).json({
-                            success: false,
-                            message: "Internal Server Error"
-                        });
-                    }
+                con.query(docsInsertQuery, [id, "Packing List", file.filename], (err, result) => {
+                    if (err) throw err;
                 });
             })
         }
         if (req.files && req.files.licenses) {
-            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
             req.files.licenses.forEach((file) => {
-                con.query(docsInsertQuery, [insertResult.insertId, "Licenses", file.filename], (err, result) => {
-                    if (err) {
-                        console.error('Error inserting document data:', err);
-                        return res.status(500).json({
-                            success: false,
-                            message: "Internal Server Error"
-                        });
-                    }
+                con.query(docsInsertQuery, [id, "Licenses", file.filename], (err, result) => {
+                    if (err) throw err;
                 });
             })
         }
         if (req.files && req.files.other_documents) {
-            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, add_attachments, document) VALUES (?, ?, ?)`;
+            const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
             req.files.other_documents.forEach((file) => {
-                con.query(docsInsertQuery, [insertResult.insertId, "Other Documents", file.filename], (err, result) => {
-                    if (err) {
-                        console.error('Error inserting document data:', err);
-                        return res.status(500).json({
-                            success: false,
-                            message: "Internal Server Error"
-                        });
-                    }
+                con.query(docsInsertQuery, [id, "Other Documents", file.filename], (err, result) => {
+                    if (err) throw err;
                 });
             })
         }
@@ -1661,12 +1631,12 @@ const Shipping_Estimate = async (req, res) => {
             des_port_fees, des_port_fees_gp, des_unpack, des_unpack_gp, des_other, des_other_gp, des_currency, freigh_amount, origin_amount,
             des_amount, sub_amount, exchange_rate, total_amount, Supplier_Quote_Amount, final_base_currency, freight_final_amount, origin_pick_final_amt, origin_cust_final_amt,
             origin_doc_final_amt, origin_ware_final_amt, org_port_fee_final_amt, org_other_final_amt, des_delivery_final_amt, des_cust_final_amt,
-            des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt
+            des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt, Roefreight, roe_origin_currency, roe_des_currency
         } = req.body;
 
         const Supplier_Quote_Attachment = req.file ? req.file.filename : null;
 
-        // console.log(req.body);
+        console.log(req.body);
 
         await con.query(`SELECT id FROM shipping_estimate WHERE freight_id='${freight_id}' AND client_id='${client_id}'`, async (err, result) => {
             if (err) throw err;
@@ -1681,7 +1651,7 @@ const Shipping_Estimate = async (req, res) => {
                     des_unpack=?, des_unpack_gp=?, des_other=?, des_other_gp=?, des_currency=?, freigh_amount=?, origin_amount=?, des_amount=?, sub_amount=?, 
                     exchange_rate=?, total_amount=?, Supplier_Quote_Attachment=?, Supplier_Quote_Amount=?, final_currency=?, freight_final_amount=?, origin_pick_final_amt=?, origin_cust_final_amt=?,
             origin_doc_final_amt=?, origin_ware_final_amt=?, org_port_fee_final_amt=?, org_other_final_amt=?, des_delivery_final_amt=?, des_cust_final_amt=?,
-            des_doc_final_amt=?, des_ware_final_amt=?, des_portfees_final_amt=?, des_unpack_final_amt=?, des_other_final_amt=? WHERE id=?`;
+            des_doc_final_amt=?, des_ware_final_amt=?, des_portfees_final_amt=?, des_unpack_final_amt=?, des_other_final_amt=?, ROE_freight=?, ROE_origin_currency=?, ROE_des_currency=? WHERE id=?`;
 
                 const updateParams = [
                     client_id, supplier_id, serial_number, date, client_ref, freight, incoterm, dimension, weight, freight_agent, freight_amount, freight_gp,
@@ -1691,7 +1661,7 @@ const Shipping_Estimate = async (req, res) => {
                     des_port_fees, des_port_fees_gp, des_unpack, des_unpack_gp, des_other, des_other_gp, des_currency, freigh_amount, origin_amount,
                     des_amount, sub_amount, exchange_rate, total_amount, Supplier_Quote_Attachment, Supplier_Quote_Amount, final_base_currency, freight_final_amount, origin_pick_final_amt, origin_cust_final_amt,
                     origin_doc_final_amt, origin_ware_final_amt, org_port_fee_final_amt, org_other_final_amt, des_delivery_final_amt, des_cust_final_amt,
-                    des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt, result[0].id
+                    des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt, Roefreight, roe_origin_currency, roe_des_currency, result[0].id
                 ];
 
 
@@ -1731,8 +1701,8 @@ const Shipping_Estimate = async (req, res) => {
                     des_port_fees, des_port_fees_gp, des_unpack, des_unpack_gp, des_other, des_other_gp, des_currency, origin_amount, 
                     des_amount, sub_amount, exchange_rate, total_amount, Supplier_Quote_Attachment, Supplier_Quote_Amount, final_currency, freight_final_amount, origin_pick_final_amt, origin_cust_final_amt,
             origin_doc_final_amt, origin_ware_final_amt, org_port_fee_final_amt, org_other_final_amt, des_delivery_final_amt, des_cust_final_amt,
-            des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+            des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt, ROE_freight, ROE_origin_currency, ROE_des_currency ) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
 
                 const insertParams = [
                     freight_id, client_id, supplier_id, serial_number, date, client_ref, freight, incoterm, dimension, weight, freight_agent, freight_amount,
@@ -1742,7 +1712,7 @@ const Shipping_Estimate = async (req, res) => {
                     des_unpack, des_unpack_gp, des_other, des_other_gp, des_currency, origin_amount, des_amount, sub_amount, exchange_rate, total_amount,
                     Supplier_Quote_Attachment, Supplier_Quote_Amount, final_base_currency, freight_final_amount, origin_pick_final_amt, origin_cust_final_amt,
                     origin_doc_final_amt, origin_ware_final_amt, org_port_fee_final_amt, org_other_final_amt, des_delivery_final_amt, des_cust_final_amt,
-                    des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt
+                    des_doc_final_amt, des_ware_final_amt, des_portfees_final_amt, des_unpack_final_amt, des_other_final_amt, Roefreight, roe_origin_currency, roe_des_currency
                 ];
 
                 con.query(insertQuery, insertParams, (err, data) => {
@@ -1903,7 +1873,8 @@ const updateShippingEstimate = async (req, res) => {
 
 const ShipEstimateList = async (req, res) => {
     try {
-        const selectQuery = `select shipping_estimate.*, shipping_estimate.final_currency, tbl_users.full_name as clientName, tbl_freight.freight_number, tbl_freight.product_desc, tbl_freight.created_at, c.name AS collection_from_name, 
+        const selectQuery = `select shipping_estimate.*, shipping_estimate.ROE_freight as Roefreight, shipping_estimate.ROE_origin_currency as roe_origin_currency, 
+        shipping_estimate.ROE_des_currency as roe_des_currency, shipping_estimate.final_currency as final_base_currency, tbl_users.full_name as clientName, tbl_freight.freight_number, tbl_freight.product_desc, tbl_freight.created_at, c.name AS collection_from_name, 
                    co.name AS delivery_to_name from shipping_estimate
         INNER JOIN tbl_freight on tbl_freight.id=shipping_estimate.freight_id
         INNER JOIN tbl_users on tbl_users.id=shipping_estimate.client_id
@@ -1946,7 +1917,8 @@ const GetShipEstimateById = async (req, res) => {
             })
         }
         else {
-            const selectQuery = `select * from shipping_estimate where id=? OR freight_id=?`;
+            const selectQuery = `select *, shipping_estimate.final_currency as final_base_currency, shipping_estimate.ROE_freight as Roefreight, shipping_estimate.ROE_origin_currency as roe_origin_currency, 
+        shipping_estimate.ROE_des_currency as roe_des_currency from shipping_estimate where id=? OR freight_id=?`;
             await con.query(selectQuery, [estimate_id, freight_id], (err, data) => {
                 if (err) throw err;
                 if (data.length > 0) {
@@ -3515,16 +3487,18 @@ const add_freight_to_warehouse = async (req, res) => {
             // Update warehouse_status in tbl_freight
             con.query(`UPDATE tbl_orders SET warehouse_status = 1 WHERE id = '${order_id}'`, (err, updateResult) => {
                 if (err) throw err;
-
-                // Insert updated data into warehouse_tbl
-                con.query(`INSERT INTO warehouse_assign_order (freight_id, order_id, warehouse_status) VALUES ('${freight_id} || 0', '${order_id}', 1)`, (err, insertResult) => {
+                con.query(`UPDATE tbl_freight SET warehouse_status = 1 WHERE id = '${freight_id}'`, (err, updateResult) => {
                     if (err) throw err;
+                    // Insert updated data into warehouse_tbl
+                    con.query(`INSERT INTO warehouse_assign_order (freight_id, order_id, warehouse_status) VALUES ('${freight_id} || 0', '${order_id}', 1)`, (err, insertResult) => {
+                        if (err) throw err;
 
-                    return res.status(200).send({
-                        success: true,
-                        message: 'Order added to warehouse successfully'
+                        return res.status(200).send({
+                            success: true,
+                            message: 'Order added to warehouse successfully'
+                        });
                     });
-                });
+                })
             });
 
         });
@@ -4672,6 +4646,8 @@ const editWarehouseDetails = async (req, res) => {
 const addWarehouseProduct = async (req, res) => {
     try {
         const {
+            user_id,
+            added_by,
             warehouse_order_id,
             product_description,
             Hazardous,
@@ -4688,10 +4664,12 @@ const addWarehouseProduct = async (req, res) => {
         // Ensure all string values are properly quoted and dates are formatted
         const query = `
             INSERT INTO warehouse_products 
-            (warehouse_order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            (user_id, added_by, warehouse_order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
         const values = [
+            user_id,
+            added_by,
             warehouse_order_id,
             product_description,
             Hazardous,
@@ -4951,6 +4929,189 @@ const RevertOrder = async (req, res) => {
     }
 };
 
+const GetFreightImages = async (req, res) => {
+    const { freight_id } = req.body;  // Retrieve the freight ID from the request parameters
+
+    try {
+        // Validate the freight ID
+        if (!freight_id) {
+            return res.status(400).send({ success: false, message: 'Freight ID is required' });
+        }
+
+        // Query to fetch documents associated with the provided freight ID
+        const selectQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
+
+        con.query(selectQuery, [freight_id], (err, docs) => {
+            if (err) {
+                // Handle database errors
+                return res.status(500).send({ success: false, message: 'Database error' });
+            }
+
+            if (docs.length > 0) {
+                // Group documents by `document_name` if needed
+                const groupedDocuments = docs.reduce((result, doc) => {
+                    if (!result[doc.document_name]) {
+                        result[doc.document_name] = [];
+                    }
+                    result[doc.document_name].push({
+                        id: doc.id,
+                        document_name: doc.document_name,
+                        document: doc.document,
+                        created_at: doc.created_at
+                    });
+                    return result;
+                }, {});
+
+                // Send the final response with grouped images
+                res.status(200).send({
+                    success: true,
+                    data: groupedDocuments
+                });
+            } else {
+                res.status(404).send({ success: false, message: 'No images found for the given freight ID' });
+            }
+        });
+    } catch (error) {
+        // Handle any unexpected errors
+        res.status(500).send({ success: false, message: error.message });
+    }
+};
+
+const DeleteDocument = async (req, res) => {
+    const { doc_id } = req.body;
+    try {
+        if (!doc_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide doc_id"
+            });
+        }
+        await con.query(`DELETE FROM freight_doc WHERE id='${doc_id}'`, (err, result) => {
+            if (err) throw err;
+
+            return res.status(200).send({
+                success: true,
+                message: "Document Deleted successfully"
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+const GetDeliveredOrder = async (req, res) => {
+    // WHERE tbl_orders.warehouse_status='${0}'
+    try {
+        con.query(`SELECT tbl_orders.*, 
+    tbl_orders.dimensions AS order_dimensions,
+    tbl_orders.created_at as order_created_date,
+    f.*, cm.name as commodity_name,
+    tbl_orders.weight AS order_weight, 
+    tbl_orders.id AS order_id, 
+    tbl_users.*, 
+    tbl_users.id AS user_id, 
+    CASE 
+            WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
+            ELSE tbl_users.full_name 
+        END as client_name,
+    tbl_users.email AS client_email,
+    o.status AS delivery_status, 
+    o.date_dispatched, 
+    o.ETA AS delivery_ETA,
+    o.actual_delivery_date, 
+    o.freight_option AS delivery_freight_option, 
+    o.port_of_loading AS delivery_port_of_loading,
+    o.port_of_discharge AS delivery_port_of_discharge, 
+    o.co_loader, 
+    o.carrier,
+    o.vessel, 
+    o.master_landing_bill, 
+    o.house_bill_landing, 
+    o.release_type,
+    o.container_no, 
+    o.seal_no, 
+    o.local_handler, 
+    o.local_carrier, 
+    o.driver_name, 
+    o.vehicle_registration,
+    o.comments AS delivery_comment, 
+    o.last_check_in, 
+    o.location_check_in, 
+    o.driver_license_id, 
+    o.status_updated_at,
+    wao.ware_receipt_no, 
+    wao.tracking_number, 
+    wao.warehouse_collect, 
+    wao.date_received,
+    w.warehouse_name,
+    w.warehouse_address,
+    w.town,
+    w.country,
+    w.email,
+    w.contact_person,
+    w.mobile_number,
+    b.batch_number, 
+    b.freight AS batch_freight, 
+    b.date_start, 
+    b.total_weight, 
+    b.total_dimensions, 
+    b.dispatched, 
+    b.time_in_storage, 
+    b.costs_to_collect,
+    b.destination, 
+    b.waybill, 
+    b.agent, 
+    b.forwarding_agent,
+    c.name AS collection_from_country, 
+    co.name AS delivery_to_country,
+    u.name AS user_country_name,
+    s.id as estimate_id,
+   s.origin_pick_up AS estimate_origin_pick_up, 
+    s.origin_pickup_gp AS estimate_origin_pickup_gp,
+    s.origin_warehouse AS estimate_origin_warehouse, 
+    s.origin_warehouse_gp AS estimate_origin_warehouse_gp, 
+    s.des_warehouse AS estimate_des_warehouse, 
+    s.des_warehouse_gp AS estimate_des_warehouse_gp, 
+    s.des_delivery AS estimate_des_delivery, 
+    s.des_delivery_gp AS estimate_des_delivery_gp,
+    s.freight_amount as estimate_freight_amount,
+    s.freight_gp as estimate_freight_gp
+FROM tbl_orders
+LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
+LEFT JOIN order_delivery_details AS o ON o.order_id = tbl_orders.id
+LEFT JOIN tbl_freight AS f ON tbl_orders.freight_id = f.id
+LEFT JOIN warehouse_assign_order AS wao ON wao.order_id = tbl_orders.id
+LEFT JOIN batches AS b ON b.id = wao.batch_id
+LEFT JOIN warehouse_tbl AS w ON w.id = b.warehouse_id
+LEFT JOIN countries AS co ON co.id = f.delivery_to
+LEFT JOIN countries AS c ON c.id = f.collection_from
+LEFT JOIN countries AS u ON u.id = tbl_users.country
+LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_orders.freight_id
+LEFT JOIN tbl_commodity  AS cm ON cm.id = f.commodity
+WHERE tbl_orders.track_status= "Delivered"
+GROUP BY tbl_orders.id
+        ORDER BY tbl_orders.id DESC`, async (err, data) => {
+            if (err) {
+                // console.error("Error executing query: ", err);
+                return;
+            }
+            // Process the data here
+            res.status(200).send({
+                success: true,
+                data: data
+            });
+
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 
 module.exports = {
@@ -4966,9 +5127,8 @@ module.exports = {
     client_Shipping_Estimate, GetWarehouseOrders, DeleteWarehouseOrder, createBatch, getAllBatch, deleteBatch, moveFreightToBatch, restoreOrderFromBatch,
     getFreightsByBatch, MoveToOrder, MoveToClearaneOrder, getCleranceOrder, CompleteCleranceOrder,
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, DeleteWarehouse, editWarehouseDetails, GetCountries,
-    GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct
+    GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, GetFreightImages,
+    DeleteDocument, GetDeliveredOrder
 
 }
 
-
-// What is the status of the SSL renewal?

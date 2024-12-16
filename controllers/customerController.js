@@ -1212,15 +1212,11 @@ const AddfreightByCustomer = async (req, res) => {
             nature_of_goods, delivery_to, port_of_loading, post_of_discharge, auto_calculate, add_attachments, sea_freight_option, road_freight_option, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter, send_to_warehouse, assign_warehouse, assign_to_clearing
         } = req.body;
         // console.log(req.body);
+        // console.log(req.files);
+
         // Generate the freight number
         generateFreightNumber((err, freightNumber) => {
-            if (err) {
-                // console.error('Error generating freight number:', err);
-                return res.status(500).json({
-                    success: false,
-                    message: "Internal Server Error"
-                });
-            }
+            if (err) throw err;
 
             const insertQuery = `INSERT INTO tbl_freight (client_ref, commodity, date, fcl_lcl, product_desc, collection_from, freight, freight_type,
                 shipment_origin, shipment_des, shipment_ref, dimension, weight, user_type, comment, no_of_packages, package_type,
@@ -1234,19 +1230,13 @@ const AddfreightByCustomer = async (req, res) => {
                 delivery_address, nature_of_goods, delivery_to, port_of_loading, post_of_discharge, auto_calculate, 2, add_attachments,
                 sea_freight_option, road_freight_option, freightNumber, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter, send_to_warehouse, assign_warehouse, assign_to_clearing
             ], (err, data) => {
-                if (err) {
-                    // console.error('Error inserting freight data:', err);
-                    return res.status(500).json({
-                        success: false,
-                        message: "Internal Server Error"
-                    });
-                }
+                if (err) throw err;
                 // console.log(req.files.document);
 
                 if (data.affectedRows > 0) {
                     const freightId = data.insertId;
                     // Handle document uploads
-                    if (req.files && req.files.document) {
+                    /* if (req.files && req.files.document) {
                         const docsInsertQuery = `update tbl_freight set add_attachment_file='${req.files.document[0].filename}' where id='${freightId}'`;
                         con.query(docsInsertQuery, (err, result) => {
                             if (err) {
@@ -1257,25 +1247,54 @@ const AddfreightByCustomer = async (req, res) => {
                                 });
                             }
                         });
+                    } */
+
+                    if (req.files && req.files.supplier_invoice) {
+                        // Iterate over all uploaded files for 'supplier_invoice'
+                        const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                        req.files.supplier_invoice.forEach((file) => {
+                            con.query(docsInsertQuery, [freightId, "Supplier Invoice", file.filename], (err, result) => {
+                                if (err) throw err;
+                            });
+                        })
+                    }
+                    if (req.files && req.files.packing_list) {
+                        const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                        req.files.packing_list.forEach((file) => {
+                            con.query(docsInsertQuery, [freightId, "Packing List", file.filename], (err, result) => {
+                                if (err) throw err;
+                            });
+                        })
+                    }
+                    if (req.files && req.files.licenses) {
+                        const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                        req.files.licenses.forEach((file) => {
+                            con.query(docsInsertQuery, [freightId, "Licenses", file.filename], (err, result) => {
+                                if (err) throw err;
+                            });
+                        })
+                    }
+                    if (req.files && req.files.other_documents) {
+                        const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                        req.files.other_documents.forEach((file) => {
+                            con.query(docsInsertQuery, [freightId, "Other Documents", file.filename], (err, result) => {
+                                if (err) throw err;
+                            });
+                        })
                     }
 
                     con.query(`SELECT * FROM tbl_users WHERE user_type = ?`, [1], (err, adminUsers) => {
                         if (err) {
                             // console.error('Error fetching admin users:', err);
-                            return res.status(500).json({
-                                success: false,
-                                message: "Internal Server Error"
-                            });
+                            if (err) throw err;
                         }
 
                         con.query(`SELECT * FROM tbl_users WHERE id = ?`, [client_id], (err, user) => {
-                            if (err) {
-                                // console.error('Error fetching user data:', err);
-                                return res.status(500).json({
-                                    success: false,
-                                    message: "Internal Server Error"
-                                });
-                            }
+                            if (err) throw err;
                             const selectQuery = `select * from tbl_freight where id='${freightId}'`
                             con.query(selectQuery, (err, result) => {
                                 if (err) throw err;
@@ -1285,23 +1304,11 @@ const AddfreightByCustomer = async (req, res) => {
                                     `${user[0].full_name} has added a new freight with Freight Number: ${result[0].freight_number}. Please Review and Process Accordingly.`,
                                     5
                                 ], (err, notificationResult) => {
-                                    if (err) {
-                                        // console.error('Error inserting notification:', err);
-                                        return res.status(500).json({
-                                            success: false,
-                                            message: "Internal Server Error"
-                                        });
-                                    }
+                                    if (err) throw err;
 
                                     const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
                                     con.query(insertNotificationSql, [adminUsers[0].id, notificationResult.insertId], (err, result) => {
-                                        if (err) {
-                                            // console.error('Error inserting notification details:', err);
-                                            return res.status(500).json({
-                                                success: false,
-                                                message: "Internal Server Error"
-                                            });
-                                        }
+                                        if (err) throw err;
                                     });
                                 });
                             })
@@ -1469,7 +1476,8 @@ const UpdatefreightByCustomer = async (req, res) => {
             shipment_origin, shipment_des, comment, no_of_packages, package_type, collection_address, delivery_address,
             nature_of_goods, delivery_to, port_of_loading, post_of_discharge, auto_calculate, add_attachments, sea_freight_option, road_freight_option, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter, send_to_warehouse, assign_warehouse, assign_to_clearing
         } = req.body;
-        console.log(req.body);
+        // console.log(req.body);
+        // console.log(req.files);
 
         let updateFields = [];
         let updateParams = [];
@@ -1594,17 +1602,54 @@ const UpdatefreightByCustomer = async (req, res) => {
 
             if (data.affectedRows > 0) {
                 // Handle document updates
-                if (req.files && req.files.document) {
-                    const docsInsertQuery = `update tbl_freight set add_attachment_file='${req.files.document[0].filename}' where id='${freight_id}'`;
-                    con.query(docsInsertQuery, (err, result) => {
-                        if (err) {
-                            console.error('Error inserting document data:', err);
-                            return res.status(500).json({
-                                success: false,
-                                message: "Internal Server Error"
-                            });
-                        }
-                    });
+                /*  if (req.files && req.files.document) {
+                     const docsInsertQuery = `update tbl_freight set add_attachment_file='${req.files.document[0].filename}' where id='${freight_id}'`;
+                     con.query(docsInsertQuery, (err, result) => {
+                         if (err) {
+                             console.error('Error inserting document data:', err);
+                             return res.status(500).json({
+                                 success: false,
+                                 message: "Internal Server Error"
+                             });
+                         }
+                     });
+                 } */
+                if (req.files && req.files.supplier_invoice) {
+                    // Iterate over all uploaded files for 'supplier_invoice'
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                    req.files.supplier_invoice.forEach((file) => {
+                        con.query(docsInsertQuery, [freight_id, "Supplier Invoice", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.packing_list) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                    req.files.packing_list.forEach((file) => {
+                        con.query(docsInsertQuery, [freight_id, "Packing List", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.licenses) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                    req.files.licenses.forEach((file) => {
+                        con.query(docsInsertQuery, [freight_id, "Licenses", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
+                }
+                if (req.files && req.files.other_documents) {
+                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                    req.files.other_documents.forEach((file) => {
+                        con.query(docsInsertQuery, [freight_id, "Other Documents", file.filename], (err, result) => {
+                            if (err) throw err;
+                        });
+                    })
                 }
 
                 res.status(200).send({
@@ -2077,7 +2122,7 @@ const orderDetails = async (req, res) => {
                 message: "Please provide user id"
             })
         }
-        await con.query(`select tbl_orders.*, CONCAT('OR000', tbl_orders.id) as order_id, tbl_freight.*, tbl_freight.id as freight_id, tbl_users.*, c.name AS collection_from_country, 
+        await con.query(`select tbl_orders.*, tbl_orders.id ORDER_ID, CONCAT('OR000', tbl_orders.id) as order_id, tbl_freight.*, tbl_freight.id as freight_id, tbl_users.*, c.name AS collection_from_country, 
     co.name AS delivery_to_country, cm.name as commodity_name,
     c.flag_url AS collection_from_country_flag_url, 
     co.flag_url AS delivery_to_country_flag_url
@@ -2603,6 +2648,448 @@ const getCommodities = async (req, res) => {
     }
 };
 
+const AddShipment = async (req, res) => {
+    try {
+        const {
+            waybill,
+            freight,
+            carrier,
+            vessel,
+            ETD,
+            ATD,
+            status,
+            origin_agent,
+            port_of_loading,
+            port_of_discharge,
+            destination_agent,
+            load,
+            release_type,
+            container,
+            seal,
+            assign_shipment,
+            assign_shipment_id,
+        } = req.body;
+        console.log(req.body);
+
+        // Replace undefined or missing values with NULL
+        const values = [
+            waybill || null,
+            freight || null,
+            carrier || null,
+            vessel || null,
+            ETD || null,
+            ATD || null,
+            status || null,
+            origin_agent || null,
+            port_of_loading || null,
+            port_of_discharge || null,
+            destination_agent || null,
+            load || null,
+            release_type || null,
+            container || null,
+            seal || null,
+            assign_shipment || null,
+            assign_shipment_id || null,
+        ];
+
+        // Use parameterized queries to prevent SQL injection
+        const query = `
+            INSERT INTO shipment_details 
+            (waybill, freight, carrier, vessel, ETD, ATD, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal, assign_shipment, assign_shipment_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        con.query(query, values, (err, result) => {
+            if (err) throw err;
+            return res.status(200).send({
+                success: true,
+                message: "Shipment details added successfully",
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+
+const getShipment = async (req, res) => {
+    try {
+        const query = `select * from shipment_details`;
+
+        con.query(query, (err, result) => {
+            if (err) throw err;
+            return res.status(200).send({
+                success: true,
+                data: result
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+}
+
+const UpdateShipment = async (req, res) => {
+    try {
+        const {
+            shipment_id,
+            waybill,
+            freight,
+            carrier,
+            vessel,
+            ETD,
+            ATD,
+            status,
+            origin_agent,
+            port_of_loading,
+            port_of_discharge,
+            destination_agent,
+            load,
+            release_type,
+            container,
+            seal,
+            assign_shipment,
+            assign_shipment_id,
+        } = req.body;
+
+        // Validate that the `id` is provided
+        if (!shipment_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Shipment ID is required for update",
+            });
+        }
+
+        // Construct the dynamic update query
+        const fieldsToUpdate = [];
+        const values = [];
+
+        if (waybill) {
+            fieldsToUpdate.push("waybill = ?");
+            values.push(waybill);
+        }
+        if (freight) {
+            fieldsToUpdate.push("freight = ?");
+            values.push(freight);
+        }
+        if (carrier) {
+            fieldsToUpdate.push("carrier = ?");
+            values.push(carrier);
+        }
+        if (vessel) {
+            fieldsToUpdate.push("vessel = ?");
+            values.push(vessel);
+        }
+        if (ETD) {
+            fieldsToUpdate.push("ETD = ?");
+            values.push(ETD);
+        }
+        if (ATD) {
+            fieldsToUpdate.push("ATD = ?");
+            values.push(ATD);
+        }
+        if (status) {
+            fieldsToUpdate.push("status = ?");
+            values.push(status);
+        }
+        if (origin_agent) {
+            fieldsToUpdate.push("origin_agent = ?");
+            values.push(origin_agent);
+        }
+        if (port_of_loading) {
+            fieldsToUpdate.push("port_of_loading = ?");
+            values.push(port_of_loading);
+        }
+        if (port_of_discharge) {
+            fieldsToUpdate.push("port_of_discharge = ?");
+            values.push(port_of_discharge);
+        }
+        if (destination_agent) {
+            fieldsToUpdate.push("destination_agent = ?");
+            values.push(destination_agent);
+        }
+        if (load) {
+            fieldsToUpdate.push("\`load\` = ?");
+            values.push(load);
+        }
+        if (release_type) {
+            fieldsToUpdate.push("release_type = ?");
+            values.push(release_type);
+        }
+        if (container) {
+            fieldsToUpdate.push("container = ?");
+            values.push(container);
+        }
+        if (seal) {
+            fieldsToUpdate.push("seal = ?");
+            values.push(seal);
+        }
+        if (assign_shipment) {
+            fieldsToUpdate.push("assign_shipment = ?");
+            values.push(assign_shipment);
+        }
+        if (assign_shipment_id) {
+            fieldsToUpdate.push("assign_shipment_id = ?");
+            values.push(assign_shipment_id);
+        }
+
+        // If no fields to update are provided
+        if (fieldsToUpdate.length === 0) {
+            return res.status(400).send({
+                success: false,
+                message: "No fields provided for update",
+            });
+        }
+
+        // Add the shipment ID to the values array
+        values.push(shipment_id);
+
+        // Create the SQL query
+        const query = `
+            UPDATE shipment_details 
+            SET ${fieldsToUpdate.join(", ")}
+            WHERE id = ?
+        `;
+
+        // Execute the query
+        con.query(query, values, (err, result) => {
+            if (err) throw err;
+
+            if (result.affectedRows === 0) {
+                return res.status(400).send({
+                    success: false,
+                    message: "Shipment not found or no changes made",
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                message: "Shipment details updated successfully",
+            });
+        });
+    } catch (error) {
+        console.error("Server error:", error);
+        res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+const DeleteShipment = async (req, res) => {
+    try {
+        const { shipment_id } = req.body; // ID of the shipment to delete
+
+        // Validate that the `id` is provided
+        if (!shipment_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Shipment ID is required for deletion",
+            });
+        }
+
+        // Construct the SQL query
+        const query = `DELETE FROM shipment_details WHERE id = ?`;
+
+        // Execute the query
+        con.query(query, [shipment_id], (err, result) => {
+            if (err) throw err;
+
+            if (result.affectedRows === 0) {
+                return res.status(400).send({
+                    success: false,
+                    message: "Shipment not found or already deleted",
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                message: "Shipment deleted successfully",
+            });
+        });
+    } catch (error) {
+        console.error("Server error:", error);
+        res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+
+const getAssignShipmentList = async (req, res) => {
+    try {
+        const { type, id } = req.body;
+
+        // Validate inputs
+        if (!type || !id) {
+            return res.status(400).send({
+                success: false,
+                message: "Type and ID are required.",
+            });
+        }
+
+        const query =
+            type == 1
+                ? `SELECT 
+                      o.id AS order_id, 
+                      COALESCE(o.weight, f.weight) AS weight, 
+                      COALESCE(o.dimensions, f.dimension) AS dimensions, 
+                      COALESCE(f.nature_of_goods, '') AS nature_of_goods, 
+                      f.freight_number AS freight_number, 
+                      CONCAT('OR000', o.id) AS order_number,
+                      CASE 
+                          WHEN o.client_id = 0 THEN o.client_name
+                          ELSE u.full_name
+                      END AS client_name
+                  FROM tbl_orders AS o
+                  LEFT JOIN tbl_freight AS f ON o.freight_id = f.id
+                  LEFT JOIN tbl_users AS u ON u.id = o.client_id
+                  WHERE o.id = ?`
+                : `SELECT 
+                      b.*, 
+                      bt.batch_number,
+                      o.id AS order_id, 
+                      COALESCE(o.weight, f.weight) AS weight, 
+                      COALESCE(o.dimensions, f.dimension) AS dimensions, 
+                      COALESCE(f.nature_of_goods, '') AS nature_of_goods, 
+                      f.freight_number AS freight_number, 
+                      CONCAT('OR000', o.id) AS order_number,
+                      CASE 
+                          WHEN o.client_id = 0 THEN o.client_name
+                          ELSE u.full_name
+                      END AS client_name
+                  FROM freight_assig_to_batch AS b
+                  LEFT JOIN batches AS bt ON bt.id = b.batch_id
+                  LEFT JOIN tbl_freight AS f ON b.freight_id = f.id
+                  LEFT JOIN tbl_orders AS o ON o.freight_id = f.id
+                  LEFT JOIN tbl_users AS u ON u.id = o.client_id
+                  WHERE b.batch_id = ?
+                  ORDER BY b.assigned_at DESC`;
+
+        // Execute the query
+        con.query(query, [id], (err, result) => {
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: "Database query failed.",
+                    error: err.message,
+                });
+            }
+
+            res.status(200).send({
+                success: true,
+                data: result,
+                message: "Data fetched successfully",
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+
+const AllFreightOrderNumbers = async (req, res) => {
+    try {
+        await con.query(`SELECT o.id as order_id, f.freight_number as freight_number, CONCAT('OR000', o.id) AS order_number
+     FROM tbl_orders as o
+            LEFT JOIN tbl_freight AS f ON o.freight_id = f.id
+             ORDER BY o.id DESC`, (err, data) => {
+            if (err) throw err;
+            res.status(200).send({
+                success: true,
+                data: data
+            });
+        })
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+const AllBatchNumbers = async (req, res) => {
+    try {
+        await con.query(`SELECT b.id as batch_id, b.batch_number as batch_number
+     FROM batches as b
+     WHERE b.is_deleted='${0}'`, (err, data) => {
+            if (err) throw err;
+            res.status(200).send({
+                success: true,
+                data: data
+            });
+        })
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+const addWareProductByUser = async (req, res) => {
+    try {
+        const {
+            user_id,
+            order_id,
+            product_description,
+            Hazardous,
+            date_received,
+            package_type,
+            packages,
+            dimension,
+            weight,
+            warehouse_ref
+        } = req.body;
+
+        // console.log(req.body);
+
+        // Ensure all string values are properly quoted and dates are formatted
+        const query = `
+            INSERT INTO warehouse_products 
+            (user_id, added_by, order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+        const values = [
+            user_id,
+            3,
+            order_id,
+            product_description,
+            Hazardous,
+            date_received,
+            package_type,
+            packages,
+            dimension,
+            weight,
+            warehouse_ref
+        ];
+
+        con.query(query, values, (err, data) => {
+            if (err) throw err;
+
+            res.status(200).send({
+                success: true,
+                message: "Warehouse Product Details Added successfully"
+            });
+        });
+    } catch (error) {
+        // console.error("Error adding warehouse product:", error.message);
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
 
 module.exports = {
     AddCustomer, GetClientList, updateClient, GetClientById, DeleteClient, GetClientFreights, AddClearing,
@@ -2610,5 +3097,7 @@ module.exports = {
     AddfreightByCustomer, UpdatefreightByCustomer, GetNotificationUser, updateNotificationSeen, deleteOneNotification,
     DeleteAllNotification, UpdateClientProfile, AddClearingByCustomer, GetClearingClient, AcceptQuotation,
     GetShipEstimate, RejectQuotation, orderDetails, UserforgotPassword, UserResetPassword, findHsCode, getListClearanceQuotation,
-    uploadClrearanceDOC, CleranceOrderList, addQueries, getQueries, deleteQueries, addCommodity, getCommodities
+    uploadClrearanceDOC, CleranceOrderList, addQueries, getQueries, deleteQueries, addCommodity,
+    getCommodities, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
+    UpdateShipment, DeleteShipment, addWareProductByUser
 }

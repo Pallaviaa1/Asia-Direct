@@ -11,9 +11,9 @@ const multer = require('multer');
 var storage = multer.diskStorage({
     destination: function (err, file, cb) {
         if (file.fieldname === "quote_document" || file.fieldname === "document" || file.fieldname === "sad500"
-           || file.fieldname === "product_literature" || file.fieldname === "product_brochures" || file.fieldname === "arrival_notification"
-           || file.fieldname === "supplier_invoice" || file.fieldname === "packing_list" || file.fieldname === "proof_of_payment"
-           || file.fieldname === "waybill" || file.fieldname === "bill_of_lading" || file.fieldname === "letter_of_authority"
+            || file.fieldname === "product_literature" || file.fieldname === "product_brochures" || file.fieldname === "arrival_notification"
+            || file.fieldname === "supplier_invoice" || file.fieldname === "packing_list" || file.fieldname === "proof_of_payment"
+            || file.fieldname === "waybill" || file.fieldname === "bill_of_lading" || file.fieldname === "letter_of_authority" || file.fieldname === "licenses" || file.fieldname === "other_documents"
         ) {
             cb(null, path.join(__dirname, '../public/documents'));
         }
@@ -33,9 +33,9 @@ var storage = multer.diskStorage({
 var upload = multer({
     storage: storage,
     // fileFilter:fileFilter
-}).fields([{ name: 'document' }, { name: 'sad500' }, {name: 'quote_document'}, {name: 'profile'}, 
-    {name: 'supplier_invoice'},{name: 'packing_list'},{name: 'proof_of_payment'},{name: 'waybill'},{name: 'bill_of_lading'},{name: 'arrival_notification'},{name: 'product_brochures'}
-    ,{name: 'product_literature'}, {name: 'letter_of_authority'}
+}).fields([{ name: 'document' }, { name: 'sad500' }, { name: 'quote_document' }, { name: 'profile' },
+{ name: 'supplier_invoice' }, { name: 'packing_list' }, { name: 'proof_of_payment' }, { name: 'waybill' }, { name: 'bill_of_lading' }, { name: 'arrival_notification' }, { name: 'product_brochures' }
+    , { name: 'product_literature' }, { name: 'letter_of_authority' }, { name: 'licenses' }, { name: 'other_documents' }
 ]);
 
 
@@ -47,7 +47,7 @@ customer_route.post('/delete-client', customerController.DeleteClient);
 
 customer_route.post('/customer-register', RegisterCustomerValidation, customerController.customerRegister);
 customer_route.post('/customer-login', adminLoginValidation, customerController.CustomerLogin);
-customer_route.post('/update-client-profile', upload, UpdateCustomerValidation,  customerController.UpdateClientProfile)
+customer_route.post('/update-client-profile', upload, UpdateCustomerValidation, customerController.UpdateClientProfile)
 
 customer_route.post('/freight-add', upload, customerController.AddfreightByCustomer);
 customer_route.post('/client-freights', customerController.GetClientFreights);
@@ -87,5 +87,14 @@ customer_route.get("/getQueries", customerController.getQueries)
 customer_route.post("/deleteQueries", customerController.deleteQueries)
 customer_route.post("/addCommodity", customerController.addCommodity)
 customer_route.get("/getCommodities", customerController.getCommodities)
+customer_route.get("/AllFreightOrderNumbers", customerController.AllFreightOrderNumbers)
+customer_route.get("/AllBatchNumbers", customerController.AllBatchNumbers)
+customer_route.post("/getAssignShipmentList", customerController.getAssignShipmentList)
+customer_route.post("/AddShipment", customerController.AddShipment)
+customer_route.post("/UpdateShipment", customerController.UpdateShipment)
+customer_route.post("/DeleteShipment", customerController.DeleteShipment)
+customer_route.get("/getShipment", customerController.getShipment)
+
+customer_route.post("/addWareProductByUser", customerController.addWareProductByUser)
 
 module.exports = customer_route;
