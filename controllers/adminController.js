@@ -1128,8 +1128,12 @@ const EditFreight = async (req, res) => {
             });
         }
 
-       
-        const selectQuery = `SELECT freight_number FROM tbl_freight WHERE id = ?`;
+
+        const selectQuery = `SELECT tbl_freight.freight_number, tbl_freight.client_id, us.full_name as sales_full_name, us.email as sale_email, u.full_name
+                FROM tbl_freight
+                INNER JOIN tbl_users as us ON us.id = tbl_freight.sales_representative
+                INNER JOIN tbl_users as u ON u.id = tbl_freight.client_id
+                WHERE tbl_freight.id = ?`;
 
         con.query(selectQuery, [id], (err, result) => {
             if (err) {
@@ -1143,6 +1147,54 @@ const EditFreight = async (req, res) => {
             }
 
             const freightNumber = result[0].freight_number;
+            const mailSubject = 'Shipment Details Amended';
+
+            const contentTemplate = `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Shipment Details Amended</h2>
+
+    <p style="font-size: 16px; color: #333;">
+      Hi,
+    </p>
+
+    <p style="font-size: 16px; color: #333;">
+      The shipment details have been amended.<br>
+      Please check the updated shipment details in the system.
+    </p>
+
+    <p style="font-size: 16px; color: #333;">
+      <strong>Freight Number:</strong> ${freightNumber}
+    </p>
+
+    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+    <p style="font-size: 14px; color: #777;">
+      Regards,<br>
+      <strong>Management System</strong>
+    </p>
+  </div>
+`;
+
+
+            sendMail("mobappssolutions174@gmail.com" || result[0].sales_email, mailSubject, contentTemplate);
+
+
+            //sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
+
+            const whatsappMessage = `
+            Shipment details have been amended.
+            
+            Freight Number: ${freightNumber}
+            You can proceed with the shipment (freights).
+            
+            Please check the updated details.
+            `;
+            const salesPersonPhone = "+918340721420" || result[0].sales_person_phone;
+            sendWhatsApp(salesPersonPhone, whatsappMessage);
+
+            // Send WhatsApp to Estimates Team
+            // const estimatesTeamPhone = result[0].estimates_team_phone;
+            // sendWhatsApp(estimatesTeamPhone, whatsappMessage);
 
             // Process all files for a given document type
             const processFiles = async (fileArray, documentName) => {
@@ -3410,6 +3462,18 @@ const UpdateOrderStatus = async (req, res) => {
 
                                                     // Send email
                                                     sendMail(email, "Order Status Update", mailContent);
+                                                    let SMSmessage = `*Shipment Status Updated*\n\nThe status of the shipment for client ${fullName} (Order No: OR000${order_id} has been updated to: ${status}.\n\nPlease check the shipment details.`;
+                                                    let salesPersonPhone = "+918340721420" || salesPersonPhone
+                                                    let opsTeamPhone = "+918340721420" || opsTeamPhone
+                                                    // send WhatsApp to Sales Person
+                                                    const whatsappResponseSales = sendWhatsApp(salesPersonPhone, SMSmessage);
+
+                                                    // send WhatsApp to Operations Team
+                                                    const whatsappResponseOps = sendWhatsApp(opsTeamPhone, SMSmessage);
+
+                                                    const smsResponseSales = sendSms(salesPersonPhone, SMSmessage);
+                                                    const smsResponseOps = sendSms(opsTeamPhone, SMSmessage);
+
 
                                                     return res.status(200).send({
                                                         success: true,
@@ -3483,7 +3547,7 @@ const GetOrderStatus = async (req, res) => {
                 } else {
                     res.status(400).send({
                         success: false,
-                        message: "Order id doesn't exist"
+                        message: "Order Number doesn't exist"
                     });
                 }
             });
@@ -5552,10 +5616,14 @@ const DeleteWarehouse = async (req, res) => {
 
 const editWarehouseDetails = async (req, res) => {
     try {
-        const { warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status, warehouse_collect, date_received, package_type, packages, dimension, weight } = req.body;
+        const { warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status, warehouse_collect, date_received, package_type, packages, dimension,
+            weight, costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch } = req.body;
         // console.log(req.body);
 
-        con.query(`update warehouse_assign_order set ware_receipt_no='${ware_receipt_no}', tracking_number='${tracking_number}', warehouse_status='${warehouse_status}', warehouse_collect='${warehouse_collect}', date_received='${date_received}' where id='${warehouse_assign_id}'`, (err, data) => {
+        con.query(`update warehouse_assign_order set ware_receipt_no='${ware_receipt_no}', tracking_number='${tracking_number}', warehouse_status='${warehouse_status}', warehouse_collect='${warehouse_collect}', date_received='${date_received}',
+            	total_weight='${weight}', total_dimension='${dimension}',costs_to_collect='${costs_to_collect}',warehouse_cost='${warehouse_cost}',warehouse_dispatch='${warehouse_dispatch}',
+                cost_to_dispatch='${cost_to_dispatch}'
+            where id='${warehouse_assign_id}'`, (err, data) => {
             if (err) throw err;
         })
         con.query(`update tbl_orders set dimensions='${dimension}', weight='${weight}' where id='${order_id}'`, (err, data) => {
@@ -6189,6 +6257,90 @@ function checkAndNotifyOverdueQuotes() {
 //     console.log('Checking overdue quotes...');
 //     checkAndNotifyOverdueQuotes();
 // });
+
+
+function checkAndSendUnbookedShipmentAlerts() {
+    const query = `
+    SELECT 
+      tbl_orders.id AS order_id, 
+      CONCAT('OR000', tbl_orders.id) AS order_number, 
+      tbl_users.full_name AS customer_name, 
+      tbl_orders.track_status, 
+      tbl_orders.created_at, 
+      tbl_freight.freight_number
+    FROM tbl_orders
+    INNER JOIN tbl_freight ON tbl_freight.id = tbl_orders.freight_id
+    INNER JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+    WHERE tbl_orders.track_status != 'Delivered'
+      AND tbl_orders.created_at <= DATE_SUB(NOW(), INTERVAL 90 DAY)
+  `;
+
+
+    con.query(query, (err, results) => {
+        if (err) {
+            console.error('Database query error:', err);
+            return;
+        }
+
+        if (results.length === 0) {
+            console.log('No pending shipments older than 90 days');
+            return;
+        }
+
+        results.forEach(order => {
+            const mailSubject = 'Unbooked Shipment';
+
+            const emailTemplate = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+          <h2 style="color: #e74c3c; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Unbooked Shipment Alert</h2>
+          <p style="font-size: 16px; color: #333;">
+            Hi <strong>{RecipientName}</strong>,
+          </p>
+          <p style="font-size: 16px; color: #333;">
+            The shipment for <strong>${order.customer_name}</strong> (Freight Number/Order Number: <strong>${order.freight_number}/ ${order.order_number}</strong>) has not been delivered for over 90 days.
+          </p>
+          <p style="font-size: 16px; color: #333;">
+            Please review the shipment status and take necessary action.
+          </p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="font-size: 14px; color: #777;">
+            Regards,<br>
+            <strong>Management System</strong>
+          </p>
+        </div>
+      `;
+
+            const bookingEmailContent = emailTemplate.replace('{RecipientName}', 'Booking Team');
+            const operationsEmailContent = emailTemplate.replace('{RecipientName}', 'Operations Team');
+
+            const bookingTeamEmail = 'mobappssolutions174@gmail.com' || 'bookingteam@example.com';
+            const operationsTeamEmail = 'mobappssolutions174@gmail.com' || 'operations@example.com';
+            const bookingTeamPhone = '+918340721420' || '+1234567890';
+            const operationsTeamPhone = '+918340721420' || '+0987654321';
+
+            // Send emails
+            const message = sendMail(bookingTeamEmail, mailSubject, bookingEmailContent);
+            console.log(message);
+            const message1 = sendMail(operationsTeamEmail, mailSubject, operationsEmailContent);
+            console.log(message1);
+
+            // Send WhatsApp messages
+            const whatsappMessage = `⚠️ Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
+
+            // sendWhatsApp(bookingTeamPhone, whatsappMessage);
+            // sendWhatsApp(operationsTeamPhone, whatsappMessage);
+
+            console.log(`Alert sent for freight ${order.freight_number}`);
+        });
+    });
+}
+
+// OPTIONAL: schedule daily at midnight
+cron.schedule('0 0 * * *', () => {
+    console.log('🔍 Running daily unbooked shipment check...');
+    checkAndSendUnbookedShipmentAlerts();
+});
+
 
 
 module.exports = {

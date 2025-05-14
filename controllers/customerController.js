@@ -6,6 +6,7 @@ const sendMail = require('../helpers/sendMail')
 const { findOrCreateFolder, uploadFile } = require('../helpers/uploadDrive');
 const { SMTP_MAIL, SMTP_PASSWORD } = process.env;
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
+const cron = require('node-cron');
 
 async function hashPassword(password) {
     return await bcrypt.hash(password, 10);
@@ -3316,8 +3317,347 @@ const getCommodities = async (req, res) => {
         });
     }
 };
-
 const AddShipment = (req, res) => {
+    const {
+        waybill,
+        freight,
+        carrier,
+        vessel,
+        ETD,
+        ATD,
+        date_of_dispatch,
+        status,
+        origin_agent,
+        port_of_loading,
+        port_of_discharge,
+        destination_agent,
+        load,
+        release_type,
+        container,
+        seal,
+        origin_country_id,
+        des_country_id,
+        details,
+    } = req.body;
+
+    console.log(req.body);
+    let detailALL;
+    if (details !== undefined && details !== '') {
+        const detailsArray = JSON.parse(details);
+        detailALL = detailsArray.join(',');
+    }
+    let detailALL1;
+    if (details !== undefined && details !== '') {
+        const detailsArray = JSON.parse(details);
+        detailALL1 = detailsArray.join(',');
+    }
+
+    const shipmentQuery = `
+        INSERT INTO tbl_shipments 
+        (waybill, freight, carrier, vessel, ETD, ATD, date_of_dispatch, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal,
+         origin_country_id, des_country_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const shipmentValues = [
+        waybill || null,
+        freight || null,
+        carrier || null,
+        vessel || null,
+        ETD || null,
+        ATD || null,
+        date_of_dispatch || null,
+        status || null,
+        origin_agent || null,
+        port_of_loading || null,
+        port_of_discharge || null,
+        destination_agent || null,
+        load || null,
+        release_type || null,
+        container || null,
+        seal || null,
+        origin_country_id || null,
+        des_country_id || null,
+    ];
+
+    con.query(shipmentQuery, shipmentValues, (shipmentErr, shipmentResult) => {
+        if (shipmentErr) {
+            return res.status(500).send({
+                success: false,
+                message: "Failed to insert shipment",
+                error: shipmentErr.message,
+                data: req.body
+            });
+        }
+        let salesPersonEmail = "mobappssolutions174@gmail.com" || salesPersonEmail;
+
+        mailSubject = 'New Freight Option Created';
+
+        const content = `
+                  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
+                
+                    <p style="font-size: 16px; color: #333;">
+                      Hi Sales Team,
+                    </p>
+                
+                    <p style="font-size: 16px; color: #333;">
+                      A new freight option has been created.
+                    </p>
+                
+                    <p style="font-size: 16px; color: #333;">
+                      <strong>Waybill:</strong> ${waybill}<br>
+                      <strong>Freight:</strong> ${freight}<br>
+                      <strong>Carrier:</strong> ${carrier}<br>
+                      <strong>Vessel:</strong> ${vessel}<br>
+                      <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
+                      <strong>Container Number:</strong> ${container}
+                    </p>
+                
+                    <p style="font-size: 16px; color: #333;">
+                      Please review the freight option in the system.
+                    </p>
+                
+                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                
+                    <p style="font-size: 14px; color: #777;">
+                      Regards,<br>
+                      <strong>Management System</strong>
+                    </p>
+                  </div>
+                `;
+
+        // Send Email
+        const emailResponse = sendMail(salesPersonEmail, mailSubject, content);
+        console.log(emailResponse);
+
+        let salesPersonPhone = "+918340721420" || salesPersonPhone;
+
+        let message = `*New Freight Option Created*\n\n` +
+            `A new freight option has been created.\n\n` +
+            `Waybill: ${waybill}\n` +
+            `Freight: ${freight}\n` +
+            `Carrier: ${carrier}\n` +
+            `Vessel: ${vessel}\n` +
+            `Date of Dispatch: ${date_of_dispatch}\n` +
+            `Container Number: ${container}\n\n` +
+            `Please review this shipment.`;
+
+        // Send WhatsApp
+        const whatsappResponse = sendWhatsApp(salesPersonPhone, message);
+
+        // Send SMS (can shorten if SMS gateway has length limit)
+        const smsResponse = sendSms(salesPersonPhone, message);
+        const shipmentId = shipmentResult.insertId;
+        if (req.files && req.files.document) {
+            con.query(`update tbl_shipments set document='${req.files.document[0].filename}' where id='${shipmentId}'`, (err, data) => {
+                if (err) throw err;
+            })
+        }
+        if (detailALL && Array.isArray(detailALL) && detailALL.length > 0) {
+            const detailsQuery = `
+                INSERT INTO shipment_details (shipment_id, order_id, batch_id)
+                VALUES ?
+            `;
+
+            const detailsValues = detailALL.map((data) => [
+                shipmentId,
+                data.order_id,
+                data.batch_id || null,
+            ]);
+
+            con.query(detailsQuery, [detailsValues], (detailsErr) => {
+                if (detailsErr) {
+                    return res.status(500).send({
+                        success: false,
+                        message: "Failed to insert shipment details",
+                        error: detailsErr.message,
+                    });
+                }
+
+                // Update orders and batches
+                detailALL.forEach((data) => {
+                    // Update tbl_orders
+
+                    const updateOrderTrack =
+                        `INSERT INTO order_track (order_id, batch_id, status, description) VALUES (?, ?, ?, ?)`
+                        ;
+                    con.query(updateOrderTrack, [data.order_id, data.batch_id || null, status, null], (updateErr) => {
+                        if (updateErr) {
+                            console.error("Failed to update order delivery details:", updateErr.message);
+                        }
+                    });
+
+                    const updateOrderQuery = `
+                        UPDATE tbl_orders 
+                        SET track_status = ?, assign_to_shipment = ?
+                        WHERE id = ?
+                    `;
+
+                    con.query(updateOrderQuery, [status, 1, data.order_id], (orderErr) => {
+                        if (orderErr) {
+                            console.error("Failed to update order:", orderErr.message);
+                        }
+                    });
+                    const selectDeliveryQuery = `
+    SELECT * FROM order_delivery_details
+    WHERE order_id = ?
+`;
+
+                    con.query(selectDeliveryQuery, [data.order_id], (selectErr, data1) => {
+                        if (selectErr) {
+                            console.error("Failed to fetch order delivery details:", selectErr.message);
+                            return;
+                        }
+
+                        if (data1.length > 0) {
+                            // Update existing delivery details
+                            const updateDeliveryQuery = `
+            UPDATE order_delivery_details 
+            SET actual_delivery_date = ?, date_dispatched=?, vessel = ?, container_no = ?, seal_no = ? , Carrier=?
+            WHERE order_id = ?
+        `;
+
+                            con.query(updateDeliveryQuery, [ATD, date_of_dispatch, vessel, container, seal, carrier, data.order_id], (updateErr) => {
+                                if (updateErr) {
+                                    console.error("Failed to update order delivery details:", updateErr.message);
+                                } else {
+                                    console.log("Order delivery details updated successfully for order_id:", data.order_id);
+                                }
+                            });
+                        } else {
+                            // Insert new delivery details
+                            const insertDeliveryQuery = `
+            INSERT INTO order_delivery_details (order_id, client_id, actual_delivery_date, date_dispatched, vessel, container_no, seal_no, Carrier) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+
+                            con.query(insertDeliveryQuery, [data.order_id, data.client_id, ATD, date_of_dispatch, vessel, container, seal, carrier], (insertErr) => {
+                                if (insertErr) {
+                                    console.error("Failed to insert order delivery details:", insertErr.message);
+                                } else {
+                                    console.log("Order delivery details inserted successfully for order_id:", data.order_id);
+                                }
+                            });
+                        }
+                    });
+                    // Fetch batch ID for the order
+                    const batchQuery = `
+                        SELECT batch_id 
+                        FROM freight_assig_to_batch 
+                        WHERE order_id = ?
+                    `;
+
+                    con.query(batchQuery, [data.order_id], (batchErr, batchResult) => {
+                        if (batchErr || !batchResult.length) {
+                            console.error("Failed to fetch batch_id:", batchErr ? batchErr.message : "Batch not found");
+                            return;
+                        }
+
+                        const batchId = batchResult[0].batch_id;
+                        const updateBatchQuery = `
+                            UPDATE batches 
+                            SET waybill = ?, vessel = ?, container_no = ?, carrier=?, track_status=?
+                            WHERE id = ?
+                        `;
+
+                        con.query(updateBatchQuery, [waybill, vessel, container, carrier, status, batchId], (updateBatchErr) => {
+                            if (updateBatchErr) {
+                                console.error("Failed to update batch:", updateBatchErr.message);
+                            }
+                        });
+
+                        // Fetch all orders in the batch
+                        const fetchBatchOrdersQuery = `
+                            SELECT order_id 
+                            FROM freight_assig_to_batch 
+                            WHERE batch_id = ? and is_assign_shipment = ?
+                        `;
+
+                        con.query(fetchBatchOrdersQuery, [batchId, 0], (fetchErr, batchOrders) => {
+                            if (fetchErr || !batchOrders.length) {
+                                console.error("Failed to fetch batch orders:", fetchErr ? fetchErr.message : "No batch orders found");
+                                return;
+                            }
+
+                            const batchOrderIds = batchOrders.map((order) => order.order_id);
+
+                            // Check if all orders in the batch are assigned to shipment
+                            const allOrdersAssigned = batchOrderIds.every((orderId) =>
+                                detailALL.some((detail) => detail.order_id === orderId)
+                            );
+
+                            if (allOrdersAssigned) {
+                                const updateBatchQuery = `
+                                    UPDATE batches 
+                                    SET assign_to_shipment = ? 
+                                    WHERE id = ?
+                                `;
+
+                                con.query(updateBatchQuery, [1, batchId], (updateBatchErr) => {
+                                    if (updateBatchErr) {
+                                        console.error("Failed to update batch:", updateBatchErr.message);
+                                    } else {
+                                        console.log(`Batch ${batchId} updated successfully.`);
+                                    }
+                                });
+                            } else {
+                                const updateBatchQuery = `
+                                    UPDATE batches 
+                                    SET assign_to_shipment = ? 
+                                    WHERE id = ?
+                                `;
+
+                                con.query(updateBatchQuery, [0, batchId], (updateBatchErr) => {
+                                    if (updateBatchErr) {
+                                        console.error("Failed to update batch:", updateBatchErr.message);
+                                    } else {
+                                        console.log(`Batch ${batchId} updated successfully.`);
+                                    }
+                                });
+                            }
+                            const updateBatchOrder = `
+                    UPDATE freight_assig_to_batch 
+                    SET is_assign_shipment = ?
+                    WHERE order_id = ?
+                `;
+                            con.query(
+                                updateBatchOrder,
+                                [1, data.order_id],
+                                (deliveryErr) => {
+                                    if (deliveryErr) {
+                                        console.error(
+                                            "Failed to update order delivery details:",
+                                            deliveryErr.message
+                                        );
+                                    }
+                                }
+                            );
+                        });
+                    });
+                });
+
+
+                res.status(200).send({
+                    success: true,
+                    message: "Shipment added successfully",
+                    detailALL
+                });
+            });
+        } else {
+            res.status(200).send({
+                success: true,
+                message: "Shipment added successfully with no details.",
+                detailALL,
+                detailALL1
+            });
+        }
+
+    });
+};
+
+
+/* const AddShipment = (req, res) => {
     const {
         waybill,
         freight,
@@ -3385,7 +3725,7 @@ const AddShipment = (req, res) => {
                 data: req.body
             });
         }
-
+           
         const shipmentId = shipmentResult.insertId;
         if (req.files && req.files.document) {
             con.query(`update tbl_shipments set document='${req.files.document[0].filename}' where id='${shipmentId}'`, (err, data) => {
@@ -3590,7 +3930,7 @@ const AddShipment = (req, res) => {
             });
         }
     });
-};
+}; */
 
 
 const getShipment = async (req, res) => {
@@ -3780,6 +4120,21 @@ const UpdateShipment = async (req, res) => {
         }
         const detailALL = JSON.parse(details);
 
+        const [existingData] = await executeQuery(
+            "SELECT status, waybill FROM tbl_shipments WHERE id = ?",
+            [shipment_id]
+        );
+
+        if (!existingData) {
+            return res.status(404).send({
+                success: false,
+                message: "Shipment not found.",
+            });
+        }
+
+        const oldStatus = existingData.status;
+        const isStatusChanged = status !== oldStatus;
+
         // Prepare shipment update query
         const updateShipmentQuery = `
             UPDATE tbl_shipments
@@ -3821,6 +4176,85 @@ const UpdateShipment = async (req, res) => {
                 if (err) throw err;
             })
         }
+
+        if (isStatusChanged) {
+            // const message = getOrderStatusMessage(orderNumber, fullName, status);
+
+            // WhatsApp/SMS messages
+            const SMSmessage = `*Shipment Status Updated*\n\nThe status of the shipment (Waybill: ${waybill}) has been updated to: ${status}.\n\nPlease check the shipment details.`;
+
+            const mailContent = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+  <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
+    Shipment Status: ${status}
+  </h2>
+
+  <p style="font-size: 16px; color: #333;">
+     Dear Operations Team,<br><br>
+    Shipment status has Updated.
+  </p>
+
+  <p style="font-size: 16px; color: #333;">
+    <strong>waybill:</strong> ${waybill}<br>
+    <strong>Current Status:</strong> ${status}
+  </p>
+
+  <p style="font-size: 16px; color: #333;">
+    Please log in to dashboard for more information.
+  </p>
+
+  <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 20px;">
+
+  <p style="font-size: 14px; color: #777;">
+    Regards,<br>
+    <strong>Management System</strong>
+  </p>
+</div>`;
+            const email = "mobappssolutions174@gmail.com"
+            // Send notifications
+            sendMail(email, "Shipment status has Updated", mailContent);
+            const opsTeamPhoneFinal = "+918340721420" || opsTeamPhone;
+
+            sendWhatsApp(opsTeamPhoneFinal, SMSmessage);
+            sendSms(opsTeamPhoneFinal, SMSmessage);
+        }
+
+        if (status && isStatusChanged && status === "Customs released") {
+            const opsTeamPhone = "+918340721420"; // fallback
+            const opsTeamEmail = "mobappssolutions174@gmail.com"; // replace with real one
+
+            const emailSubject = "Shipment Released";
+
+            const emailContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+      <h2 style="color: #2c3e50;">Shipment Released Notification</h2>
+      <p style="font-size: 16px; color: #333;">
+        Dear Operations Team,
+      </p>
+      <p style="font-size: 16px; color: #333;">
+        A shipment with Waybill: <strong>${waybill}</strong> has been <strong>released</strong>.
+      </p>
+      <p style="font-size: 16px; color: #333;">
+        <strong>Waybill:</strong> ${waybill || ""}<br>
+        <strong>Status:</strong> ${status}<br>
+      </p>
+      <p style="font-size: 16px; color: #333;">
+        Please check the system for more details.
+      </p>
+      <hr style="border-top: 1px solid #ddd;">
+      <p style="font-size: 14px; color: #777;">
+        Regards,<br><strong>Management System</strong>
+      </p>
+    </div>`;
+
+
+            const whatsappMessage = `*Shipment Released*\n\nA shipment with Waybill *${waybill}* has been *released*.\n\nCheck the system for full details.`;
+
+            // Send notifications
+            sendMail(opsTeamEmail, emailSubject, emailContent);
+            sendWhatsApp(opsTeamPhone, whatsappMessage);
+        }
+
         if (detailALL && Array.isArray(detailALL)) {
             // Step 1: Delete existing shipment details
             const deleteDetailsQuery = `DELETE FROM shipment_details WHERE shipment_id = ?`;
@@ -4920,6 +5354,140 @@ const AssignBatchOrdersToClearing = async (req, res) => {
         });
     }
 };
+
+
+function notifyUnrespondedDisputes() {
+    const query = `
+        SELECT id, Dispute_ID, created 
+        FROM tbl_queries 
+        WHERE TIMESTAMPDIFF(HOUR, created, NOW()) >= 48 
+        AND is_notified = 0
+    `;
+
+    con.query(query, (err, rows) => {
+        if (err) {
+            console.error('❌ Error querying disputes:', err);
+            return;
+        }
+
+        if (!rows.length) {
+            console.log('✅ No pending disputes for notification.');
+            return;
+        }
+
+        rows.forEach(dispute => {
+            const disputeId = dispute.Dispute_ID;
+
+            const message = `*Dispute Pending Review*\n\nDispute ID: #${disputeId} has not been resolved for over 48 hours.\n\nPlease review this dispute.`;
+            const emailSubject = `Dispute ID: #${disputeId} Overdue`;
+            const emailBody = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
+                    <h2 style="color: #d9534f;">Dispute Notification</h2>
+                    <p>Dispute with ID <strong>#${disputeId}</strong> has not been addressed within 48 hours.</p>
+                    <p>Please log in to your dashboard to review and take necessary action.</p>
+                    <br/>
+                    <p style="font-size: 14px; color: #888;">
+                        Regards,<br><strong> Management System</strong>
+                    </p>
+                </div>
+            `;
+
+            const SupportPhone = "+918340721420";
+            const AccountsPhone = "+918340721420";
+
+            // Send notifications
+            sendWhatsApp(SupportPhone, message);
+            sendWhatsApp(AccountsPhone, message);
+            sendSms(SupportPhone, message);
+            sendSms(AccountsPhone, message);
+            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+
+            // Mark dispute as notified
+            const updateQuery = `UPDATE tbl_queries SET is_notified = 1 WHERE Dispute_ID = ?`;
+            con.query(updateQuery, [disputeId], (updateErr) => {
+                if (updateErr) {
+                    console.error(`❌ Error updating dispute ${disputeId}:`, updateErr);
+                } else {
+                    console.log(`📨 Notification sent for Dispute ID: ${disputeId}`);
+                }
+            });
+        });
+    });
+}
+
+// Schedule to run every hour at minute 0
+/* cron.schedule('0 * * * *', () => {
+    console.log(`Running dispute notification check at ${new Date().toISOString()}`);
+    notifyUnrespondedDisputes();
+});
+ */
+
+function notifyDisputesUnresolved7Days() {
+    const query = `
+        SELECT id, Dispute_ID, created 
+        FROM tbl_queries 
+        WHERE TIMESTAMPDIFF(DAY, created, NOW()) >= 7 
+        AND is_notified_7days = 0
+    `;
+
+    con.query(query, (err, rows) => {
+        if (err) {
+            console.error('❌ Error querying 7-day disputes:', err);
+            return;
+        }
+
+        if (!rows.length) {
+            console.log('✅ No disputes pending for 7-day notification.');
+            return;
+        }
+
+        rows.forEach(dispute => {
+            const disputeId = dispute.Dispute_ID;
+
+            const message = `*Dispute Unresolved - 7 Days*\n\nDispute ID: #${disputeId} has remained unresolved for over 7 days.\n\nImmediate action is required.`;
+            const emailSubject = `Dispute ID: #${disputeId} Unresolved for 7 Days`;
+            const emailBody = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
+                    <h2 style="color: #d9534f;">Urgent Dispute Notification</h2>
+                    <p>Dispute with ID <strong>#${disputeId}</strong> has not been resolved for over 7 days.</p>
+                    <p>Please take immediate action.</p>
+                    <br/>
+                    <p style="font-size: 14px; color: #888;">
+                        Regards,<br><strong>Management System</strong>
+                    </p>
+                </div>
+            `;
+
+            const SupportPhone = "+918340721420";
+            const AccountsPhone = "+918340721420";
+
+            // Send messages
+            sendWhatsApp(SupportPhone, message);
+            sendWhatsApp(AccountsPhone, message);
+            sendSms(SupportPhone, message);
+            sendSms(AccountsPhone, message);
+            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+
+            // Mark as notified for 7 days
+            const updateQuery = `UPDATE tbl_queries SET is_notified_7days = 1 WHERE Dispute_ID = ?`;
+            con.query(updateQuery, [disputeId], (updateErr) => {
+                if (updateErr) {
+                    console.error(`❌ Error updating 7-day dispute ${disputeId}:`, updateErr);
+                } else {
+                    console.log(`📨 7-day notification sent for Dispute ID: ${disputeId}`);
+                }
+            });
+        });
+    });
+}
+
+/* cron.schedule('0 0 * * *', () => {
+    notifyDisputesUnresolved7Days();
+}); */
+
+
 
 
 module.exports = {

@@ -4,6 +4,10 @@ const twilio = require('twilio');
 const { Account_SID, Auth_Token, Twilio_phone_number, Twilio_Whatsapp_number } = process.env;
 
 // Your Twilio account SID and Auth Token from the Twilio Console
+
+console.log('SID:', Account_SID);
+console.log('TOKEN:', Auth_Token);
+
 const accountSid = Account_SID;
 const authToken = Auth_Token;
 

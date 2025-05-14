@@ -122,4 +122,9 @@ We look forward to reviewing your solution!
 // use Effect basic
 // life cyscle with useEffect
 // stying React using Css
+// inline styling in react
+// daynmic inline css style
+// external css
+// styled compnents
+// Bootstrap react
 -->
