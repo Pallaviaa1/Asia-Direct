@@ -845,7 +845,7 @@ const Addfreight = (req, res) => {
                                     });
                                 });
 
-                                console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+                                console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                             }
                         } catch (error) {
                             console.error(`Error processing files for ${documentName}:`, error);
@@ -869,7 +869,7 @@ const Addfreight = (req, res) => {
                                     }
                                 }
 
-                                console.log("✅ All files processed successfully!");
+                                console.log("All files processed successfully!");
                             }
                         } catch (error) {
                             console.error("Error handling file uploads:", error);
@@ -1176,7 +1176,7 @@ const EditFreight = async (req, res) => {
 `;
 
 
-            sendMail("mobappssolutions174@gmail.com" || result[0].sales_email, mailSubject, contentTemplate);
+            sendMail(result[0].sales_email, mailSubject, contentTemplate);
 
 
             //sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
@@ -1189,8 +1189,31 @@ const EditFreight = async (req, res) => {
             
             Please check the updated details.
             `;
-            const salesPersonPhone = "+918340721420" || result[0].sales_person_phone;
+            const salesPersonPhone = result[0].sales_person_phone;
             sendWhatsApp(salesPersonPhone, whatsappMessage);
+
+
+            // Send email and WhatsApp to all team members
+            const teamQuery = `SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(1, assigned_roles) AND is_deleted=0 AND status=1`;
+
+            con.query(teamQuery, async (err, teamMembers) => {
+                if (err) {
+                    console.error("Error fetching team members:", err);
+                    return;
+                }
+
+                for (const member of teamMembers) {
+                    // Send Email
+                    await sendMail(member.email, mailSubject, contentTemplate);
+
+                    // Send WhatsApp
+                    const formattedPhone = member.cellphone.startsWith('+') ? member.cellphone : `+${member.cellphone}`;
+                    await sendWhatsApp(formattedPhone, whatsappMessage);
+                }
+
+                console.log("Notifications sent to all team members.");
+            });
+
 
             // Send WhatsApp to Estimates Team
             // const estimatesTeamPhone = result[0].estimates_team_phone;
@@ -1238,7 +1261,7 @@ const EditFreight = async (req, res) => {
                             });
                         });
 
-                        console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+                        console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                     }
                 } catch (error) {
                     console.error(`Error processing files for ${documentName}:`, error);
@@ -1261,7 +1284,7 @@ const EditFreight = async (req, res) => {
                             }
                         }
 
-                        console.log("✅ All files processed successfully!");
+                        console.log("All files processed successfully!");
                     }
                 } catch (error) {
                     console.error("Error handling file uploads:", error);
@@ -3462,24 +3485,60 @@ const UpdateOrderStatus = async (req, res) => {
 
                                                     // Send email
                                                     sendMail(email, "Order Status Update", mailContent);
-                                                    let SMSmessage = `*Shipment Status Updated*\n\nThe status of the shipment for client ${fullName} (Order No: OR000${order_id} has been updated to: ${status}.\n\nPlease check the shipment details.`;
-                                                    let salesPersonPhone = "+918340721420" || salesPersonPhone
-                                                    let opsTeamPhone = "+918340721420" || opsTeamPhone
-                                                    // send WhatsApp to Sales Person
-                                                    const whatsappResponseSales = sendWhatsApp(salesPersonPhone, SMSmessage);
+                                                    // Step 1: Get freight_id from order
+                                                    con.query(`SELECT freight_id, client_id FROM tbl_orders WHERE id = ?`, [order_id], (err, freightResult) => {
+                                                        if (err) return res.status(500).send({ success: false, message: err.message });
 
-                                                    // send WhatsApp to Operations Team
-                                                    const whatsappResponseOps = sendWhatsApp(opsTeamPhone, SMSmessage);
+                                                        if (freightResult.length === 0) {
+                                                            return res.status(400).send({ success: false, message: "Freight not found for this order" });
+                                                        }
 
-                                                    const smsResponseSales = sendSms(salesPersonPhone, SMSmessage);
-                                                    const smsResponseOps = sendSms(opsTeamPhone, SMSmessage);
+                                                        const freight_id = freightResult[0].freight_id;
+                                                        const client_id = freightResult[0].client_id;
 
+                                                        // Step 2: Get sales_person_id from tbl_freights
+                                                        con.query(`SELECT sales_representative as sales_person_id FROM tbl_freights WHERE id = ?`, [freight_id], (err, salesPersonResult) => {
+                                                            if (err) return res.status(500).send({ success: false, message: err.message });
 
-                                                    return res.status(200).send({
-                                                        success: true,
-                                                        message: "Order status updated and notification sent.",
-                                                        email: email
+                                                            const sales_person_id = salesPersonResult.length ? salesPersonResult[0].sales_person_id : null;
+
+                                                            // Step 3: Get sales person contact details
+                                                            con.query(`SELECT full_name, cellphone FROM tbl_users WHERE id = ? AND is_deleted = 0 AND status = 1`, [sales_person_id], (err, salesResult) => {
+                                                                if (err) return res.status(500).send({ success: false, message: err.message });
+
+                                                                const salesPersonPhone = salesResult.length ? salesResult[0].cellphone : null;
+
+                                                                // Step 4: Fetch Ops team
+                                                                con.query(`SELECT cellphone FROM tbl_users WHERE user_type = 3 AND 
+                                                                    FIND_IN_SET(2, assigned_roles)
+                                                                    AND is_deleted = 0 AND status = 1`, (err, opsResults) => {
+                                                                    if (err) return res.status(500).send({ success: false, message: err.message });
+
+                                                                    const opsPhones = opsResults.map(row => row.cellphone).filter(Boolean);
+                                                                    const messageText = `*Shipment Status Updated*\n\nThe status of the shipment for client ${fullName} (Order No: OR000${order_id}) has been updated to: ${status}.\n\nPlease check the shipment details.`;
+
+                                                                    // Send to sales person
+                                                                    if (salesPersonPhone) {
+                                                                        sendSms(salesPersonPhone, messageText);
+                                                                        sendWhatsApp(salesPersonPhone, messageText);
+                                                                    }
+
+                                                                    // Send to Ops team
+                                                                    opsPhones.forEach(phone => {
+                                                                        sendSms(phone, messageText);
+                                                                        sendWhatsApp(phone, messageText);
+                                                                    });
+
+                                                                    return res.status(200).send({
+                                                                        success: true,
+                                                                        message: "Order status updated and notifications sent.",
+                                                                        email: email
+                                                                    });
+                                                                });
+                                                            });
+                                                        });
                                                     });
+
                                                 });
                                             });
                                     });
@@ -6150,7 +6209,7 @@ const OrderInvoiceList = async (req, res) => {
     }
 };
 
-function checkAndNotifyEstimateOverdue() {
+/* function checkAndNotifyEstimateOverdue() {
     const query = `
       SELECT tbl_freight.freight_number, tbl_users.full_name
       FROM tbl_freight
@@ -6176,13 +6235,63 @@ function checkAndNotifyEstimateOverdue() {
             sendWhatsApp(estimatesTeamPhoneNumber, message);  // <<== FIXED (use correct variable)
         });
     });
+} */
+
+function checkAndNotifyEstimateOverdue() {
+    const freightQuery = `
+      SELECT tbl_freight.freight_number, tbl_users.full_name
+      FROM tbl_freight
+      INNER JOIN tbl_users ON tbl_freight.client_id = tbl_users.id
+      WHERE tbl_freight.status <> 4
+        AND TIMESTAMPDIFF(HOUR, tbl_freight.created_at, NOW()) >= 72
+    `;
+
+    // Fetch overdue freight quotes
+    con.query(freightQuery, function (err, freightResults) {
+        if (err) {
+            console.error('Database error (freight):', err);
+            return;
+        }
+
+        if (freightResults.length === 0) {
+            console.log('No overdue estimates found.');
+            return;
+        }
+
+        // Now fetch all Estimate team members
+        const estimateTeamQuery = `SELECT full_name, cellphone, telephone 
+  FROM tbl_users 
+  WHERE user_type = 3 
+    AND FIND_IN_SET(1, assigned_roles) AND cellphone IS NOT NULL AND is_deleted=0 AND status=1`;
+
+        con.query(estimateTeamQuery, function (err, teamResults) {
+            if (err) {
+                console.error('Database error (team):', err);
+                return;
+            }
+
+            if (teamResults.length === 0) {
+                console.log('No Estimate team members found.');
+                return;
+            }
+
+            // Loop over each overdue freight and send to all Estimate team members
+            freightResults.forEach(freight => {
+                const message = `*Quote overdue*\n\nQuote for client *${freight.full_name}*\nFreight: *${freight.freight_number}* has not been issued in the past 72 hours.\nPlease act urgently.`;
+
+                teamResults.forEach(member => {
+                    sendWhatsApp(member.cellphone, message);
+                });
+            });
+        });
+    });
 }
 
 // Schedule to run every hour
-// cron.schedule('0 * * * *', function () {
-//     console.log('Running check for overdue estimates...');
-//     checkAndNotifyEstimateOverdue();
-// });
+cron.schedule('0 * * * *', function () {
+    console.log('Running check for overdue estimates...');
+    checkAndNotifyEstimateOverdue();
+});
 
 function checkAndNotifyOverdueQuotes() {
     const query = `
@@ -6242,41 +6351,40 @@ function checkAndNotifyOverdueQuotes() {
 </div>
 `;
 
-            let salesEmail = `mobappssolutions174@gmail.com` || record.sales_person_email
-            let sales_person_phone = `+918340721420` || record.sales_person_phone
+            let salesEmail = record.sales_person_email
+            let sales_person_phone = record.sales_person_phone
             const whatsappMessage = `Hi ${record.sales_person_name},\nQuote has been issued and status not updated.\nPlease follow up with client.\n\nFreight Number: ${record.freight_number}\nClient Name: ${record.client_name}`;
 
             sendMail(salesEmail, subject, emailMessage);
-            // sendWhatsApp(sales_person_phone, whatsappMessage);
+            sendWhatsApp(sales_person_phone, whatsappMessage);
         });
     });
 }
 
 // run every day at 9 AM
-// cron.schedule('0 9 * * *', () => {
-//     console.log('Checking overdue quotes...');
-//     checkAndNotifyOverdueQuotes();
-// });
+cron.schedule('0 9 * * *', () => {
+    console.log('Checking overdue quotes...');
+    checkAndNotifyOverdueQuotes();
+});
 
 
 function checkAndSendUnbookedShipmentAlerts() {
-    const query = `
-    SELECT 
-      tbl_orders.id AS order_id, 
-      CONCAT('OR000', tbl_orders.id) AS order_number, 
-      tbl_users.full_name AS customer_name, 
-      tbl_orders.track_status, 
-      tbl_orders.created_at, 
-      tbl_freight.freight_number
-    FROM tbl_orders
-    INNER JOIN tbl_freight ON tbl_freight.id = tbl_orders.freight_id
-    INNER JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
-    WHERE tbl_orders.track_status != 'Delivered'
-      AND tbl_orders.created_at <= DATE_SUB(NOW(), INTERVAL 90 DAY)
-  `;
+    const unbookedQuery = `
+        SELECT 
+            tbl_orders.id AS order_id, 
+            CONCAT('OR000', tbl_orders.id) AS order_number, 
+            tbl_users.full_name AS customer_name, 
+            tbl_orders.track_status, 
+            tbl_orders.created_at, 
+            tbl_freight.freight_number
+        FROM tbl_orders
+        INNER JOIN tbl_freight ON tbl_freight.id = tbl_orders.freight_id
+        INNER JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+        WHERE tbl_orders.track_status != 'Delivered'
+          AND tbl_orders.created_at <= DATE_SUB(NOW(), INTERVAL 90 DAY)
+    `;
 
-
-    con.query(query, (err, results) => {
+    con.query(unbookedQuery, (err, results) => {
         if (err) {
             console.error('Database query error:', err);
             return;
@@ -6287,53 +6395,68 @@ function checkAndSendUnbookedShipmentAlerts() {
             return;
         }
 
-        results.forEach(order => {
-            const mailSubject = 'Unbooked Shipment';
+        // Fetch team members based on user_type and assigned_roles
+        const teamQuery = `
+            SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 3 
+            AND (FIND_IN_SET(2, assigned_roles) OR FIND_IN_SET(6, assigned_roles))
+            AND is_deleted = 0 AND status = 1;
 
-            const emailTemplate = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-          <h2 style="color: #e74c3c; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Unbooked Shipment Alert</h2>
-          <p style="font-size: 16px; color: #333;">
-            Hi <strong>{RecipientName}</strong>,
-          </p>
-          <p style="font-size: 16px; color: #333;">
-            The shipment for <strong>${order.customer_name}</strong> (Freight Number/Order Number: <strong>${order.freight_number}/ ${order.order_number}</strong>) has not been delivered for over 90 days.
-          </p>
-          <p style="font-size: 16px; color: #333;">
-            Please review the shipment status and take necessary action.
-          </p>
-          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-          <p style="font-size: 14px; color: #777;">
-            Regards,<br>
-            <strong>Management System</strong>
-          </p>
-        </div>
-      `;
+        `;
 
-            const bookingEmailContent = emailTemplate.replace('{RecipientName}', 'Booking Team');
-            const operationsEmailContent = emailTemplate.replace('{RecipientName}', 'Operations Team');
+        con.query(teamQuery, (teamErr, teamMembers) => {
+            if (teamErr) {
+                console.error('Error fetching team members:', teamErr);
+                return;
+            }
 
-            const bookingTeamEmail = 'mobappssolutions174@gmail.com' || 'bookingteam@example.com';
-            const operationsTeamEmail = 'mobappssolutions174@gmail.com' || 'operations@example.com';
-            const bookingTeamPhone = '+918340721420' || '+1234567890';
-            const operationsTeamPhone = '+918340721420' || '+0987654321';
+            if (teamMembers.length === 0) {
+                console.log('No team members found to send alerts.');
+                return;
+            }
 
-            // Send emails
-            const message = sendMail(bookingTeamEmail, mailSubject, bookingEmailContent);
-            console.log(message);
-            const message1 = sendMail(operationsTeamEmail, mailSubject, operationsEmailContent);
-            console.log(message1);
+            results.forEach(order => {
+                const mailSubject = 'Unbooked Shipment';
 
-            // Send WhatsApp messages
-            const whatsappMessage = `⚠️ Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
+                teamMembers.forEach(member => {
+                    const emailTemplate = `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                          <h2 style="color: #e74c3c; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Unbooked Shipment Alert</h2>
+                          <p style="font-size: 16px; color: #333;">
+                            Hi <strong>${member.full_name}</strong>,
+                          </p>
+                          <p style="font-size: 16px; color: #333;">
+                            The shipment for <strong>${order.customer_name}</strong> (Freight Number/Order Number: <strong>${order.freight_number}/ ${order.order_number}</strong>) has not been delivered for over 90 days.
+                          </p>
+                          <p style="font-size: 16px; color: #333;">
+                            Please review the shipment status and take necessary action.
+                          </p>
+                          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                          <p style="font-size: 14px; color: #777;">
+                            Regards,<br>
+                            <strong>Management System</strong>
+                          </p>
+                        </div>
+                    `;
 
-            // sendWhatsApp(bookingTeamPhone, whatsappMessage);
-            // sendWhatsApp(operationsTeamPhone, whatsappMessage);
+                    // Send email
+                    if (member.email) {
+                        sendMail(member.email, mailSubject, emailTemplate);
+                    }
 
-            console.log(`Alert sent for freight ${order.freight_number}`);
+                    // Send WhatsApp message
+                    const phone = member.cellphone;
+                    if (phone) {
+                        const whatsappMessage = `⚠️ Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
+                        sendWhatsApp(phone, whatsappMessage);
+                    }
+
+                    console.log(`Alert sent to ${member.full_name} for freight ${order.freight_number}`);
+                });
+            });
         });
     });
 }
+
 
 // OPTIONAL: schedule daily at midnight
 cron.schedule('0 0 * * *', () => {

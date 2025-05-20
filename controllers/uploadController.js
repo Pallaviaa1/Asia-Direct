@@ -76,7 +76,7 @@ const AttachedShippingEstimate = async (req, res) => {
                     return;
                 }
                 const freightNumber = result[0].freight_number;
-                const Email = "mobappssolutions174@gmail.com"/* result[0].sale_email; */ // send email to sales person
+                const Email = result[0].sale_email;  // send email to sales person
                 const mailSubject = 'Estimate Issued';
                 const content = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
@@ -135,7 +135,7 @@ Please forward this estimate to the client.
 
                 const clearanceNumber = result[0].clearance_number;
                 const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
-                console.log(`📂 Folder ID: ${folderId}`);
+                console.log(`Folder ID: ${folderId}`);
 
 
                 const { fileId, webViewLink } = await uploadFile(folderId, file);
@@ -190,7 +190,7 @@ const AttachedCustomOrderDoc = async (req, res) => {
             const Subfolder = "Clearance Doc"
             const clearanceNumber = result[0].clearance_number;
             const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
-            console.log(`📂 Folder ID: ${folderId}`);
+            console.log(`Folder ID: ${folderId}`);
 
 
             const { fileId, webViewLink } = await uploadFile(folderId, file);

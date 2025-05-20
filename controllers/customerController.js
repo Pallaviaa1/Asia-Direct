@@ -50,7 +50,7 @@ const AddCustomer = async (req, res) => {
                                 if (err) throw err;
                                 if (insertdata.affectedRows > 0) {
 
-                                    const Email = SMTP_MAIL;
+                                    /* const Email = SMTP_MAIL;
                                     const mailSubject = 'New User Registered';
                                     const content = `
   <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
@@ -69,7 +69,7 @@ const AddCustomer = async (req, res) => {
   </div>
 `;
 
-                                    sendMail(Email, mailSubject, content);
+                                    sendMail(Email, mailSubject, content); */
 
                                     res.status(200).send({
                                         success: true,
@@ -1204,30 +1204,47 @@ const customerRegister = async (req, res) => {
                         con.query(insertQuery, [client_name, email, encrypassword, cellphone, telephone, contact_person, address_1, address_2, city, province, country, code, company_id, importers_ref, tax_ref, 3], (err, insertdata) => {
                             if (err) throw err;
                             if (insertdata.affectedRows > 0) {
-                                const Email = SMTP_MAIL;
                                 const mailSubject = 'New User Registered';
                                 const content = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New User Registered</h2>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+        <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New User Registered</h2>
 
-    <p style="font-size: 16px; color: #333;">
-      Hey Sales, let's welcome <strong>${client_name}</strong> who has just created a new profile and let's give them an awesome experience.
-    </p>
+        <p style="font-size: 16px; color: #333;">
+          Hey Sales, let's welcome <strong>${client_name}</strong> who has just created a new profile and let's give them an awesome experience.
+        </p>
 
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
 
-    <p style="font-size: 14px; color: #777;">
-      Regards,<br>
-      <strong>Management System</strong>
-    </p>
-  </div>
-`;
+        <p style="font-size: 14px; color: #777;">
+          Regards,<br>
+          <strong>Management System</strong>
+        </p>
+      </div>
+    `;
 
-                                sendMail(Email, mailSubject, content);
-                                res.status(200).send({
-                                    success: true,
-                                    message: "Your account has been successfully created !"
-                                })
+                                // Query all staff with role 'Sales'
+                                const getSalesEmailsQuery = `SELECT email FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(4, assigned_roles) AND is_deleted=0 AND status=1`;
+
+                                con.query(getSalesEmailsQuery, (err, results) => {
+                                    if (err) {
+                                        console.error("Error fetching sales emails:", err);
+                                        return res.status(500).send({
+                                            success: false,
+                                            message: "Account created but failed to notify sales team."
+                                        });
+                                    }
+
+                                    // Loop through each email and send the message
+                                    results.forEach((staff) => {
+                                        const staffEmail = staff.email;
+                                        sendMail(staffEmail, mailSubject, content);
+                                    });
+
+                                    return res.status(200).send({
+                                        success: true,
+                                        message: "Your account has been successfully created and sales team notified!"
+                                    });
+                                });
                             }
                             else {
                                 res.status(400).send({
@@ -2316,46 +2333,104 @@ Thank you for your order. You can track your order using the following tracking 
                                         });
 
                                     })
-                                    Email = SMTP_MAIL;
-                                    mailSubject = `Order Confirmation by ${username}`;
-                                    content = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Order Details</h2>
-    
-    <p style="font-size: 16px; color: #333;">
-      <strong>Client Name:</strong> ${details[0].full_name}<br>
-      <strong>Client Email:</strong> ${details[0].email}<br>
-      <strong>Freight Number:</strong> ${order_status[0].freight_number}<br>
-      <strong>Order Number:</strong> ${orderId}<br>
-      <strong>Goods Description:</strong> ${order_status[0].product_desc}<br>
-      <strong>Freight:</strong> ${order_status[0].freight}<br>
-      <strong>Weight (Kgs):</strong> ${order_status[0].dimension}<br>
-      <strong>Dimensions (CBM):</strong> ${order_status[0].weight}<br>
-    </p>
-    
-    <p style="font-size: 16px; color: #333;">
-      Your order has been successfully confirmed. We will keep you updated with further processing and shipping details.
-    </p>
-    
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-    
-    <p style="font-size: 14px; color: #777;">
-      Regards,<br>
-      <strong>Management System</strong>
-    </p>
-    </div>`
-                                    //content = 'Hi ' + data[0].first_name + ', <p> Please click the below button to reset your password. </p> <p> <span style="background: #6495ED; padding: 5px;"> <a style="color: white; text-decoration: none;  font-weight: 600;" href="http://localhost:3001/reset-password?token=' + randomToken + '">Click Here </a> </span> </p>';
-                                    sendMail(Email, mailSubject, content);
-                                    let message = `*New Shipment Booking*\n\nA new shipment from client ${details[0].full_name} for Freight number ${order_status[0].freight_number} has been confirmed.\nPlease arrange booking.`;
+                                    let Email = SMTP_MAIL;
+                                    const mailSubject = `Order Confirmation by ${username}`;
+                                    const content = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+  <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">Order Details</h2>
 
-                                    const whatsappResponse = sendWhatsApp(user_phoneNumber, message);
+  <p style="font-size: 16px; color: #333;">
+    <strong>Client Name:</strong> ${details[0].full_name}<br>
+    <strong>Client Email:</strong> ${details[0].email}<br>
+    <strong>Freight Number:</strong> ${order_status[0].freight_number}<br>
+    <strong>Order Number:</strong> ${orderId}<br>
+    <strong>Goods Description:</strong> ${order_status[0].product_desc}<br>
+    <strong>Freight:</strong> ${order_status[0].freight}<br>
+    <strong>Weight (Kgs):</strong> ${order_status[0].dimension}<br>
+    <strong>Dimensions (CBM):</strong> ${order_status[0].weight}<br>
+  </p>
 
+  <p style="font-size: 16px; color: #333;">
+    Your order has been successfully confirmed. We will keep you updated with further processing and shipping details.
+  </p>
+
+  <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+  <p style="font-size: 14px; color: #777;">
+    Regards,<br>
+    <strong>Management System</strong>
+  </p>
+</div>
+`;
+                                    // sendMail(Email, mailSubject, content);
+
+                                    const message = `*New Shipment Booking*\n\nA new shipment from client ${details[0].full_name} for Freight number ${order_status[0].freight_number} has been confirmed.\nPlease arrange booking.`;
+
+                                    const getOperationPhonesQuery = `SELECT cellphone, telephone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted=0 AND status=1`;
+
+                                    con.query(getOperationPhonesQuery, (err, result) => {
+                                        if (err) {
+                                            console.error('Failed to fetch operations team:', err);
+                                            return res.status(500).send({
+                                                success: false,
+                                                message: 'Internal server error while notifying operations team.'
+                                            });
+                                        }
+
+                                        if (result.length === 0) {
+                                            console.warn('No operations team phone numbers found.');
+                                        } else {
+                                            result.forEach((row) => {
+                                                const phone = row.cellphone || row.telephone;
+                                                sendWhatsApp(phone, message);
+                                            });
+                                            // Notify Sales Person
+                                            const salesQuery = `SELECT tbl_freight.*, tbl_users.full_name as sales_name, tbl_users.email as sales_email, tbl_users.cellphone as sales_cellphone, tbl_users.telephone as sales_telephone
+                                            FROM tbl_freight INNER JOIN tbl_users ON tbl_users.id = tbl_freight.client_id WHERE tbl_freight.id = ?`;
+
+                                            con.query(salesQuery, [freight_id], (err, result) => {
+                                                if (err) {
+                                                    console.error('Failed to fetch sales person:', err);
+                                                } else if (result.length > 0) {
+                                                    const user = result[0];
+                                                    const phone = user.cellphone || user.telephone;
+                                                    if (phone) sendWhatsApp(phone, message);
+                                                    if (user.email) sendMail(user.email, mailSubject, content);
+                                                } else {
+                                                    console.warn('No sales person found for the provided freight ID.');
+                                                }
+
+                                                // Notify Booking Team
+                                                const bookingQuery = `SELECT full_name, email, cellphone, telephone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(6, assigned_roles) AND is_deleted = 0 AND status = 1`;
+                                                con.query(bookingQuery, (err, bookingUsers) => {
+                                                    if (err) {
+                                                        console.error('Failed to fetch booking team:', err);
+                                                    } else {
+                                                        bookingUsers.forEach((user) => {
+                                                            const phone = user.cellphone || user.telephone;
+                                                            if (phone) sendWhatsApp(phone, message);
+                                                            if (user.email) sendMail(user.email, mailSubject, content);
+                                                        });
+                                                    }
+
+                                                    // Final response
+                                                    return res.status(200).send({
+                                                        success: true,
+                                                        message: "Accept quotation successfully"
+                                                    });
+                                                });
+                                            });
+
+                                        }
+
+                                        // Final response
+                                        return res.status(200).send({
+                                            success: true,
+                                            message: "Accept quotation successfully"
+                                        });
+
+                                    });
                                 })
-
-                            });
-
-                            res.status(200).send({
-                                success: true,
-                                message: "Accept quotation successfully"
                             })
                         }
                         else {
@@ -3005,15 +3080,11 @@ const addQueries = async (req, res) => {
         }
 
         const currentYear = new Date().getFullYear();
-        let newDisputeNumber = 1; // Default if no previous record
+        let newDisputeNumber = 1;
         let disputeId = `D-${currentYear}${newDisputeNumber}`;
 
-        console.log("Fetching last Dispute_ID...");
-
-        // Check last Dispute_ID asynchronously
         con.query("SELECT Dispute_ID FROM tbl_queries ORDER BY id DESC LIMIT 1", (err, result) => {
             if (err) {
-                console.error("Database Error:", err);
                 return res.status(500).send({
                     success: false,
                     message: "Database error while fetching last Dispute_ID",
@@ -3021,37 +3092,24 @@ const addQueries = async (req, res) => {
                 });
             }
 
-            console.log("DB Result:", result);
-
             if (result.length > 0 && result[0].Dispute_ID) {
-                const lastDisputeId = result[0].Dispute_ID; // Example: D-2025100
-                const match = lastDisputeId.match(/^D-(\d{4})(\d+)$/);
+                const match = result[0].Dispute_ID.match(/^D-(\d{4})(\d+)$/);
                 if (match) {
                     const lastYear = parseInt(match[1], 10);
                     const lastNumber = parseInt(match[2], 10);
-
                     if (lastYear === currentYear) {
                         newDisputeNumber = lastNumber + 1;
                     }
-                } else {
-                    console.warn("Invalid Dispute_ID format found:", lastDisputeId);
-                    return res.status(500).send({
-                        success: false,
-                        message: "Invalid Dispute_ID format found in database",
-                    });
                 }
             }
 
             disputeId = `D-${currentYear}${newDisputeNumber}`;
-            console.log("New Dispute_ID Generated:", disputeId);
 
-            // Insert query
             con.query(
                 "INSERT INTO tbl_queries (Dispute_ID, user_id, name, freight_no, nature_of_Heading, subject, message, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [disputeId, user_id, name, freight_no, nature_of_Heading, subject, message, "Pending"],
                 (insertErr) => {
                     if (insertErr) {
-                        console.error("Insert Error:", insertErr);
                         return res.status(500).send({
                             success: false,
                             message: "Failed to insert query",
@@ -3059,62 +3117,58 @@ const addQueries = async (req, res) => {
                         });
                     }
 
-                    console.log("Query Inserted Successfully:", disputeId);
-
-                    // Inside con.query insert success callback:
-
-                    console.log("Query Inserted Successfully:", disputeId);
-
-                    // Send Email, SMS, WhatsApp Notifications
-                    const supportEmail = 'mobappssolutions174@gmail.com';  // update with actual
-                    const accountsEmail = 'mobappssolutions174@gmail.com'; // update with actual
-
                     const emailSubject = `New Dispute Lodged - ${disputeId}`;
-
                     const emailContent = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Dispute Created</h2>
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                            <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Dispute Created</h2>
+                            <p style="font-size: 16px; color: #333;">
+                              Hello Support/Accounts,<br><br>
+                              A new dispute <strong>${disputeId}</strong> has been lodged in the system.<br>
+                              Please review and take necessary action.
+                            </p>
+                            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                            <p style="font-size: 14px; color: #777;">
+                              Regards,<br>
+                              <strong>Management System</strong>
+                            </p>
+                        </div>
+                    `;
 
-    <p style="font-size: 16px; color: #333;">
-      Hello Support/Accounts,<br><br>
-      A new dispute <strong>${disputeId}</strong> has been lodged in the system.<br>
-      Please review and take necessary action.
-    </p>
-
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-
-    <p style="font-size: 14px; color: #777;">
-      Regards,<br>
-      <strong>Management System</strong>
-    </p>
-  </div>
-`;
-
-                    // Send Email to both support and accounts
-                    sendMail(supportEmail, emailSubject, emailContent);
-                    sendMail(accountsEmail, emailSubject, emailContent);
-
-                    // SMS/WhatsApp Message
                     const notificationMessage = `Dispute ${disputeId} has been lodged.\nRaised By: ${name}\nFreight Number: ${freight_no}`;
 
-                    // Example phone numbers
-                    const supportPhone = '+918340721420';  // update
-                    const accountsPhone = '+918340721420'; // update
+                    // 🔍 Fetch accounts & support team members
+                    const queryTeam = `
+    SELECT email, cellphone FROM tbl_users 
+    WHERE user_type = 3 
+      AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
+      AND is_deleted = 0 
+      AND status = 1
+`;
 
-                    // Send SMS
-                    sendSms(supportPhone, notificationMessage);
-                    sendSms(accountsPhone, notificationMessage);
+                    con.query(queryTeam, async (err, teamMembers) => {
+                        if (err) {
+                            console.error("Failed to fetch team members", err);
+                            return res.status(500).send({
+                                success: false,
+                                message: "Query inserted, but failed to notify team.",
+                            });
+                        }
 
-                    // Send WhatsApp
-                    sendWhatsApp(supportPhone, notificationMessage);
-                    sendWhatsApp(accountsPhone, notificationMessage);
+                        for (const member of teamMembers) {
+                            if (member.email) await sendMail(member.email, emailSubject, emailContent);
+                            if (member.cellphone) {
+                                const phone = member.cellphone.startsWith("+") ? member.cellphone : `+${member.cellphone}`;
+                                await sendSms(phone, notificationMessage);
+                                await sendWhatsApp(phone, notificationMessage);
+                            }
+                        }
 
-                    return res.status(200).send({
-                        success: true,
-                        message: "Your query has been received. Our team will get back to you shortly.",
-                        disputeId,
+                        return res.status(200).send({
+                            success: true,
+                            message: "Your query has been received. Our team will get back to you shortly.",
+                            disputeId,
+                        });
                     });
-
                 }
             );
         });
@@ -3128,8 +3182,6 @@ const addQueries = async (req, res) => {
         });
     }
 };
-
-
 
 const updateQuery = async (req, res) => {
     try {
@@ -3317,343 +3369,109 @@ const getCommodities = async (req, res) => {
         });
     }
 };
-const AddShipment = (req, res) => {
-    const {
-        waybill,
-        freight,
-        carrier,
-        vessel,
-        ETD,
-        ATD,
-        date_of_dispatch,
-        status,
-        origin_agent,
-        port_of_loading,
-        port_of_discharge,
-        destination_agent,
-        load,
-        release_type,
-        container,
-        seal,
-        origin_country_id,
-        des_country_id,
-        details,
-    } = req.body;
+const AddShipment = async (req, res) => {
+    try {
+        const {
+            freight_id,
+            waybill,
+            carrier,
+            vessel,
+            container,
+            destination,
+            date_of_dispatch,
+            agent,
+            forwarding_agent,
+        } = req.body;
 
-    console.log(req.body);
-    let detailALL;
-    if (details !== undefined && details !== '') {
-        const detailsArray = JSON.parse(details);
-        detailALL = detailsArray.join(',');
-    }
-    let detailALL1;
-    if (details !== undefined && details !== '') {
-        const detailsArray = JSON.parse(details);
-        detailALL1 = detailsArray.join(',');
-    }
+        const checkWaybillQuery = `SELECT * FROM batches WHERE waybill = ? AND is_deleted = 0`;
+        con.query(checkWaybillQuery, [waybill], (err, results) => {
+            if (err) {
+                console.error("Error checking waybill:", err);
+                return res.status(500).json({ success: false, message: "Error checking waybill", error: err.message });
+            }
 
-    const shipmentQuery = `
-        INSERT INTO tbl_shipments 
-        (waybill, freight, carrier, vessel, ETD, ATD, date_of_dispatch, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal,
-         origin_country_id, des_country_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+            if (results.length > 0) {
+                return res.status(400).json({ success: false, message: "Waybill already exists." });
+            }
 
-    const shipmentValues = [
-        waybill || null,
-        freight || null,
-        carrier || null,
-        vessel || null,
-        ETD || null,
-        ATD || null,
-        date_of_dispatch || null,
-        status || null,
-        origin_agent || null,
-        port_of_loading || null,
-        port_of_discharge || null,
-        destination_agent || null,
-        load || null,
-        release_type || null,
-        container || null,
-        seal || null,
-        origin_country_id || null,
-        des_country_id || null,
-    ];
+            const insertQuery = `INSERT INTO batches 
+        (freight, waybill, carrier, vessel, container, destination, date_dispatch, agent, forwarding_agent) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-    con.query(shipmentQuery, shipmentValues, (shipmentErr, shipmentResult) => {
-        if (shipmentErr) {
-            return res.status(500).send({
-                success: false,
-                message: "Failed to insert shipment",
-                error: shipmentErr.message,
-                data: req.body
-            });
-        }
-        let salesPersonEmail = "mobappssolutions174@gmail.com" || salesPersonEmail;
-
-        mailSubject = 'New Freight Option Created';
-
-        const content = `
-                  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-                    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
-                
-                    <p style="font-size: 16px; color: #333;">
-                      Hi Sales Team,
-                    </p>
-                
-                    <p style="font-size: 16px; color: #333;">
-                      A new freight option has been created.
-                    </p>
-                
-                    <p style="font-size: 16px; color: #333;">
-                      <strong>Waybill:</strong> ${waybill}<br>
-                      <strong>Freight:</strong> ${freight}<br>
-                      <strong>Carrier:</strong> ${carrier}<br>
-                      <strong>Vessel:</strong> ${vessel}<br>
-                      <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
-                      <strong>Container Number:</strong> ${container}
-                    </p>
-                
-                    <p style="font-size: 16px; color: #333;">
-                      Please review the freight option in the system.
-                    </p>
-                
-                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                
-                    <p style="font-size: 14px; color: #777;">
-                      Regards,<br>
-                      <strong>Management System</strong>
-                    </p>
-                  </div>
-                `;
-
-        // Send Email
-        const emailResponse = sendMail(salesPersonEmail, mailSubject, content);
-        console.log(emailResponse);
-
-        let salesPersonPhone = "+918340721420" || salesPersonPhone;
-
-        let message = `*New Freight Option Created*\n\n` +
-            `A new freight option has been created.\n\n` +
-            `Waybill: ${waybill}\n` +
-            `Freight: ${freight}\n` +
-            `Carrier: ${carrier}\n` +
-            `Vessel: ${vessel}\n` +
-            `Date of Dispatch: ${date_of_dispatch}\n` +
-            `Container Number: ${container}\n\n` +
-            `Please review this shipment.`;
-
-        // Send WhatsApp
-        const whatsappResponse = sendWhatsApp(salesPersonPhone, message);
-
-        // Send SMS (can shorten if SMS gateway has length limit)
-        const smsResponse = sendSms(salesPersonPhone, message);
-        const shipmentId = shipmentResult.insertId;
-        if (req.files && req.files.document) {
-            con.query(`update tbl_shipments set document='${req.files.document[0].filename}' where id='${shipmentId}'`, (err, data) => {
-                if (err) throw err;
-            })
-        }
-        if (detailALL && Array.isArray(detailALL) && detailALL.length > 0) {
-            const detailsQuery = `
-                INSERT INTO shipment_details (shipment_id, order_id, batch_id)
-                VALUES ?
-            `;
-
-            const detailsValues = detailALL.map((data) => [
-                shipmentId,
-                data.order_id,
-                data.batch_id || null,
-            ]);
-
-            con.query(detailsQuery, [detailsValues], (detailsErr) => {
-                if (detailsErr) {
-                    return res.status(500).send({
-                        success: false,
-                        message: "Failed to insert shipment details",
-                        error: detailsErr.message,
-                    });
+            con.query(insertQuery, [freight_id, waybill, carrier, vessel, container, destination, date_of_dispatch, agent, forwarding_agent], (err, result) => {
+                if (err) {
+                    console.error("Error inserting shipment:", err);
+                    return res.status(500).json({ success: false, message: "Error inserting shipment", error: err.message });
                 }
 
-                // Update orders and batches
-                detailALL.forEach((data) => {
-                    // Update tbl_orders
-
-                    const updateOrderTrack =
-                        `INSERT INTO order_track (order_id, batch_id, status, description) VALUES (?, ?, ?, ?)`
-                        ;
-                    con.query(updateOrderTrack, [data.order_id, data.batch_id || null, status, null], (updateErr) => {
-                        if (updateErr) {
-                            console.error("Failed to update order delivery details:", updateErr.message);
-                        }
-                    });
-
-                    const updateOrderQuery = `
-                        UPDATE tbl_orders 
-                        SET track_status = ?, assign_to_shipment = ?
-                        WHERE id = ?
-                    `;
-
-                    con.query(updateOrderQuery, [status, 1, data.order_id], (orderErr) => {
-                        if (orderErr) {
-                            console.error("Failed to update order:", orderErr.message);
-                        }
-                    });
-                    const selectDeliveryQuery = `
-    SELECT * FROM order_delivery_details
-    WHERE order_id = ?
-`;
-
-                    con.query(selectDeliveryQuery, [data.order_id], (selectErr, data1) => {
-                        if (selectErr) {
-                            console.error("Failed to fetch order delivery details:", selectErr.message);
-                            return;
-                        }
-
-                        if (data1.length > 0) {
-                            // Update existing delivery details
-                            const updateDeliveryQuery = `
-            UPDATE order_delivery_details 
-            SET actual_delivery_date = ?, date_dispatched=?, vessel = ?, container_no = ?, seal_no = ? , Carrier=?
-            WHERE order_id = ?
+                // ✅ Fetch the operations team
+                const teamQuery = `
+          SELECT full_name, email, cellphone 
+          FROM tbl_users 
+          WHERE user_type = 3 
+            AND FIND_IN_SET(2, assigned_roles) 
+            AND is_deleted = 0 
+            AND status = 1
         `;
 
-                            con.query(updateDeliveryQuery, [ATD, date_of_dispatch, vessel, container, seal, carrier, data.order_id], (updateErr) => {
-                                if (updateErr) {
-                                    console.error("Failed to update order delivery details:", updateErr.message);
-                                } else {
-                                    console.log("Order delivery details updated successfully for order_id:", data.order_id);
-                                }
-                            });
-                        } else {
-                            // Insert new delivery details
-                            const insertDeliveryQuery = `
-            INSERT INTO order_delivery_details (order_id, client_id, actual_delivery_date, date_dispatched, vessel, container_no, seal_no, Carrier) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        `;
+                con.query(teamQuery, async (opErr, teamResults) => {
+                    if (opErr) {
+                        console.error("Error fetching team members:", opErr);
+                        return res.status(500).json({ success: false, message: "Failed to fetch operations team", error: opErr.message });
+                    }
 
-                            con.query(insertDeliveryQuery, [data.order_id, data.client_id, ATD, date_of_dispatch, vessel, container, seal, carrier], (insertErr) => {
-                                if (insertErr) {
-                                    console.error("Failed to insert order delivery details:", insertErr.message);
-                                } else {
-                                    console.log("Order delivery details inserted successfully for order_id:", data.order_id);
-                                }
-                            });
+                    const mailSubject = 'New Freight Option Created';
+                    const htmlContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+              <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
+              <p style="font-size: 16px; color: #333;">Hi Operations Team,</p>
+              <p style="font-size: 16px; color: #333;">A new freight option has been created.</p>
+              <p style="font-size: 16px; color: #333;">
+                <strong>Waybill:</strong> ${waybill}<br>
+                <strong>Freight:</strong> ${freight_id}<br>
+                <strong>Carrier:</strong> ${carrier}<br>
+                <strong>Vessel:</strong> ${vessel}<br>
+                <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
+                <strong>Container Number:</strong> ${container}
+              </p>
+              <p style="font-size: 16px; color: #333;">Please review the freight option in the system.</p>
+              <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+              <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
+            </div>
+          `;
+
+                    const plainMessage = `*New Freight Option Created*\n\n` +
+                        `A new freight option has been created.\n\n` +
+                        `Waybill: ${waybill}\n` +
+                        `Freight: ${freight_id}\n` +
+                        `Carrier: ${carrier}\n` +
+                        `Vessel: ${vessel}\n` +
+                        `Date of Dispatch: ${date_of_dispatch}\n` +
+                        `Container Number: ${container}\n\n` +
+                        `Please review this shipment.`;
+
+                    for (const member of teamResults) {
+                        if (member.email) {
+                            sendMail(member.email, mailSubject, htmlContent);
                         }
-                    });
-                    // Fetch batch ID for the order
-                    const batchQuery = `
-                        SELECT batch_id 
-                        FROM freight_assig_to_batch 
-                        WHERE order_id = ?
-                    `;
 
-                    con.query(batchQuery, [data.order_id], (batchErr, batchResult) => {
-                        if (batchErr || !batchResult.length) {
-                            console.error("Failed to fetch batch_id:", batchErr ? batchErr.message : "Batch not found");
-                            return;
+                        if (member.cellphone) {
+                            sendWhatsApp(member.cellphone, plainMessage);
+                            sendSms(member.cellphone, plainMessage);
                         }
+                    }
 
-                        const batchId = batchResult[0].batch_id;
-                        const updateBatchQuery = `
-                            UPDATE batches 
-                            SET waybill = ?, vessel = ?, container_no = ?, carrier=?, track_status=?
-                            WHERE id = ?
-                        `;
-
-                        con.query(updateBatchQuery, [waybill, vessel, container, carrier, status, batchId], (updateBatchErr) => {
-                            if (updateBatchErr) {
-                                console.error("Failed to update batch:", updateBatchErr.message);
-                            }
-                        });
-
-                        // Fetch all orders in the batch
-                        const fetchBatchOrdersQuery = `
-                            SELECT order_id 
-                            FROM freight_assig_to_batch 
-                            WHERE batch_id = ? and is_assign_shipment = ?
-                        `;
-
-                        con.query(fetchBatchOrdersQuery, [batchId, 0], (fetchErr, batchOrders) => {
-                            if (fetchErr || !batchOrders.length) {
-                                console.error("Failed to fetch batch orders:", fetchErr ? fetchErr.message : "No batch orders found");
-                                return;
-                            }
-
-                            const batchOrderIds = batchOrders.map((order) => order.order_id);
-
-                            // Check if all orders in the batch are assigned to shipment
-                            const allOrdersAssigned = batchOrderIds.every((orderId) =>
-                                detailALL.some((detail) => detail.order_id === orderId)
-                            );
-
-                            if (allOrdersAssigned) {
-                                const updateBatchQuery = `
-                                    UPDATE batches 
-                                    SET assign_to_shipment = ? 
-                                    WHERE id = ?
-                                `;
-
-                                con.query(updateBatchQuery, [1, batchId], (updateBatchErr) => {
-                                    if (updateBatchErr) {
-                                        console.error("Failed to update batch:", updateBatchErr.message);
-                                    } else {
-                                        console.log(`Batch ${batchId} updated successfully.`);
-                                    }
-                                });
-                            } else {
-                                const updateBatchQuery = `
-                                    UPDATE batches 
-                                    SET assign_to_shipment = ? 
-                                    WHERE id = ?
-                                `;
-
-                                con.query(updateBatchQuery, [0, batchId], (updateBatchErr) => {
-                                    if (updateBatchErr) {
-                                        console.error("Failed to update batch:", updateBatchErr.message);
-                                    } else {
-                                        console.log(`Batch ${batchId} updated successfully.`);
-                                    }
-                                });
-                            }
-                            const updateBatchOrder = `
-                    UPDATE freight_assig_to_batch 
-                    SET is_assign_shipment = ?
-                    WHERE order_id = ?
-                `;
-                            con.query(
-                                updateBatchOrder,
-                                [1, data.order_id],
-                                (deliveryErr) => {
-                                    if (deliveryErr) {
-                                        console.error(
-                                            "Failed to update order delivery details:",
-                                            deliveryErr.message
-                                        );
-                                    }
-                                }
-                            );
-                        });
+                    return res.status(200).json({
+                        success: true,
+                        message: "Shipment added and notifications sent successfully",
                     });
                 });
-
-
-                res.status(200).send({
-                    success: true,
-                    message: "Shipment added successfully",
-                    detailALL
-                });
             });
-        } else {
-            res.status(200).send({
-                success: true,
-                message: "Shipment added successfully with no details.",
-                detailALL,
-                detailALL1
-            });
-        }
-
-    });
+        });
+    } catch (err) {
+        console.error("Unhandled error in AddShipment:", err);
+        return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    }
 };
 
 
@@ -4181,79 +3999,109 @@ const UpdateShipment = async (req, res) => {
             // const message = getOrderStatusMessage(orderNumber, fullName, status);
 
             // WhatsApp/SMS messages
-            const SMSmessage = `*Shipment Status Updated*\n\nThe status of the shipment (Waybill: ${waybill}) has been updated to: ${status}.\n\nPlease check the shipment details.`;
+            // Fetch ops team dynamically
+            const teamQuery = `
+  SELECT full_name, email, cellphone 
+  FROM tbl_users 
+  WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
+`;
+            const opsTeamMembers = await executeQuery(teamQuery);
 
-            const mailContent = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-  <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
-    Shipment Status: ${status}
-  </h2>
+            if (opsTeamMembers && opsTeamMembers.length > 0) {
+                // Compose SMS message
+                const SMSmessage = `*Shipment Status Updated*\n\nThe status of the shipment (Waybill: ${waybill}) has been updated to: ${status}.\n\nPlease check the shipment details.`;
 
-  <p style="font-size: 16px; color: #333;">
-     Dear Operations Team,<br><br>
-    Shipment status has Updated.
-  </p>
+                // Compose email content (you can reuse your existing mailContent)
+                const mailContent = `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
+      Shipment Status: ${status}
+    </h2>
 
-  <p style="font-size: 16px; color: #333;">
-    <strong>waybill:</strong> ${waybill}<br>
-    <strong>Current Status:</strong> ${status}
-  </p>
+    <p style="font-size: 16px; color: #333;">
+      Dear Operations Team,<br><br>
+      Shipment status has Updated.
+    </p>
 
-  <p style="font-size: 16px; color: #333;">
-    Please log in to dashboard for more information.
-  </p>
+    <p style="font-size: 16px; color: #333;">
+      <strong>Waybill:</strong> ${waybill}<br>
+      <strong>Current Status:</strong> ${status}
+    </p>
 
-  <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 20px;">
+    <p style="font-size: 16px; color: #333;">
+      Please log in to dashboard for more information.
+    </p>
 
-  <p style="font-size: 14px; color: #777;">
-    Regards,<br>
-    <strong>Management System</strong>
-  </p>
-</div>`;
-            const email = "mobappssolutions174@gmail.com"
-            // Send notifications
-            sendMail(email, "Shipment status has Updated", mailContent);
-            const opsTeamPhoneFinal = "+918340721420" || opsTeamPhone;
+    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 20px;">
 
-            sendWhatsApp(opsTeamPhoneFinal, SMSmessage);
-            sendSms(opsTeamPhoneFinal, SMSmessage);
+    <p style="font-size: 14px; color: #777;">
+      Regards,<br>
+      <strong>Management System</strong>
+    </p>
+  </div>`;
+
+                // Send notifications to each ops team member
+                for (const member of opsTeamMembers) {
+                    const { full_name, email, cellphone } = member;
+
+                    if (email) {
+                        sendMail(email, "Shipment status has Updated", mailContent);
+                    }
+                    if (cellphone) {
+                        sendWhatsApp(cellphone, SMSmessage);
+                        sendSms(cellphone, SMSmessage);
+                    }
+                }
+            }
+
         }
 
         if (status && isStatusChanged && status === "Customs released") {
-            const opsTeamPhone = "+918340721420"; // fallback
-            const opsTeamEmail = "mobappssolutions174@gmail.com"; // replace with real one
+            // Use the opsTeamMembers fetched above or query again if needed
 
+            const teamQuery = `
+  SELECT full_name, email, cellphone 
+  FROM tbl_users 
+  WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
+`;
+            const opsTeamMembers = await executeQuery(teamQuery);
             const emailSubject = "Shipment Released";
-
             const emailContent = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-      <h2 style="color: #2c3e50;">Shipment Released Notification</h2>
-      <p style="font-size: 16px; color: #333;">
-        Dear Operations Team,
-      </p>
-      <p style="font-size: 16px; color: #333;">
-        A shipment with Waybill: <strong>${waybill}</strong> has been <strong>released</strong>.
-      </p>
-      <p style="font-size: 16px; color: #333;">
-        <strong>Waybill:</strong> ${waybill || ""}<br>
-        <strong>Status:</strong> ${status}<br>
-      </p>
-      <p style="font-size: 16px; color: #333;">
-        Please check the system for more details.
-      </p>
-      <hr style="border-top: 1px solid #ddd;">
-      <p style="font-size: 14px; color: #777;">
-        Regards,<br><strong>Management System</strong>
-      </p>
-    </div>`;
-
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+    <h2 style="color: #2c3e50;">Shipment Released Notification</h2>
+    <p style="font-size: 16px; color: #333;">
+      Dear Operations Team,
+    </p>
+    <p style="font-size: 16px; color: #333;">
+      A shipment with Waybill: <strong>${waybill}</strong> has been <strong>released</strong>.
+    </p>
+    <p style="font-size: 16px; color: #333;">
+      <strong>Waybill:</strong> ${waybill || ""}<br>
+      <strong>Status:</strong> ${status}<br>
+    </p>
+    <p style="font-size: 16px; color: #333;">
+      Please check the system for more details.
+    </p>
+    <hr style="border-top: 1px solid #ddd;">
+    <p style="font-size: 14px; color: #777;">
+      Regards,<br><strong>Management System</strong>
+    </p>
+  </div>`;
 
             const whatsappMessage = `*Shipment Released*\n\nA shipment with Waybill *${waybill}* has been *released*.\n\nCheck the system for full details.`;
 
-            // Send notifications
-            sendMail(opsTeamEmail, emailSubject, emailContent);
-            sendWhatsApp(opsTeamPhone, whatsappMessage);
+            for (const member of opsTeamMembers) {
+                const { email, cellphone } = member;
+
+                if (email) {
+                    sendMail(email, emailSubject, emailContent);
+                }
+                if (cellphone) {
+                    sendWhatsApp(cellphone, whatsappMessage);
+                }
+            }
         }
+
 
         if (detailALL && Array.isArray(detailALL)) {
             // Step 1: Delete existing shipment details
@@ -5357,131 +5205,176 @@ const AssignBatchOrdersToClearing = async (req, res) => {
 
 
 function notifyUnrespondedDisputes() {
-    const query = `
+    const disputeQuery = `
         SELECT id, Dispute_ID, created 
         FROM tbl_queries 
         WHERE TIMESTAMPDIFF(HOUR, created, NOW()) >= 48 
-        AND is_notified = 0
+          AND is_notified = 0
     `;
 
-    con.query(query, (err, rows) => {
+    // Query to fetch all active accounts and support team members
+    const teamQuery = `
+        SELECT email, cellphone 
+        FROM tbl_users 
+        WHERE user_type = 3 
+          AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
+          AND is_deleted = 0 
+          AND status = 1
+    `;
+
+    con.query(disputeQuery, (err, disputes) => {
         if (err) {
-            console.error('❌ Error querying disputes:', err);
+            console.error('Error querying disputes:', err);
             return;
         }
 
-        if (!rows.length) {
-            console.log('✅ No pending disputes for notification.');
+        if (!disputes.length) {
+            console.log('No pending disputes for notification.');
             return;
         }
 
-        rows.forEach(dispute => {
-            const disputeId = dispute.Dispute_ID;
+        con.query(teamQuery, (teamErr, teamMembers) => {
+            if (teamErr) {
+                console.error('Error fetching team members:', teamErr);
+                return;
+            }
 
-            const message = `*Dispute Pending Review*\n\nDispute ID: #${disputeId} has not been resolved for over 48 hours.\n\nPlease review this dispute.`;
-            const emailSubject = `Dispute ID: #${disputeId} Overdue`;
-            const emailBody = `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
-                    <h2 style="color: #d9534f;">Dispute Notification</h2>
-                    <p>Dispute with ID <strong>#${disputeId}</strong> has not been addressed within 48 hours.</p>
-                    <p>Please log in to your dashboard to review and take necessary action.</p>
-                    <br/>
-                    <p style="font-size: 14px; color: #888;">
-                        Regards,<br><strong> Management System</strong>
-                    </p>
-                </div>
-            `;
+            if (!teamMembers.length) {
+                console.log('No active accounts or support team members found to notify.');
+                return;
+            }
 
-            const SupportPhone = "+918340721420";
-            const AccountsPhone = "+918340721420";
+            disputes.forEach(dispute => {
+                const disputeId = dispute.Dispute_ID;
 
-            // Send notifications
-            sendWhatsApp(SupportPhone, message);
-            sendWhatsApp(AccountsPhone, message);
-            sendSms(SupportPhone, message);
-            sendSms(AccountsPhone, message);
-            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
-            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+                const message = `*Dispute Pending Review*\n\nDispute ID: #${disputeId} has not been resolved for over 48 hours.\n\nPlease review this dispute.`;
+                const emailSubject = `Dispute ID: #${disputeId} Overdue`;
+                const emailBody = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
+                        <h2 style="color: #d9534f;">Dispute Notification</h2>
+                        <p>Dispute with ID <strong>#${disputeId}</strong> has not been addressed within 48 hours.</p>
+                        <p>Please log in to your dashboard to review and take necessary action.</p>
+                        <br/>
+                        <p style="font-size: 14px; color: #888;">
+                            Regards,<br><strong>Management System</strong>
+                        </p>
+                    </div>
+                `;
 
-            // Mark dispute as notified
-            const updateQuery = `UPDATE tbl_queries SET is_notified = 1 WHERE Dispute_ID = ?`;
-            con.query(updateQuery, [disputeId], (updateErr) => {
-                if (updateErr) {
-                    console.error(`❌ Error updating dispute ${disputeId}:`, updateErr);
-                } else {
-                    console.log(`📨 Notification sent for Dispute ID: ${disputeId}`);
-                }
+                // Send notifications to each team member
+                teamMembers.forEach(member => {
+                    if (member.cellphone) {
+                        sendWhatsApp(member.cellphone, message);
+                        sendSms(member.cellphone, message);
+                    }
+                    if (member.email) {
+                        sendMail(member.email, emailSubject, emailBody);
+                    }
+                });
+
+                // Mark dispute as notified
+                const updateQuery = `UPDATE tbl_queries SET is_notified = 1 WHERE Dispute_ID = ?`;
+                con.query(updateQuery, [disputeId], (updateErr) => {
+                    if (updateErr) {
+                        console.error(`Error updating dispute ${disputeId}:`, updateErr);
+                    } else {
+                        console.log(`Notification sent for Dispute ID: ${disputeId}`);
+                    }
+                });
             });
         });
     });
 }
 
+
 // Schedule to run every hour at minute 0
-/* cron.schedule('0 * * * *', () => {
+cron.schedule('0 * * * *', () => {
     console.log(`Running dispute notification check at ${new Date().toISOString()}`);
     notifyUnrespondedDisputes();
 });
- */
+
 
 function notifyDisputesUnresolved7Days() {
-    const query = `
+    const disputeQuery = `
         SELECT id, Dispute_ID, created 
         FROM tbl_queries 
         WHERE TIMESTAMPDIFF(DAY, created, NOW()) >= 7 
-        AND is_notified_7days = 0
+          AND is_notified_7days = 0
     `;
 
-    con.query(query, (err, rows) => {
+    const teamQuery = `
+        SELECT email, cellphone 
+        FROM tbl_users 
+        WHERE user_type = 3 
+          AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
+          AND is_deleted = 0 
+          AND status = 1
+    `;
+
+    con.query(disputeQuery, (err, disputes) => {
         if (err) {
-            console.error('❌ Error querying 7-day disputes:', err);
+            console.error('Error querying 7-day disputes:', err);
             return;
         }
 
-        if (!rows.length) {
-            console.log('✅ No disputes pending for 7-day notification.');
+        if (!disputes.length) {
+            console.log(' No disputes pending for 7-day notification.');
             return;
         }
 
-        rows.forEach(dispute => {
-            const disputeId = dispute.Dispute_ID;
+        con.query(teamQuery, (teamErr, teamMembers) => {
+            if (teamErr) {
+                console.error('Error fetching team members:', teamErr);
+                return;
+            }
 
-            const message = `*Dispute Unresolved - 7 Days*\n\nDispute ID: #${disputeId} has remained unresolved for over 7 days.\n\nImmediate action is required.`;
-            const emailSubject = `Dispute ID: #${disputeId} Unresolved for 7 Days`;
-            const emailBody = `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
-                    <h2 style="color: #d9534f;">Urgent Dispute Notification</h2>
-                    <p>Dispute with ID <strong>#${disputeId}</strong> has not been resolved for over 7 days.</p>
-                    <p>Please take immediate action.</p>
-                    <br/>
-                    <p style="font-size: 14px; color: #888;">
-                        Regards,<br><strong>Management System</strong>
-                    </p>
-                </div>
-            `;
+            if (!teamMembers.length) {
+                console.log('No active accounts or support team members found to notify.');
+                return;
+            }
 
-            const SupportPhone = "+918340721420";
-            const AccountsPhone = "+918340721420";
+            disputes.forEach(dispute => {
+                const disputeId = dispute.Dispute_ID;
 
-            // Send messages
-            sendWhatsApp(SupportPhone, message);
-            sendWhatsApp(AccountsPhone, message);
-            sendSms(SupportPhone, message);
-            sendSms(AccountsPhone, message);
-            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
-            sendMail("mobappssolutions174@gmail.com", emailSubject, emailBody);
+                const message = `*Dispute Unresolved - 7 Days*\n\nDispute ID: #${disputeId} has remained unresolved for over 7 days.\n\nImmediate action is required.`;
+                const emailSubject = `Dispute ID: #${disputeId} Unresolved for 7 Days`;
+                const emailBody = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
+                        <h2 style="color: #d9534f;">Urgent Dispute Notification</h2>
+                        <p>Dispute with ID <strong>#${disputeId}</strong> has not been resolved for over 7 days.</p>
+                        <p>Please take immediate action.</p>
+                        <br/>
+                        <p style="font-size: 14px; color: #888;">
+                            Regards,<br><strong>Management System</strong>
+                        </p>
+                    </div>
+                `;
 
-            // Mark as notified for 7 days
-            const updateQuery = `UPDATE tbl_queries SET is_notified_7days = 1 WHERE Dispute_ID = ?`;
-            con.query(updateQuery, [disputeId], (updateErr) => {
-                if (updateErr) {
-                    console.error(`❌ Error updating 7-day dispute ${disputeId}:`, updateErr);
-                } else {
-                    console.log(`📨 7-day notification sent for Dispute ID: ${disputeId}`);
-                }
+                // Send notifications to each team member
+                teamMembers.forEach(member => {
+                    if (member.cellphone) {
+                        sendWhatsApp(member.cellphone, message);
+                        sendSms(member.cellphone, message);
+                    }
+                    if (member.email) {
+                        sendMail(member.email, emailSubject, emailBody);
+                    }
+                });
+
+                // Mark as notified for 7 days
+                const updateQuery = `UPDATE tbl_queries SET is_notified_7days = 1 WHERE Dispute_ID = ?`;
+                con.query(updateQuery, [disputeId], (updateErr) => {
+                    if (updateErr) {
+                        console.error(`Error updating 7-day dispute ${disputeId}:`, updateErr);
+                    } else {
+                        console.log(`7-day notification sent for Dispute ID: ${disputeId}`);
+                    }
+                });
             });
         });
     });
 }
+
 
 /* cron.schedule('0 0 * * *', () => {
     notifyDisputesUnresolved7Days();
