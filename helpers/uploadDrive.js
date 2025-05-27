@@ -41,7 +41,7 @@ const findOrCreateFolder = async (folderName) => {
     // console.log(response);
 
     if (response.data.files.length > 0) {
-        console.log(`📂 Folder already exists with ID: ${response.data.files[0].id}`);
+        console.log(` Folder already exists with ID: ${response.data.files[0].id}`);
         return response.data.files[0].id;
     } else {
         const fileMetadata = {
@@ -50,7 +50,7 @@ const findOrCreateFolder = async (folderName) => {
         };
 
         const folder = await drive.files.create({ resource: fileMetadata, fields: 'id' });
-        console.log(`✅ Folder created with ID: ${folder.data.id}`);
+        console.log(` Folder created with ID: ${folder.data.id}`);
         return folder.data.id;
     }
 };
@@ -65,7 +65,7 @@ const uploadFile = async (folderId, files) => {
 
     // for (const file of files) {
     const { path, originalname } = files;
-    console.log(`🚀 Uploading file: ${originalname}`);
+    console.log(` Uploading file: ${originalname}`);
 
     const fileMetadata = {
         name: originalname,
@@ -86,8 +86,8 @@ const uploadFile = async (folderId, files) => {
 
     // fs.unlinkSync(path); // Delete temp file
 
-    console.log(`✅ File uploaded with ID: ${response.data.id}`);
-    console.log(`🔗 View link: ${response.data.webViewLink}`);
+    console.log(` File uploaded with ID: ${response.data.id}`);
+    console.log(` View link: ${response.data.webViewLink}`);
 
     uploadResults.push({ fileId: response.data.id, webViewLink: response.data.webViewLink });
     // }
@@ -123,8 +123,53 @@ const authenticateGoogleDrive = async () => {
     return driveClient;
 };
 
+const nestedFolderStructure = {
+    "Clearing Documents": [
+        "Customs Documents",
+        "Supporting Documents"
+    ],
+    "Freight documents": [
+        "Waybills",
+        "Warehouse Entry Docs",
+        "Supplier Invoices"
+    ],
+    "Supplier Invoices": [
+        "Invoice, Packing List",
+        "Product Literature",
+        "Letters of authority"
+    ],
+    "Quotations": [
+        "AD_ Invoice",
+        "AD_Quotations"
+    ],
+    "Proof of Delivery": [
+        "Delivery note",
+        "Courier Waybills"
+    ]
+};
+
+const findOrCreateFolder = async (freightNumber) => {
+    const drive = await authenticateGoogleDrive();
+
+    // Create or find the main freight folder
+    const freightFolderId = await createFolderIfNotExists(freightNumber);
+
+    // Loop through first-level folders
+    for (const [mainFolder, subFolders] of Object.entries(nestedFolderStructure)) {
+        const mainSubFolderId = await createFolderIfNotExists(mainFolder, freightFolderId);
+
+        for (const sub of subFolders) {
+            await createFolderIfNotExists(sub, mainSubFolderId);
+            // console.log(` Created: ${freightNumber}/${mainFolder}/${sub}`);
+        }
+    }
+
+    // console.log(" Entire folder structure created.");
+};
+
+
 // Find or create folder (supports parent and subfolder)
-const findOrCreateFolder = async (freightNumber, subfolderName) => {
+/* const findOrCreateFolder = async (freightNumber, subfolderName) => {
     const drive = await authenticateGoogleDrive();
 
     // Create or find the main freight folder
@@ -133,9 +178,9 @@ const findOrCreateFolder = async (freightNumber, subfolderName) => {
     // Create or find the subfolder inside the freight folder
     const subfolderId = await createFolderIfNotExists(subfolderName, freightFolderId);
 
-    console.log(`📂 Folder structure created: ${freightNumber} -> ${subfolderName}`);
+    console.log(` Folder structure created: ${freightNumber} -> ${subfolderName}`);
     return { freightFolderId, subfolderId };
-};
+}; */
 
 // Helper function to check or create folder
 const createFolderIfNotExists = async (folderName, parentFolderId = null) => {
@@ -149,7 +194,7 @@ const createFolderIfNotExists = async (folderName, parentFolderId = null) => {
     const response = await drive.files.list({ q: query, fields: 'files(id, name)' });
 
     if (response.data.files.length > 0) {
-        console.log(`📂 Folder "${folderName}" already exists with ID: ${response.data.files[0].id}`);
+        console.log(` Folder "${folderName}" already exists with ID: ${response.data.files[0].id}`);
         return response.data.files[0].id;
     } else {
         const fileMetadata = {
@@ -159,7 +204,7 @@ const createFolderIfNotExists = async (folderName, parentFolderId = null) => {
         };
 
         const folder = await drive.files.create({ resource: fileMetadata, fields: 'id' });
-        console.log(`✅ Folder "${folderName}" created with ID: ${folder.data.id}`);
+        console.log(` Folder "${folderName}" created with ID: ${folder.data.id}`);
         return folder.data.id;
     }
 };
@@ -167,12 +212,12 @@ const createFolderIfNotExists = async (folderName, parentFolderId = null) => {
 // Upload multiple files to Google Drive
 const uploadFile = async (folderId, files) => {
     console.log(folderId, files, "hii");
-    
+
     const drive = await authenticateGoogleDrive();
     const uploadResults = [];
 
     const { path, originalname } = files;
-    console.log(`🚀 Uploading file: ${originalname}`);
+    console.log(` Uploading file: ${originalname}`);
 
     const fileMetadata = {
         name: originalname,
@@ -190,8 +235,8 @@ const uploadFile = async (folderId, files) => {
         fields: 'id, webViewLink',
     });
 
-    console.log(`✅ File uploaded with ID: ${response.data.id}`);
-    console.log(`🔗 View link: ${response.data.webViewLink}`);
+    console.log(` File uploaded with ID: ${response.data.id}`);
+    console.log(` View link: ${response.data.webViewLink}`);
 
     uploadResults.push({ fileId: response.data.id, webViewLink: response.data.webViewLink });
 
@@ -210,8 +255,8 @@ module.exports = { findOrCreateFolder, uploadFile };
 //         console.log(`Subfolder ID: ${subfolderId}`);
 //     })
 //     .catch((error) => {
-//         console.error('❌ Error:', error.message);
+//         console.error(' Error:', error.message);
 //     });
 
 
-// Let me know if you want me to adjust anything! 🚀
+// Let me know if you want me to adjust anything! 

@@ -711,11 +711,11 @@ const AddClearingByCustomer = async (req, res) => {
                     // console.log(file);
 
                     const clearanceNumber = result[0].clearance_number;
-                    const folderId = await findOrCreateFolder(clearanceNumber);
+                    /* const folderId = await findOrCreateFolder(clearanceNumber);
                     console.log(`📂 Folder ID: ${folderId}`);
 
 
-                    const { fileId, webViewLink } = await uploadFile(folderId, file);
+                    const { fileId, webViewLink } = await uploadFile(folderId, file); */
                 })
                 if (data.affectedRows > 0) {
                     const InsertQuery = `insert into tbl_notifications (title, description, send_to) values (?,?,?)`;
@@ -925,11 +925,11 @@ const EditClearing = async (req, res) => {
                         // console.log(file);
 
                         const clearanceNumber = result[0].clearance_number;
-                        const folderId = await findOrCreateFolder(clearanceNumber);
+                       /*  const folderId = await findOrCreateFolder(clearanceNumber);
                         console.log(`📂 Folder ID: ${folderId}`);
 
 
-                        const { fileId, webViewLink } = await uploadFile(folderId, file);
+                        const { fileId, webViewLink } = await uploadFile(folderId, file); */
                     })
                     res.status(200).send({
                         success: true,
@@ -1223,7 +1223,7 @@ const customerRegister = async (req, res) => {
     `;
 
                                 // Query all staff with role 'Sales'
-                                const getSalesEmailsQuery = `SELECT email FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(4, assigned_roles) AND is_deleted=0 AND status=1`;
+                                const getSalesEmailsQuery = `SELECT email FROM tbl_users WHERE user_type = 2 AND FIND_IN_SET(4, assigned_roles) AND is_deleted=0 AND status=1`;
 
                                 con.query(getSalesEmailsQuery, (err, results) => {
                                     if (err) {
@@ -1488,7 +1488,7 @@ const AddfreightByCustomer = async (req, res) => {
                         console.log(freightNumber);
 
                         // Process all files for a given document type
-                        const processFiles = async (fileArray, documentName) => {
+                        /* const processFiles = async (fileArray, documentName) => {
                             try {
                                 for (const file of fileArray) { // Loop through all files
                                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
@@ -1579,7 +1579,7 @@ const AddfreightByCustomer = async (req, res) => {
                         };
 
                         // Start processing all files
-                        handleFileUploads();
+                        handleFileUploads(); */
                     });
 
                     /*  if (req.files && req.files.supplier_invoice) {
@@ -1946,7 +1946,7 @@ const UpdatefreightByCustomer = async (req, res) => {
                     console.log(freightNumber);
 
                     // Process all files for a given document type
-                    const processFiles = async (fileArray, documentName) => {
+                   /*  const processFiles = async (fileArray, documentName) => {
                         try {
                             for (const file of fileArray) { // Loop through all files
                                 const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
@@ -2037,7 +2037,7 @@ const UpdatefreightByCustomer = async (req, res) => {
                     };
 
                     // Start processing all files
-                    handleFileUploads();
+                    handleFileUploads(); */
                 });
                 res.status(200).send({
                     success: true,
@@ -2333,7 +2333,23 @@ Thank you for your order. You can track your order using the following tracking 
                                         });
 
                                     })
-                                    let Email = SMTP_MAIL;
+
+                                    const createDriveFolderOnly = async (req, res) => {
+                                        try {
+                                            const freightNumber = order_status[0].freight_number;
+
+                                            if (!freightNumber) {
+                                                return res.status(400).json({ message: "Missing freightNumber in request body" });
+                                            }
+
+                                            const folderId = await findOrCreateFolder(freightNumber);
+
+                                        } catch (error) {
+                                            console.error("Error creating folder:", error);
+                                        }
+                                    };
+                                    createDriveFolderOnly()
+                                    // let Email = SMTP_MAIL;
                                     const mailSubject = `Order Confirmation by ${username}`;
                                     const content = `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
@@ -2366,7 +2382,7 @@ Thank you for your order. You can track your order using the following tracking 
 
                                     const message = `*New Shipment Booking*\n\nA new shipment from client ${details[0].full_name} for Freight number ${order_status[0].freight_number} has been confirmed.\nPlease arrange booking.`;
 
-                                    const getOperationPhonesQuery = `SELECT cellphone, telephone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted=0 AND status=1`;
+                                    const getOperationPhonesQuery = `SELECT cellphone, telephone FROM tbl_users WHERE user_type = 2 AND FIND_IN_SET(2, assigned_roles) AND is_deleted=0 AND status=1`;
 
                                     con.query(getOperationPhonesQuery, (err, result) => {
                                         if (err) {
@@ -2376,6 +2392,7 @@ Thank you for your order. You can track your order using the following tracking 
                                                 message: 'Internal server error while notifying operations team.'
                                             });
                                         }
+                                        console.log("result");
 
                                         if (result.length === 0) {
                                             console.warn('No operations team phone numbers found.');
@@ -2383,6 +2400,8 @@ Thank you for your order. You can track your order using the following tracking 
                                             result.forEach((row) => {
                                                 const phone = row.cellphone || row.telephone;
                                                 sendWhatsApp(phone, message);
+                                                console.log("send");
+
                                             });
                                             // Notify Sales Person
                                             const salesQuery = `SELECT tbl_freight.*, tbl_users.full_name as sales_name, tbl_users.email as sales_email, tbl_users.cellphone as sales_cellphone, tbl_users.telephone as sales_telephone
@@ -2393,6 +2412,8 @@ Thank you for your order. You can track your order using the following tracking 
                                                     console.error('Failed to fetch sales person:', err);
                                                 } else if (result.length > 0) {
                                                     const user = result[0];
+                                                    console.log(user);
+
                                                     const phone = user.cellphone || user.telephone;
                                                     if (phone) sendWhatsApp(phone, message);
                                                     if (user.email) sendMail(user.email, mailSubject, content);
@@ -2401,11 +2422,13 @@ Thank you for your order. You can track your order using the following tracking 
                                                 }
 
                                                 // Notify Booking Team
-                                                const bookingQuery = `SELECT full_name, email, cellphone, telephone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(6, assigned_roles) AND is_deleted = 0 AND status = 1`;
+                                                const bookingQuery = `SELECT full_name, email, cellphone, telephone FROM tbl_users WHERE user_type = 2 AND FIND_IN_SET(6, assigned_roles) AND is_deleted = 0 AND status = 1`;
                                                 con.query(bookingQuery, (err, bookingUsers) => {
                                                     if (err) {
                                                         console.error('Failed to fetch booking team:', err);
                                                     } else {
+                                                        console.log(bookingUsers);
+
                                                         bookingUsers.forEach((user) => {
                                                             const phone = user.cellphone || user.telephone;
                                                             if (phone) sendWhatsApp(phone, message);
@@ -2422,13 +2445,6 @@ Thank you for your order. You can track your order using the following tracking 
                                             });
 
                                         }
-
-                                        // Final response
-                                        return res.status(200).send({
-                                            success: true,
-                                            message: "Accept quotation successfully"
-                                        });
-
                                     });
                                 })
                             })
@@ -2606,7 +2622,7 @@ const orderDetails = async (req, res) => {
         }
 
         // Construct the base query and condition
-        let condition = `WHERE tbl_orders.client_id = ?`;
+        let condition = `WHERE tbl_orders.client_id = ? ORDER BY tbl_orders.created_at DESC`;
         let params = [user_id];
 
         if (origin) {
@@ -3139,7 +3155,7 @@ const addQueries = async (req, res) => {
                     // 🔍 Fetch accounts & support team members
                     const queryTeam = `
     SELECT email, cellphone FROM tbl_users 
-    WHERE user_type = 3 
+    WHERE user_type = 2
       AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
       AND is_deleted = 0 
       AND status = 1
@@ -3369,7 +3385,7 @@ const getCommodities = async (req, res) => {
         });
     }
 };
-const AddShipment = async (req, res) => {
+/* const AddShipment = async (req, res) => {
     try {
         const {
             freight_id,
@@ -3408,7 +3424,7 @@ const AddShipment = async (req, res) => {
                 const teamQuery = `
           SELECT full_name, email, cellphone 
           FROM tbl_users 
-          WHERE user_type = 3 
+          WHERE user_type = 2
             AND FIND_IN_SET(2, assigned_roles) 
             AND is_deleted = 0 
             AND status = 1
@@ -3473,9 +3489,9 @@ const AddShipment = async (req, res) => {
         return res.status(500).json({ success: false, message: "Server Error", error: err.message });
     }
 };
+ */
 
-
-/* const AddShipment = (req, res) => {
+const AddShipment = (req, res) => {
     const {
         waybill,
         freight,
@@ -3499,7 +3515,7 @@ const AddShipment = async (req, res) => {
     } = req.body;
 
     console.log(req.body);
-    const detailALL = JSON.parse(details);
+    const detailALL = details ? JSON.parse(details) : null;
     let detailALL1;
     if (details !== undefined && details !== '') {
         const detailsArray = JSON.parse(details);
@@ -3543,7 +3559,7 @@ const AddShipment = async (req, res) => {
                 data: req.body
             });
         }
-           
+
         const shipmentId = shipmentResult.insertId;
         if (req.files && req.files.document) {
             con.query(`update tbl_shipments set document='${req.files.document[0].filename}' where id='${shipmentId}'`, (err, data) => {
@@ -3740,6 +3756,64 @@ const AddShipment = async (req, res) => {
                 });
             });
         } else {
+            const teamQuery = `
+          SELECT full_name, email, cellphone 
+          FROM tbl_users 
+          WHERE user_type = 2
+            AND FIND_IN_SET(2, assigned_roles) 
+            AND is_deleted = 0 
+            AND status = 1
+        `;
+            con.query(teamQuery, async (opErr, teamResults) => {
+                if (opErr) {
+                    console.error("Error fetching team members:", opErr);
+                    return res.status(500).json({ success: false, message: "Failed to fetch operations team", error: opErr.message });
+                }
+
+                const mailSubject = 'New Freight Option Created';
+                const htmlContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+              <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
+              <p style="font-size: 16px; color: #333;">Hi Operations Team,</p>
+              <p style="font-size: 16px; color: #333;">A new freight option has been created.</p>
+              <p style="font-size: 16px; color: #333;">
+                <strong>Waybill:</strong> ${waybill}<br>
+                <strong>Freight:</strong> ${freight}<br>
+                <strong>Carrier:</strong> ${carrier}<br>
+                <strong>Vessel:</strong> ${vessel}<br>
+                <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
+                <strong>Container Number:</strong> ${container}
+              </p>
+              <p style="font-size: 16px; color: #333;">Please review the freight option in the system.</p>
+              <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+              <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
+            </div>
+          `;
+
+                const plainMessage = `*New Freight Option Created*\n\n` +
+                    `A new freight option has been created.\n\n` +
+                    `Waybill: ${waybill}\n` +
+                    `Freight: ${freight}\n` +
+                    `Carrier: ${carrier}\n` +
+                    `Vessel: ${vessel}\n` +
+                    `Date of Dispatch: ${date_of_dispatch}\n` +
+                    `Container Number: ${container}\n\n` +
+                    `Please review this shipment.`;
+                console.log(teamResults);
+
+                for (const member of teamResults) {
+                    if (member.email) {
+                        sendMail(member.email, mailSubject, htmlContent);
+                    }
+
+                    if (member.cellphone) {
+                        sendWhatsApp(member.cellphone, plainMessage);
+                        sendSms(member.cellphone, plainMessage);
+                    }
+                }
+
+
+            });
             res.status(200).send({
                 success: true,
                 message: "Shipment added successfully with no details.",
@@ -3748,7 +3822,7 @@ const AddShipment = async (req, res) => {
             });
         }
     });
-}; */
+};
 
 
 const getShipment = async (req, res) => {
@@ -3936,7 +4010,7 @@ const UpdateShipment = async (req, res) => {
                 message: "Shipment ID is required for update.",
             });
         }
-        const detailALL = JSON.parse(details);
+        const detailALL = details ? JSON.parse(details) : null;
 
         const [existingData] = await executeQuery(
             "SELECT status, waybill FROM tbl_shipments WHERE id = ?",
@@ -4003,7 +4077,7 @@ const UpdateShipment = async (req, res) => {
             const teamQuery = `
   SELECT full_name, email, cellphone 
   FROM tbl_users 
-  WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
+  WHERE user_type = 2 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
 `;
             const opsTeamMembers = await executeQuery(teamQuery);
 
@@ -4062,7 +4136,7 @@ const UpdateShipment = async (req, res) => {
             const teamQuery = `
   SELECT full_name, email, cellphone 
   FROM tbl_users 
-  WHERE user_type = 3 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
+  WHERE user_type = 2 AND FIND_IN_SET(2, assigned_roles) AND is_deleted = 0 AND status = 1
 `;
             const opsTeamMembers = await executeQuery(teamQuery);
             const emailSubject = "Shipment Released";
@@ -5216,7 +5290,7 @@ function notifyUnrespondedDisputes() {
     const teamQuery = `
         SELECT email, cellphone 
         FROM tbl_users 
-        WHERE user_type = 3 
+        WHERE user_type = 2 
           AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
           AND is_deleted = 0 
           AND status = 1
@@ -5305,7 +5379,7 @@ function notifyDisputesUnresolved7Days() {
     const teamQuery = `
         SELECT email, cellphone 
         FROM tbl_users 
-        WHERE user_type = 3 
+        WHERE user_type = 2 
           AND (FIND_IN_SET(5, assigned_roles) OR FIND_IN_SET(8, assigned_roles))
           AND is_deleted = 0 
           AND status = 1
@@ -5376,9 +5450,9 @@ function notifyDisputesUnresolved7Days() {
 }
 
 
-/* cron.schedule('0 0 * * *', () => {
+cron.schedule('0 0 * * *', () => {
     notifyDisputesUnresolved7Days();
-}); */
+});
 
 
 

@@ -748,7 +748,7 @@ const Addfreight = (req, res) => {
                 const selectQuery = `
                     SELECT tbl_freight.freight_number, tbl_freight.client_id, tbl_users.full_name
                     FROM tbl_freight
-                    INNER JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+                    LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
                     WHERE tbl_freight.id = ?
                   `;
 
@@ -802,7 +802,7 @@ const Addfreight = (req, res) => {
                     sendMail(Email, mailSubject, content);
 
                     // Process all files for a given document type
-                    const processFiles = async (fileArray, documentName) => {
+                    /* const processFiles = async (fileArray, documentName) => {
                         try {
 
 
@@ -819,11 +819,11 @@ const Addfreight = (req, res) => {
                                     });
                                 });
 
-                                console.log(`🚀 Uploading file: ${file.originalname}`);
+                                // console.log(` Uploading file: ${file.originalname}`);
 
                                 // Upload the file to Google Drive
                                 const folderId = await findOrCreateFolder(freightNumber);
-                                console.log(`📂 Folder ID: ${folderId}`);
+                                console.log(` Folder ID: ${folderId}`);
                                 console.log(file);
 
                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
@@ -845,7 +845,7 @@ const Addfreight = (req, res) => {
                                     });
                                 });
 
-                                console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+                                // console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                             }
                         } catch (error) {
                             console.error(`Error processing files for ${documentName}:`, error);
@@ -863,7 +863,7 @@ const Addfreight = (req, res) => {
 
                                     if (files.length > 0) {
                                         const documentName = getDocumentName(key);
-                                        console.log(files, documentName, "📂 Files to process");
+                                        // console.log(files, documentName, " Files to process");
 
                                         await processFiles(files, documentName);
                                     }
@@ -883,7 +883,7 @@ const Addfreight = (req, res) => {
 
                         switch (fieldName) {
                             case 'supplier_invoice':
-                                return "Supplier Invoice";
+                                return "Supplier Invoices";
                             case 'packing_list':
                                 return "Packing List";
                             case 'licenses':
@@ -896,7 +896,7 @@ const Addfreight = (req, res) => {
                     };
 
                     // Start processing all files
-                    handleFileUploads();
+                    handleFileUploads(); */
                 });
 
             });
@@ -1131,8 +1131,8 @@ const EditFreight = async (req, res) => {
 
         const selectQuery = `SELECT tbl_freight.freight_number, tbl_freight.client_id, us.full_name as sales_full_name, us.email as sale_email, u.full_name
                 FROM tbl_freight
-                INNER JOIN tbl_users as us ON us.id = tbl_freight.sales_representative
-                INNER JOIN tbl_users as u ON u.id = tbl_freight.client_id
+                LEFT JOIN tbl_users as us ON us.id = tbl_freight.sales_representative
+                LEFT JOIN tbl_users as u ON u.id = tbl_freight.client_id
                 WHERE tbl_freight.id = ?`;
 
         con.query(selectQuery, [id], (err, result) => {
@@ -1140,6 +1140,7 @@ const EditFreight = async (req, res) => {
                 console.error("Error fetching freight number:", err);
                 return;
             }
+            console.log(result);
 
             if (result.length === 0) {
                 console.error("No freight number found for the given ID.");
@@ -1174,9 +1175,10 @@ const EditFreight = async (req, res) => {
     </p>
   </div>
 `;
+            // console.log(result[0].sales_email);
 
 
-            sendMail(result[0].sales_email, mailSubject, contentTemplate);
+            sendMail(result[0].sale_email, mailSubject, contentTemplate);
 
 
             //sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
@@ -1194,7 +1196,7 @@ const EditFreight = async (req, res) => {
 
 
             // Send email and WhatsApp to all team members
-            const teamQuery = `SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 3 AND FIND_IN_SET(1, assigned_roles) AND is_deleted=0 AND status=1`;
+            const teamQuery = `SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 2 AND FIND_IN_SET(1, assigned_roles) AND is_deleted=0 AND status=1`;
 
             con.query(teamQuery, async (err, teamMembers) => {
                 if (err) {
@@ -1220,7 +1222,7 @@ const EditFreight = async (req, res) => {
             // sendWhatsApp(estimatesTeamPhone, whatsappMessage);
 
             // Process all files for a given document type
-            const processFiles = async (fileArray, documentName) => {
+            /* const processFiles = async (fileArray, documentName) => {
                 try {
                     for (const file of fileArray) { // Loop through all files
                         const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
@@ -1235,11 +1237,11 @@ const EditFreight = async (req, res) => {
                             });
                         });
 
-                        console.log(`🚀 Uploading file: ${file.originalname}`);
+                        console.log(` Uploading file: ${file.originalname}`);
 
                         // Upload the file to Google Drive
                         const folderId = await findOrCreateFolder(freightNumber);
-                        console.log(`📂 Folder ID: ${folderId}`);
+                        console.log(` Folder ID: ${folderId}`);
                         console.log(file);
 
                         const { fileId, webViewLink } = await uploadFile(folderId, file);
@@ -1278,7 +1280,7 @@ const EditFreight = async (req, res) => {
 
                             if (files.length > 0) {
                                 const documentName = getDocumentName(key);
-                                console.log(files, documentName, "📂 Files to process");
+                                console.log(files, documentName, " Files to process");
 
                                 await processFiles(files, documentName);
                             }
@@ -1311,7 +1313,7 @@ const EditFreight = async (req, res) => {
             };
 
             // Start processing all files
-            handleFileUploads();
+            handleFileUploads(); */
         });
         res.status(200).json({
             success: true,
@@ -3450,8 +3452,8 @@ const UpdateOrderStatus = async (req, res) => {
                                                     const user_phoneNumber = userData[0].cellphone || userData[0].telephone;
                                                     const orderNumber = `OR000${order_id}`
                                                     const message = getOrderStatusMessage(orderNumber, fullName, status);
-                                                    // const smsResponse = sendSms(user_phoneNumber, message);
-                                                    // const whatsappResponse = sendWhatsApp(user_phoneNumber, message);
+                                                    const smsResponse = sendSms(user_phoneNumber, message);
+                                                    const whatsappResponse = sendWhatsApp(user_phoneNumber, message);
                                                     // console.log(smsResponse);
                                                     // console.log(whatsappResponse);
 
@@ -3497,30 +3499,44 @@ const UpdateOrderStatus = async (req, res) => {
                                                         const client_id = freightResult[0].client_id;
 
                                                         // Step 2: Get sales_person_id from tbl_freights
-                                                        con.query(`SELECT sales_representative as sales_person_id FROM tbl_freights WHERE id = ?`, [freight_id], (err, salesPersonResult) => {
+                                                        con.query(`SELECT sales_representative as sales_person_id FROM tbl_freight WHERE id = ?`, [freight_id], (err, salesPersonResult) => {
                                                             if (err) return res.status(500).send({ success: false, message: err.message });
 
                                                             const sales_person_id = salesPersonResult.length ? salesPersonResult[0].sales_person_id : null;
 
                                                             // Step 3: Get sales person contact details
-                                                            con.query(`SELECT full_name, cellphone FROM tbl_users WHERE id = ? AND is_deleted = 0 AND status = 1`, [sales_person_id], (err, salesResult) => {
+                                                            con.query(`SELECT full_name, cellphone, email FROM tbl_users WHERE id = ? AND is_deleted = 0 AND status = 1`, [sales_person_id], (err, salesResult) => {
                                                                 if (err) return res.status(500).send({ success: false, message: err.message });
 
                                                                 const salesPersonPhone = salesResult.length ? salesResult[0].cellphone : null;
+                                                                const salesEmail = salesResult.length ? salesResult[0].email : null;
+
 
                                                                 // Step 4: Fetch Ops team
-                                                                con.query(`SELECT cellphone FROM tbl_users WHERE user_type = 3 AND 
+                                                                con.query(`SELECT email, cellphone FROM tbl_users WHERE user_type = 2 AND 
                                                                     FIND_IN_SET(2, assigned_roles)
                                                                     AND is_deleted = 0 AND status = 1`, (err, opsResults) => {
                                                                     if (err) return res.status(500).send({ success: false, message: err.message });
 
                                                                     const opsPhones = opsResults.map(row => row.cellphone).filter(Boolean);
+                                                                    const opsEmails = opsResults.map(row => row.email).filter(Boolean);
                                                                     const messageText = `*Shipment Status Updated*\n\nThe status of the shipment for client ${fullName} (Order No: OR000${order_id}) has been updated to: ${status}.\n\nPlease check the shipment details.`;
+                                                                    const opsMailContent = `<div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; background-color: #fff; border: 1px solid #ddd;">
+  <h3>Shipment Status Updated</h3>
+  <p>The status of the shipment for client ${fullName} (Order No: OR000${order_id}) has been updated to: <strong>${status}</strong>.</p>
+  <p>Please check the shipment details.</p>
+  <p style="font-size: 14px; color: #888;">
+    Regards,<br><strong>Management System</strong>
+  </p>
+</div>`;
 
                                                                     // Send to sales person
                                                                     if (salesPersonPhone) {
                                                                         sendSms(salesPersonPhone, messageText);
                                                                         sendWhatsApp(salesPersonPhone, messageText);
+                                                                        sendMail(salesEmail, "Order Status Update", opsMailContent);
+
+
                                                                     }
 
                                                                     // Send to Ops team
@@ -3528,7 +3544,9 @@ const UpdateOrderStatus = async (req, res) => {
                                                                         sendSms(phone, messageText);
                                                                         sendWhatsApp(phone, messageText);
                                                                     });
-
+                                                                    opsEmails.forEach(email => {
+                                                                        sendMail(email, "Order Status Update", opsMailContent);
+                                                                    });
                                                                     return res.status(200).send({
                                                                         success: true,
                                                                         message: "Order status updated and notifications sent.",
@@ -5673,14 +5691,14 @@ const DeleteWarehouse = async (req, res) => {
 };
 
 
-const editWarehouseDetails = async (req, res) => {
+/* const editWarehouseDetails = async (req, res) => {
     try {
         const { warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status, warehouse_collect, date_received, package_type, packages, dimension,
             weight, costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch } = req.body;
         // console.log(req.body);
 
         con.query(`update warehouse_assign_order set ware_receipt_no='${ware_receipt_no}', tracking_number='${tracking_number}', warehouse_status='${warehouse_status}', warehouse_collect='${warehouse_collect}', date_received='${date_received}',
-            	total_weight='${weight}', total_dimension='${dimension}',costs_to_collect='${costs_to_collect}',warehouse_cost='${warehouse_cost}',warehouse_dispatch='${warehouse_dispatch}',
+                total_weight='${weight}', total_dimension='${dimension}',costs_to_collect='${costs_to_collect}',warehouse_cost='${warehouse_cost}',warehouse_dispatch='${warehouse_dispatch}',
                 cost_to_dispatch='${cost_to_dispatch}'
             where id='${warehouse_assign_id}'`, (err, data) => {
             if (err) throw err;
@@ -5703,9 +5721,131 @@ const editWarehouseDetails = async (req, res) => {
             message: error.message
         });
     }
-}
+} */
 
-const addWarehouseProduct = async (req, res) => {
+
+const editWarehouseDetails = async (req, res) => {
+    try {
+        const {
+            warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status,
+            warehouse_collect, date_received, package_type, packages, dimension, weight,
+            costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch
+        } = req.body;
+
+        // Step 1: Fetch old date_received
+        con.query(`SELECT date_received, order_id as warehouse_order_id FROM warehouse_assign_order WHERE id = ?`, [warehouse_assign_id], (err, oldResult) => {
+            if (err || oldResult.length === 0) return res.status(400).send({ success: false, message: "Warehouse record not found" });
+
+            const oldDateReceived = oldResult[0].date_received;
+            const warehouse_order_id = oldResult[0].warehouse_order_id;
+
+            // Step 2: Update records
+            con.query(`UPDATE warehouse_assign_order SET 
+                ware_receipt_no = ?, tracking_number = ?, warehouse_status = ?, warehouse_collect = ?,
+                date_received = ?, total_weight = ?, total_dimension = ?, costs_to_collect = ?, 
+                warehouse_cost = ?, warehouse_dispatch = ?, cost_to_dispatch = ?
+                WHERE id = ?`,
+                [
+                    ware_receipt_no, tracking_number, warehouse_status, warehouse_collect,
+                    date_received, weight, dimension, costs_to_collect, warehouse_cost,
+                    warehouse_dispatch, cost_to_dispatch, warehouse_assign_id
+                ],
+                (err) => {
+                    if (err) throw err;
+
+                    // Update tbl_orders
+                    con.query(`UPDATE tbl_orders SET dimensions = ?, weight = ? WHERE id = ?`,
+                        [dimension, weight, order_id]);
+
+                    // Update tbl_freight
+                    con.query(`UPDATE tbl_freight SET no_of_packages = ?, package_type = ? WHERE id = ?`,
+                        [packages, package_type, freight_id]);
+
+                    // === Send notification if date_received changed ===
+                    if (oldDateReceived !== date_received) {
+
+                        // Step 3: Get freight_id using order_id
+                        const orderQuery = `SELECT freight_id FROM tbl_orders WHERE id = ?`;
+                        con.query(orderQuery, [warehouse_order_id], (orderErr, orderResult) => {
+                            if (orderErr || orderResult.length === 0) {
+                                console.log("Could not fetch freight info");
+                                return;
+                            }
+
+                            const fetchedFreightId = orderResult[0].freight_id;
+
+                            // Step 4: Get sales person from tbl_freight
+                            const freightQuery = `SELECT sales_representative AS sales_person FROM tbl_freight WHERE id = ?`;
+                            con.query(freightQuery, [fetchedFreightId], (freightErr, freightResult) => {
+                                if (freightErr || freightResult.length === 0) {
+                                    console.log("Could not fetch sales person");
+                                    return;
+                                }
+
+                                const salesPersonId = freightResult[0].sales_person;
+
+                                // Step 5: Get email of sales person
+                                const userQuery = `SELECT email FROM tbl_users WHERE id = ?`;
+                                con.query(userQuery, [salesPersonId], (userErr, userResult) => {
+                                    const salesPersonEmail = userResult?.[0]?.email || null;
+
+                                    // Step 6: Get Ops Team emails
+                                    const opsQuery = `SELECT email FROM tbl_users WHERE FIND_IN_SET(2, assigned_roles) AND status = 1 AND is_deleted = 0`;
+                                    con.query(opsQuery, async (opsErr, opsResult) => {
+                                        const opsEmails = opsResult.map(row => row.email);
+                                        const allRecipients = [...opsEmails];
+                                        if (salesPersonEmail) allRecipients.push(salesPersonEmail);
+
+                                        const subject = `New Warehouse Receipt`;
+                                        const htmlBody = `
+                                            <div style="font-family: Arial, sans-serif;">
+                                                <h3>New Warehouse Receipt Notification</h3>
+                                                <p><strong>Date Received</strong> has been updated for a warehouse entry:</p>
+                                                <ul>
+                                                    <li><strong>Receipt No:</strong> ${ware_receipt_no}</li>
+                                                    <li><strong>Tracking No:</strong> ${tracking_number}</li>
+                                                    <li><strong>New Date Received:</strong> ${date_received}</li>
+                                                    <li><strong>Packages:</strong> ${packages} (${package_type})</li>
+                                                    <li><strong>Weight:</strong> ${weight} kg</li>
+                                                </ul>
+                                                <p>Please take necessary action.</p>
+                                                <p>Regards,<br>Warehouse System</p>
+                                            </div>
+                                        `;
+
+                                        // Send email to all
+                                        for (const email of allRecipients) {
+                                            if (email) await sendMail(email, subject, htmlBody);
+                                        }
+
+                                        // ✅ Response after notification
+                                        res.status(200).send({
+                                            success: true,
+                                            message: "Warehouse details updated and notifications sent."
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    } else {
+                        res.status(200).send({
+                            success: true,
+                            message: "Warehouse details updated (no notification sent)."
+                        });
+                    }
+                });
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+/* const addWarehouseProduct = async (req, res) => {
     try {
         const {
             user_id,
@@ -5736,7 +5876,12 @@ const addWarehouseProduct = async (req, res) => {
             supplier_Email,
             Supplier_Contact
         } = req.body;
-
+        if (!warehouse_order_id) {
+            return res.status(400).send({
+                success: true,
+                message: "Provide Warehouse Order ID"
+            })
+        }
         // SQL query with all fields
         const query = `
             INSERT INTO warehouse_products 
@@ -5792,8 +5937,162 @@ const addWarehouseProduct = async (req, res) => {
             message: error.message
         });
     }
-}
+} */
 
+const addWarehouseProduct = async (req, res) => {
+    try {
+        const {
+            user_id,
+            added_by,
+            warehouse_order_id,
+            product_description,
+            Hazardous,
+            date_received,
+            package_type,
+            packages,
+            dimension,
+            weight,
+            warehouse_ref,
+            freight,
+            groupage_batch_ref,
+            supplier,
+            warehouse_receipt_number,
+            tracking_number,
+            date_dspatched,
+            supplier_address,
+            warehouse_collect,
+            costs_to_collect,
+            port_of_loading,
+            warehouse_dispatch,
+            warehouse_cost,
+            cost_to_dispatch,
+            waybill_ref,
+            supplier_Email,
+            Supplier_Contact
+        } = req.body;
+
+        if (!warehouse_order_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Provide Warehouse Order ID"
+            });
+        }
+
+        const insertQuery = `
+            INSERT INTO warehouse_products 
+            (user_id, added_by, warehouse_order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref, 
+            freight, groupage_batch_ref, supplier, warehouse_receipt_number, tracking_number, date_dspatched, supplier_address, warehouse_collect, 
+            costs_to_collect, port_of_loading, warehouse_dispatch, warehouse_cost, cost_to_dispatch, waybill_ref, supplier_Email, Supplier_Contact) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        const values = [
+            user_id,
+            added_by,
+            warehouse_order_id,
+            product_description,
+            Hazardous,
+            date_received,
+            package_type,
+            packages,
+            dimension,
+            weight,
+            warehouse_ref,
+            freight,
+            groupage_batch_ref,
+            supplier,
+            warehouse_receipt_number,
+            tracking_number,
+            date_dspatched,
+            supplier_address,
+            warehouse_collect,
+            costs_to_collect,
+            port_of_loading,
+            warehouse_dispatch,
+            warehouse_cost,
+            cost_to_dispatch,
+            waybill_ref,
+            supplier_Email,
+            Supplier_Contact
+        ];
+
+        // Step 1: Insert the product
+        con.query(insertQuery, values, async (err, data) => {
+            if (err) throw err;
+
+            // Step 2: Get freight_id from order
+            const orderQuery = `SELECT freight_id FROM tbl_orders WHERE id = ?`;
+            con.query(orderQuery, [warehouse_order_id], (orderErr, orderResult) => {
+                if (orderErr || orderResult.length === 0) {
+                    console.log("Product added, but could not fetch freight info");
+                    return
+                }
+
+                const freightId = orderResult[0].freight_id;
+
+                // Step 3: Get sales_person_id from tbl_freight
+                const freightQuery = `SELECT sales_representative as sales_person FROM tbl_freight WHERE id = ?`;
+                con.query(freightQuery, [freightId], (freightErr, freightResult) => {
+                    if (freightErr || freightResult.length === 0) {
+                        console.log("Product added, but could not fetch sales person");
+                        return
+                    }
+
+                    const salesPersonId = freightResult[0].sales_person;
+
+                    // Step 4: Get sales person email
+                    const userQuery = `SELECT email FROM tbl_users WHERE id = ?`;
+                    con.query(userQuery, [salesPersonId], (userErr, userResult) => {
+                        const salesPersonEmail = userResult && userResult.length > 0 ? userResult[0].email : null;
+
+                        // Step 5: Get Ops team emails (assumes role_id 2 = Ops)
+                        const opsQuery = `
+                            SELECT email FROM tbl_users 
+                            WHERE FIND_IN_SET(2, assigned_roles) AND status = 1 AND is_deleted = 0
+                        `;
+                        con.query(opsQuery, async (opsErr, opsResult) => {
+                            const opsEmails = opsResult.map(row => row.email);
+                            const allRecipients = [...opsEmails];
+                            if (salesPersonEmail) allRecipients.push(salesPersonEmail);
+
+                            const subject = `New Warehouse Entry Created by Customer`;
+                            const htmlBody = `
+                                <div style="font-family: Arial, sans-serif;">
+                                    <h3>New Warehouse Entry Notification</h3>
+                                    <p>A new product has been added to the warehouse:</p>
+                                    <ul>
+                                        <li><strong>Warehouse Ref:</strong> ${warehouse_ref}</li>
+                                        <li><strong>Product:</strong> ${product_description}</li>
+                                        <li><strong>Packages:</strong> ${packages} (${package_type})</li>
+                                        <li><strong>Weight:</strong> ${weight} kg</li>
+                                        <li><strong>Date Received:</strong> ${date_received}</li>
+                                    </ul>
+                                    <p>Regards,<br> Management System</p>
+                                </div>
+                            `;
+
+                            // Send mail to all recipients
+                            for (const email of allRecipients) {
+                                if (email) await sendMail(email, subject, htmlBody);
+                            }
+
+                            res.status(200).send({
+                                success: true,
+                                message: "Warehouse Product added"
+                            });
+                        });
+                    });
+                });
+            });
+        });
+
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 const GetCountries = async (req, res) => {
     try {
@@ -6261,7 +6560,7 @@ function checkAndNotifyEstimateOverdue() {
         // Now fetch all Estimate team members
         const estimateTeamQuery = `SELECT full_name, cellphone, telephone 
   FROM tbl_users 
-  WHERE user_type = 3 
+  WHERE user_type = 2
     AND FIND_IN_SET(1, assigned_roles) AND cellphone IS NOT NULL AND is_deleted=0 AND status=1`;
 
         con.query(estimateTeamQuery, function (err, teamResults) {
@@ -6356,6 +6655,9 @@ function checkAndNotifyOverdueQuotes() {
             const whatsappMessage = `Hi ${record.sales_person_name},\nQuote has been issued and status not updated.\nPlease follow up with client.\n\nFreight Number: ${record.freight_number}\nClient Name: ${record.client_name}`;
 
             sendMail(salesEmail, subject, emailMessage);
+            if (sales_person_phone && sales_person_phone.trim() !== '') {
+                sendWhatsApp(sales_person_phone, whatsappMessage);
+            }
             sendWhatsApp(sales_person_phone, whatsappMessage);
         });
     });
@@ -6397,8 +6699,8 @@ function checkAndSendUnbookedShipmentAlerts() {
 
         // Fetch team members based on user_type and assigned_roles
         const teamQuery = `
-            SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 3 
-            AND (FIND_IN_SET(2, assigned_roles) OR FIND_IN_SET(6, assigned_roles))
+            SELECT full_name, email, cellphone FROM tbl_users WHERE user_type = 2
+            AND (FIND_IN_SET(2, assigned_roles) OR FIND_IN_SET(2, assigned_roles))
             AND is_deleted = 0 AND status = 1;
 
         `;
@@ -6446,7 +6748,7 @@ function checkAndSendUnbookedShipmentAlerts() {
                     // Send WhatsApp message
                     const phone = member.cellphone;
                     if (phone) {
-                        const whatsappMessage = `⚠️ Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
+                        const whatsappMessage = `Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
                         sendWhatsApp(phone, whatsappMessage);
                     }
 
@@ -6460,11 +6762,296 @@ function checkAndSendUnbookedShipmentAlerts() {
 
 // OPTIONAL: schedule daily at midnight
 cron.schedule('0 0 * * *', () => {
-    console.log('🔍 Running daily unbooked shipment check...');
+    console.log('Running daily unbooked shipment check...');
     checkAndSendUnbookedShipmentAlerts();
 });
 
+function checkAndSendUndownloadedBookingInstructions() {
+    const undownloadedQuery = `
+        SELECT 
+            bi.order_id,
+            f.freight_number,
+            f.sales_representative as sales_person,
+            u.full_name AS sales_name,
+            u.email,
+            u.cellphone,
+            bi.created_at,
+            bi.is_download,
+            o.id as order_id
+        FROM booking_instruction AS bi
+        INNER JOIN tbl_orders AS o ON o.id = bi.order_id
+        INNER JOIN tbl_freight AS f ON f.id = o.freight_id
+        INNER JOIN tbl_users AS u ON u.id = f.sales_representative
+        WHERE bi.is_download = 0
+          AND bi.created_at <= DATE_SUB(NOW(), INTERVAL 5 DAY)
+    `;
 
+    con.query(undownloadedQuery, (err, results) => {
+        if (err) {
+            console.error('Database query error:', err);
+            return;
+        }
+
+        if (results.length === 0) {
+            console.log('No undownloaded booking instructions older than 5 days.');
+            return;
+        }
+
+        results.forEach(record => {
+            const { sales_name, email, cellphone, freight_number, created_at, order_id } = record;
+
+            const mailSubject = 'Booking Instruction Not Shared With Client';
+
+            const emailTemplate = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                    <h2 style="color: #c0392b;">Booking Instruction Alert</h2>
+                    <p style="font-size: 16px;">Hi <strong>${sales_name}</strong>,</p>
+                    <p style="font-size: 16px;">
+                        The booking instruction for <strong>Order Number: OROOO${order_id}</strong> created on <strong>${new Date(created_at).toLocaleDateString()}</strong>
+                        has not been downloaded for over <strong>5 days</strong>.
+                    </p>
+                    <p>Please ensure it is shared with the client as soon as possible.</p>
+                    <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
+                </div>
+            `;
+
+            const whatsappMessage = `*Booking Instruction Not Shared*\n\nThe booking instruction for *Freight Number: ${freight_number}* has not been downloaded for over 5 days since creation.\nPlease ensure it is shared with the client.`;
+
+            // Send email
+            if (email) sendMail(email, mailSubject, emailTemplate);
+
+            // Send WhatsApp
+            if (cellphone) sendWhatsApp(cellphone, whatsappMessage);
+
+            console.log(`Notification sent to ${sales_name} for freight number ${freight_number}`);
+        });
+    });
+}
+
+
+cron.schedule('0 0 * * *', () => {
+    checkAndSendUndownloadedBookingInstructions();
+});
+
+function notifyUpcomingShipmentETA() {
+    try {
+        // 1. Sea Freight (10 days before) and Air Freight (1 day before)
+        const seaQuery = `
+      SELECT id, freight, waybill, ATD
+      FROM tbl_shipments
+      WHERE freight = 'Sea'
+        AND DATE(ATD) = DATE_ADD(CURDATE(), INTERVAL 10 DAY)
+        AND (notification_sent IS NULL OR notification_sent = 'no')
+    `;
+        const airQuery = `
+      SELECT id, freight, waybill, ATD
+      FROM tbl_shipments
+      WHERE freight = 'Air'
+        AND DATE(ATD) = DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+        AND (notification_sent IS NULL OR notification_sent = 'no')
+    `;
+        const todayArrivalQuery = `
+      SELECT id, freight, waybill, ATD
+      FROM tbl_shipments
+      WHERE DATE(ATD) = CURDATE()
+        AND (notified_arrival IS NULL OR notified_arrival = 'no')
+    `;
+
+        con.query(seaQuery, (seaErr, seaResult) => {
+            if (seaErr) return console.error("Sea query error:", seaErr);
+
+            con.query(airQuery, (airErr, airResult) => {
+                if (airErr) return console.error("Air query error:", airErr);
+
+                con.query(todayArrivalQuery, (arriveErr, arrivalResult) => {
+                    if (arriveErr) return console.error("Arrival today query error:", arriveErr);
+
+                    const shipments = [
+                        ...seaResult.map(s => ({ ...s, freight_mode: 'Sea Freight', type: 'reminder' })),
+                        ...airResult.map(s => ({ ...s, freight_mode: 'Air Freight', type: 'reminder' })),
+                        ...arrivalResult.map(s => ({ ...s, freight_mode: s.freight + ' Freight', type: 'arrival' }))
+                    ];
+
+                    if (shipments.length === 0) return;
+
+                    // 2. Fetch Ops & Clearing team members
+                    const teamQuery = `
+            SELECT full_name, email, cellphone 
+            FROM tbl_users 
+            WHERE user_type = 2 
+              AND (FIND_IN_SET(2, assigned_roles) OR FIND_IN_SET(3, assigned_roles))
+              AND is_deleted = 0 AND status = 1
+          `;
+                    con.query(teamQuery, async (teamErr, teamMembers) => {
+                        if (teamErr) return console.error("Team query error:", teamErr);
+                        if (teamMembers.length === 0) return;
+
+                        for (const shipment of shipments) {
+                            const { id, freight, waybill, ATD, freight_mode, type } = shipment;
+                            const etaDate = new Date(ATD).toDateString();
+
+                            let subject = '';
+                            let htmlBody = '';
+                            let plainText = '';
+
+                            if (type === 'reminder') {
+                                const reminderTime = freight_mode === 'Sea Freight'
+                                    ? 'in 10 days (Sea Freight)'
+                                    : 'within 24 hours (Air Freight)';
+
+                                subject = `Shipment "${freight} & ${waybill}" scheduled for arrival`;
+                                htmlBody = `
+                  <div style="font-family: Arial, sans-serif;">
+                    <h3>Upcoming ${freight_mode} Shipment</h3>
+                    <p>Dear Team,</p>
+                    <p>The ${freight_mode.toLowerCase()} shipment <strong>${freight}</strong> 
+                       with Waybill <strong>${waybill}</strong> is scheduled to arrive on 
+                       <strong>${etaDate}</strong>.</p>
+                    <p>This is a reminder as it's arriving ${reminderTime}.</p>
+                    <p>Regards,<br>Management System</p>
+                  </div>
+                `;
+                                plainText = `Reminder: ${freight_mode} shipment "${freight}" (Waybill: ${waybill}) is arriving ${reminderTime} on ${etaDate}.`;
+                            } else if (type === 'arrival') {
+                                subject = `Shipment "${freight} & ${waybill}" has arrived at Port`;
+                                htmlBody = `
+                  <div style="font-family: Arial, sans-serif;">
+                    <h3>Shipment Arrived at Port</h3>
+                    <p>Dear Team,</p>
+                    <p>This is to inform you that the ${freight_mode.toLowerCase()} shipment 
+                    <strong>${freight}</strong> with Waybill <strong>${waybill}</strong> has 
+                    arrived at the port today <strong>${etaDate}</strong>.</p>
+                    <p>Please initiate the required clearance and handling procedures.</p>
+                    <p>Regards,<br>Logistics Notification System</p>
+                  </div>
+                `;
+                                plainText = `ALERT: ${freight_mode} shipment "${freight}" (Waybill: ${waybill}) has arrived at the port today (${etaDate}). Please proceed with clearance.`;
+                            }
+
+                            for (const member of teamMembers) {
+                                const { email, cellphone } = member;
+                                if (email) await sendMail(email, subject, htmlBody);
+                                /* if (cellphone) {
+                                    await sendWhatsApp(cellphone, plainText);
+                                    await sendSMS(cellphone, plainText);
+                                } */
+                            }
+
+                            if (type === 'reminder') {
+                                con.query(
+                                    `UPDATE tbl_shipments SET notification_sent = 'yes' WHERE id = ?`,
+                                    [id],
+                                    (updateErr) => {
+                                        if (updateErr)
+                                            console.error(`Failed to update reminder notification for ID ${id}:`, updateErr);
+                                    }
+                                );
+                            } else if (type === 'arrival') {
+                                con.query(
+                                    `UPDATE tbl_shipments SET notified_arrival = 'yes' WHERE id = ?`,
+                                    [id],
+                                    (updateErr) => {
+                                        if (updateErr)
+                                            console.error(`Failed to update arrival notification for ID ${id}:`, updateErr);
+                                    }
+                                );
+                            }
+
+                        }
+
+                        console.log(`Shipment notifications (reminder/arrival) sent for ${shipments.length} shipments.`);
+                    });
+                });
+            });
+        });
+
+    } catch (err) {
+        console.error("Error in notifyUpcomingShipmentETA:", err);
+    }
+}
+
+// Run daily at 08:00 AM
+cron.schedule('0 8 * * *', () => {
+    notifyUpcomingShipmentETA();
+});
+
+function notifyUnreleasedShipmentsAfterArrival() {
+    try {
+        const unreleasedQuery = `
+      SELECT id, freight, waybill, ATD, status
+      FROM tbl_shipments
+      WHERE DATE(ATD) = DATE_SUB(CURDATE(), INTERVAL 3 DAY)
+        AND status != 'Customs Released'
+        AND (notified_unreleased IS NULL OR notified_unreleased = 'no')
+    `;
+
+        con.query(unreleasedQuery, (err, shipments) => {
+            if (err) return console.error("Unreleased query error:", err);
+            if (shipments.length === 0) return;
+
+            const teamQuery = `
+        SELECT full_name, email, cellphone 
+        FROM tbl_users 
+        WHERE user_type = 2
+          AND (FIND_IN_SET(2, assigned_roles) OR FIND_IN_SET(3, assigned_roles))
+          AND is_deleted = 0 AND status = 1
+      `;
+
+            con.query(teamQuery, async (teamErr, teamMembers) => {
+                if (teamErr) return console.error("Team query error:", teamErr);
+                if (teamMembers.length === 0) return;
+
+                for (const shipment of shipments) {
+                    const { id, freight, waybill, ATD, status } = shipment;
+                    const arrivalDate = new Date(ATD).toDateString();
+
+                    const subject = `ALERT: Shipment "${freight} & ${waybill}" still not released after 3 days`;
+                    const htmlBody = `
+            <div style="font-family: Arial, sans-serif;">
+              <h3>Shipment Delayed Release</h3>
+              <p>Dear Team,</p>
+              <p>The ${freight} shipment with Waybill <strong>${waybill}</strong> arrived at the port on 
+              <strong>${arrivalDate}</strong>, but it is still not marked as <strong>Customs Released</strong>.</p>
+              <p>Current status: <strong>${status}</strong></p>
+              <p>Please investigate and take necessary actions immediately.</p>
+              <p>Regards,<br>Logistics Notification System</p>
+            </div>
+          `;
+                    const plainText = `ALERT: ${freight} shipment "${waybill}" arrived on ${arrivalDate} but is still not released. Status: ${status}.`;
+
+                    for (const member of teamMembers) {
+                        const { email, cellphone } = member;
+                        if (email) await sendMail(email, subject, htmlBody);
+                        /* if (cellphone) {
+                            await sendWhatsApp(cellphone, plainText);
+                            await sendSMS(cellphone, plainText);
+                        } */
+                    }
+
+                    // Mark as notified
+                    con.query(
+                        `UPDATE tbl_shipments SET notified_unreleased = 'yes' WHERE id = ?`,
+                        [id],
+                        (updateErr) => {
+                            if (updateErr)
+                                console.error(`Failed to update notified_unreleased for shipment ID ${id}:`, updateErr);
+                        }
+                    );
+                }
+
+                console.log(`Unreleased shipment alerts sent for ${shipments.length} shipments.`);
+            });
+        });
+    } catch (err) {
+        console.error("Error in notifyUnreleasedShipmentsAfterArrival:", err);
+    }
+}
+
+// Run every day at 08:00 AM server time
+cron.schedule('0 8 * * *', () => {
+    console.log('🔔 Running cron job for unreleased shipments...');
+    notifyUnreleasedShipmentsAfterArrival();
+});
 
 module.exports = {
     AdminLogin, ChangePassword, PrivacyPolicy, GetPrivacy, TermCondition, GetTerms, Addfreight,
