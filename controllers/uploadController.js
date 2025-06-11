@@ -104,11 +104,11 @@ Please forward this estimate to the client.
 
                 sendMail(Email, mailSubject, content);
                 const Subfolder = "Order Quotations"
-                const folderId = await findOrCreateFolder(freightNumber, Subfolder);
+                /* const folderId = await findOrCreateFolder(freightNumber, Subfolder);
                 console.log(`📂 Folder ID: ${folderId}`);
                 console.log(file);
 
-                const { fileId, webViewLink } = await uploadFile(folderId.subfolderId, file);
+                const { fileId, webViewLink } = await uploadFile(folderId.subfolderId, file); */
             })
             return res.status(200).json({
                 success: true,
@@ -133,12 +133,12 @@ Please forward this estimate to the client.
                 // console.log(file);
                 const Subfolder = "Clearance Quotations"
 
-                const clearanceNumber = result[0].clearance_number;
+               /*  const clearanceNumber = result[0].clearance_number;
                 const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
                 console.log(`Folder ID: ${folderId}`);
 
 
-                const { fileId, webViewLink } = await uploadFile(folderId, file);
+                const { fileId, webViewLink } = await uploadFile(folderId, file); */
             })
             return res.status(200).json({
                 success: true,
@@ -188,12 +188,12 @@ const AttachedCustomOrderDoc = async (req, res) => {
 
             // console.log(file);
             const Subfolder = "Clearance Doc"
-            const clearanceNumber = result[0].clearance_number;
+            /* const clearanceNumber = result[0].clearance_number;
             const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
             console.log(`Folder ID: ${folderId}`);
 
 
-            const { fileId, webViewLink } = await uploadFile(folderId, file);
+            const { fileId, webViewLink } = await uploadFile(folderId, file); */
         })
         return res.status(200).json({
             success: true,

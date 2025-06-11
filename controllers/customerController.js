@@ -525,6 +525,178 @@ const GetClientFreights = async (req, res) => {
 };
 
 
+// const AddClearing = async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//         return res.status(400).json({
+//             success: false,
+//             errors: errors.array()
+//         });
+//     }
+
+//     try {
+//         const {
+//             trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit, clearing_agent, clearing_status, clearing_result,
+//             document_req, comment_on_docs, sales_representative
+//         } = req.body;
+//         console.log(req.body);
+
+//         generateClearanceNumber((err, clearanceNumber) => {
+//             if (err) {
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: "Internal Server Error"
+//                 });
+//             }
+
+//             const insertQuery = `INSERT INTO tbl_clearance (trans_reference, client, customer_ref, goods_desc, destination, loading_country, discharge_country, clearing_agent, clearing_status, clearing_result, 
+//                 document_req, comment_on_docs, added_by, clearance_number, sales_representative) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+//             const insertParams = [
+//                 trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit, clearing_agent, clearing_status, clearing_result,
+//                 document_req, comment_on_docs, 1, clearanceNumber, sales_representative
+//             ];
+
+//             con.query(insertQuery, insertParams, (err, data) => {
+//                 if (err) {
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: "Internal Server Error",
+//                         error: err.message
+//                     });
+//                 }
+// /* const documentTypes = [
+//                         'packing_list',
+//                         'licenses_permit',
+//                         'product_literature',
+//                         'other_docs'
+//                     ]; */
+//                 if (data.affectedRows > 0) {
+//                     if (req.files && req.files.document) {
+//                         const updateQuery = `UPDATE tbl_clearance SET document_upload = ? WHERE id = ?`;
+//                         const updateParams = [req.files.document[0].filename, data.insertId];
+
+//                         con.query(updateQuery, updateParams, (updateErr, updateData) => {
+//                             if (updateErr) {
+//                                 return res.status(500).json({
+//                                     success: false,
+//                                     message: "Failed to update document"
+//                                 });
+//                             }
+//                             const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+
+//                             con.query(selectQuery, [data.insertId], async (err, result) => {
+//                                 if (err) {
+//                                     console.error("Error fetching clearance number:", err);
+//                                     return;
+//                                 }
+//                                 let file = req.files.document[0];
+//                                 // console.log(file);
+
+//                                 const clearanceNumber = result[0].clearance_number;
+//                                 const folderId = await findOrCreateFolder(clearanceNumber);
+//                                 console.log(`📂 Folder ID: ${folderId}`);
+
+
+//                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
+//                             })
+//                             res.status(200).send({
+//                                 success: true,
+//                                 message: "Clearance added and document updated successfully"
+//                             });
+//                         });
+//                     } else if (req.files && req.files.packing_list) {
+//                         const updateQuery = `UPDATE tbl_clearance SET document_upload = ? WHERE id = ?`;
+//                         const updateParams = [req.files.document[0].filename, data.insertId];
+
+//                         con.query(updateQuery, updateParams, (updateErr, updateData) => {
+//                             if (updateErr) {
+//                                 return res.status(500).json({
+//                                     success: false,
+//                                     message: "Failed to update document"
+//                                 });
+//                             }
+//                             const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+
+//                             con.query(selectQuery, [data.insertId], async (err, result) => {
+//                                 if (err) {
+//                                     console.error("Error fetching clearance number:", err);
+//                                     return;
+//                                 }
+//                                 let file = req.files.document[0];
+//                                 // console.log(file);
+
+//                                 const clearanceNumber = result[0].clearance_number;
+//                                 const folderId = await findOrCreateFolder(clearanceNumber);
+//                                 console.log(`📂 Folder ID: ${folderId}`);
+
+
+//                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
+//                             })
+//                             res.status(200).send({
+//                                 success: true,
+//                                 message: "Clearance added and document updated successfully"
+//                             });
+//                         });
+//                     } else {
+//                         res.status(200).send({
+//                             success: true,
+//                             message: "Clearance added successfully"
+//                         });
+//                     }
+//                 } else {
+//                     res.status(400).send({
+//                         success: false,
+//                         message: "Failed to add Clearance"
+//                     });
+//                 }
+//             });
+//         });
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+// const generateClearanceNumber = (callback) => {
+//     try {
+//         // Get the last inserted clearance number
+//         con.query(
+//             'SELECT clearance_number FROM tbl_clearance ORDER BY id DESC LIMIT 1',
+//             (err, rows) => {
+//                 if (err) {
+//                     callback(err);
+//                     return;
+//                 }
+
+//                 let sequenceNumber = 1;
+//                 const currentDate = new Date();
+//                 const year = currentDate.getFullYear();
+//                 const month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); // Months are zero-indexed
+
+//                 if (rows.length > 0 && rows[0].clearance_number) {
+//                     const lastClearanceNumber = rows[0].clearance_number;
+//                     const lastYearMonth = lastClearanceNumber.slice(2, 8); // Extract the year and month (e.g., '202406')
+//                     const currentYearMonth = `${year}${month}`;
+
+//                     if (lastYearMonth === currentYearMonth) {
+//                         const lastSequencePart = parseInt(lastClearanceNumber.slice(-3)); // Extract last 3 digits
+//                         sequenceNumber = lastSequencePart + 1;
+//                     }
+//                 }
+
+//                 // Format the clearance number as C-YYYYMMNNN
+//                 const clearanceNumber = `C-${year}${month}${sequenceNumber.toString().padStart(3, '0')}`;
+//                 callback(null, clearanceNumber);
+//             }
+//         );
+//     } catch (error) {
+//         // console.error('Error generating clearance number:', error);
+//         callback(error);
+//     }
+// };
+
+
 const AddClearing = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -536,12 +708,12 @@ const AddClearing = async (req, res) => {
 
     try {
         const {
-            trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit, clearing_agent, clearing_status, clearing_result,
+            trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit,
+            clearing_agent, clearing_status, clearing_result,
             document_req, comment_on_docs, sales_representative
         } = req.body;
-        console.log(req.body);
 
-        generateClearanceNumber((err, clearanceNumber) => {
+        generateClearanceNumber(async (err, clearanceNumber) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -549,77 +721,125 @@ const AddClearing = async (req, res) => {
                 });
             }
 
-            const insertQuery = `INSERT INTO tbl_clearance (trans_reference, client, customer_ref, goods_desc, destination, loading_country, discharge_country, clearing_agent, clearing_status, clearing_result, 
-                document_req, comment_on_docs, added_by, clearance_number, sales_representative) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            const insertQuery = `
+                INSERT INTO tbl_clearance 
+                (trans_reference, client, customer_ref, goods_desc, destination, loading_country, discharge_country,
+                clearing_agent, clearing_status, clearing_result, document_req, comment_on_docs, added_by, 
+                clearance_number, sales_representative)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
             const insertParams = [
-                trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit, clearing_agent, clearing_status, clearing_result,
+                trans_reference, client, customer_ref, goods_desc, destination, port_of_entry, port_of_exit,
+                clearing_agent, clearing_status, clearing_result,
                 document_req, comment_on_docs, 1, clearanceNumber, sales_representative
             ];
 
-            con.query(insertQuery, insertParams, (err, data) => {
+            con.query(insertQuery, insertParams, async (err, result) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
-                        message: "Internal Server Error",
+                        message: "Error inserting clearance",
                         error: err.message
                     });
                 }
 
-                if (data.affectedRows > 0) {
-                    if (req.files && req.files.document) {
-                        const updateQuery = `UPDATE tbl_clearance SET document_upload = ? WHERE id = ?`;
-                        const updateParams = [req.files.document[0].filename, data.insertId];
+                const clearanceId = result.insertId;
 
-                        con.query(updateQuery, updateParams, (updateErr, updateData) => {
-                            if (updateErr) {
-                                return res.status(500).json({
-                                    success: false,
-                                    message: "Failed to update document"
-                                });
-                            }
-                            const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+                // Process uploaded files
+                await handleFileUploads(clearanceId, clearanceNumber, req.files);
 
-                            con.query(selectQuery, [data.insertId], async (err, result) => {
-                                if (err) {
-                                    console.error("Error fetching clearance number:", err);
-                                    return;
-                                }
-                                let file = req.files.document[0];
-                                // console.log(file);
-
-                                const clearanceNumber = result[0].clearance_number;
-                                const folderId = await findOrCreateFolder(clearanceNumber);
-                                console.log(`📂 Folder ID: ${folderId}`);
-
-
-                                const { fileId, webViewLink } = await uploadFile(folderId, file);
-                            })
-                            res.status(200).send({
-                                success: true,
-                                message: "Clearance added and document updated successfully"
-                            });
-                        });
-                    } else {
-                        res.status(200).send({
-                            success: true,
-                            message: "Clearance added successfully"
-                        });
-                    }
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "Failed to add Clearance"
-                    });
-                }
+                return res.status(200).json({
+                    success: true,
+                    message: "Clearance added and documents uploaded successfully"
+                });
             });
         });
     } catch (error) {
-        res.status(500).send({
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: "Unexpected error",
+            error: error.message
         });
     }
 };
+
+const handleFileUploads = async (clearanceId, clearanceNumber, files) => {
+    try {
+        if (files) {
+            const fileKeys = Object.keys(files);
+            for (const key of fileKeys) {
+                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+                const documentName = getDocumentName(key);
+
+                await processFiles(fileArray, documentName, clearanceId, clearanceNumber);
+            }
+        }
+    } catch (error) {
+        console.error("❌ Error handling file uploads:", error);
+    }
+};
+
+const processFiles = async (fileArray, documentName, clearanceId, clearanceNumber) => {
+    for (const file of fileArray) {
+        const insertDocQuery = `
+            INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+            VALUES (?, ?, ?)
+        `;
+
+        await new Promise((resolve, reject) => {
+            con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+                if (err) {
+                    console.error(`❌ Error inserting ${documentName}:`, err);
+                    return reject(err);
+                }
+                resolve();
+            });
+        });
+
+        console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
+
+        // Optional: Upload to Google Drive
+        /*
+        const folderId = await findOrCreateFolder(clearanceNumber);
+        const { fileId, webViewLink } = await uploadFile(folderId, file);
+
+        const insertFileQuery = `
+            INSERT INTO transaction_files 
+            (clearance_number, file_name, drive_file_id, file_link) 
+            VALUES (?, ?, ?, ?)
+        `;
+
+        await new Promise((resolve, reject) => {
+            con.query(insertFileQuery, [clearanceNumber, file.filename, fileId, webViewLink], (err) => {
+                if (err) {
+                    console.error("❌ Error inserting file details:", err);
+                    return reject(err);
+                }
+                resolve();
+            });
+        });
+        */
+    }
+};
+
+const getDocumentName = (fieldName) => {
+    switch (fieldName) {
+        case 'document':
+            return "General Document";
+        case 'packing_list':
+            return "Packing List";
+        case 'licenses':
+            return "Licenses/Permit";
+        case 'product_literature':
+            return "Product Literature";
+        case 'other_documents':
+            return "Other Documents";
+        default:
+            return "Unknown Document";
+    }
+};
+
+
 const generateClearanceNumber = (callback) => {
     try {
         // Get the last inserted clearance number
@@ -657,13 +877,170 @@ const generateClearanceNumber = (callback) => {
         callback(error);
     }
 };
+// const AddClearingByCustomer = async (req, res) => {
+//     try {
+//         const { user_id, client, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, comment_on_docs, added_by, document_name } = req.body;
+//         // console.log(req.body);
+//         if (!user_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Please provide user id"
+//             });
+//         }
+
+//         // Generate the clearance number
+//         generateClearanceNumber((err, clearanceNumber) => {
+//             if (err) {
+//                 // console.error('Error generating clearance number:', err);
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: "Internal Server Error"
+//                 });
+//             }
+//             const addedByValue = added_by || 2;
+//             // Prepare insert query based on the presence of document files
+//             let insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?)`;
+//             let insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, addedByValue, clearanceNumber];
+
+//             if (req.files && req.files.document) {
+//                 insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, document_upload, document_name, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?)`;
+//                 insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, req.files.document[0].filename, document_name, comment_on_docs, addedByValue, clearanceNumber];
+
+//             }
+
+//             // Execute the insertion query
+//             con.query(insertQuery, insertParams, (err, data) => {
+//                 if (err) {
+//                     // console.error('Error inserting clearance data:', err);
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: "Internal Server Error"
+//                     });
+//                 }
+//                 const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+
+//                 con.query(selectQuery, [data.insertId], async (err, result) => {
+//                     if (err) {
+//                         console.error("Error fetching clearance number:", err);
+//                         return;
+//                     }
+//                     let file = req.files.document[0];
+//                     // console.log(file);
+
+//                     const clearanceNumber = result[0].clearance_number;
+//                     /* const folderId = await findOrCreateFolder(clearanceNumber);
+//                     console.log(`📂 Folder ID: ${folderId}`);
 
 
+//                     const { fileId, webViewLink } = await uploadFile(folderId, file); */
+//                 })
+//                 if (data.affectedRows > 0) {
+//                     const InsertQuery = `insert into tbl_notifications (title, description, send_to) values (?,?,?)`;
+//                     con.query(InsertQuery, ["New Clearance Alert!", `A Client Has Added a New Clearance. Admins, Please Review and Process Accordingly`, 5], (err, notificationData) => {
+//                         if (err) {
+//                             // console.error('Error inserting notification:', err);
+//                             return res.status(500).json({
+//                                 success: false,
+//                                 message: "Internal Server Error"
+//                             });
+//                         }
+
+//                         con.query(`select * from tbl_users where user_type='${1}'`, (err, id) => {
+//                             if (err) {
+//                                 // console.error('Error fetching admin user:', err);
+//                                 return res.status(500).json({
+//                                     success: false,
+//                                     message: "Internal Server Error"
+//                                 });
+//                             }
+//                             const selectQuery1 = `SELECT * FROM tbl_clearance WHERE id = ?`;
+
+//                             con.query(selectQuery1, [data.insertId], async (err, result1) => {
+//                                 if (err) {
+//                                     console.error("Error fetching clearance number:", err);
+//                                     return;
+//                                 }
+//                                 con.query(`select * from tbl_users where id='${result1[0].user_id}'`, (err, userrData) => {
+//                                     if (err) {
+//                                         // console.error('Error fetching admin user:', err);
+//                                         return res.status(500).json({
+//                                             success: false,
+//                                             message: "Internal Server Error"
+//                                         });
+//                                     }
+//                                     const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
+//                                     con.query(insertNotificationSql, [id[0].id, notificationData.insertId], (err, result) => {
+//                                         if (err) {
+//                                             // console.error('Error inserting notification details:', err);
+//                                             return res.status(500).json({
+//                                                 success: false,
+//                                                 message: "Internal Server Error"
+//                                             });
+//                                         }
+//                                     });
+//                                     Email = SMTP_MAIL;
+//                                     mailSubject = `New Clearance Registered by ${id[0].full_name}`;
+//                                     content = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+// <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Clearance Registered</h2>
+
+// <p style="font-size: 16px; color: #333;">
+// <strong>Client Name:</strong> ${userrData[0].full_name}<br>
+// <strong>Client Email:</strong> ${userrData[0].email}<br>
+// <strong>Freight Number:</strong> ${result1[0].clearance_number}<br>
+// <strong>Goods Description:</strong> ${result1[0].goods_desc}<br>
+// </p>
+
+// <p style="font-size: 16px; color: #333;">
+// The client has successfully registered a new clearance. Please review the clearance details in the system.
+// </p>
+
+// <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+// <p style="font-size: 14px; color: #777;">
+// Regards,<br>
+// <strong>Management System</strong>
+// </p>
+// </div>`
+//                                     //content = 'Hi ' + data[0].first_name + ', <p> Please click the below button to reset your password. </p> <p> <span style="background: #6495ED; padding: 5px;"> <a style="color: white; text-decoration: none;  font-weight: 600;" href="http://localhost:3001/reset-password?token=' + randomToken + '">Click Here </a> </span> </p>';
+//                                     sendMail(Email, mailSubject, content);
+//                                 });
+//                             })
+//                         })
+//                     });
+
+//                     res.status(200).send({
+//                         success: true,
+//                         message: "Clearance added successfully",
+//                         data: data.insertId
+//                     });
+//                 } else {
+//                     res.status(400).send({
+//                         success: false,
+//                         message: "Failed to add Clearance"
+//                     });
+//                 }
+//             });
+//         });
+
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+// Utility function to generate clearance number
 
 const AddClearingByCustomer = async (req, res) => {
     try {
-        const { user_id, client, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, comment_on_docs, added_by, document_name } = req.body;
-        // console.log(req.body);
+        const {
+            user_id, client, freight, freight_option, is_Import_Export, is_cong_shipp,
+            customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension,
+            total_box, total_weight, destination, loading_country, discharge_country,
+            port_of_loading, port_of_discharge, comment_on_docs, added_by
+        } = req.body;
+
         if (!user_id) {
             return res.status(400).send({
                 success: false,
@@ -671,140 +1048,84 @@ const AddClearingByCustomer = async (req, res) => {
             });
         }
 
-        // Generate the clearance number
         generateClearanceNumber((err, clearanceNumber) => {
             if (err) {
-                // console.error('Error generating clearance number:', err);
-                return res.status(500).json({
-                    success: false,
-                    message: "Internal Server Error"
-                });
+                return res.status(500).json({ success: false, message: "Internal Server Error" });
             }
+
             const addedByValue = added_by || 2;
-            // Prepare insert query based on the presence of document files
-            let insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?)`;
-            let insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, addedByValue, clearanceNumber];
+            const insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            const insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, addedByValue, clearanceNumber];
 
-            if (req.files && req.files.document) {
-                insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, document_upload, document_name, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?)`;
-                insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, req.files.document[0].filename, document_name, comment_on_docs, addedByValue, clearanceNumber];
-
-            }
-
-            // Execute the insertion query
             con.query(insertQuery, insertParams, (err, data) => {
-                if (err) {
-                    // console.error('Error inserting clearance data:', err);
-                    return res.status(500).json({
-                        success: false,
-                        message: "Internal Server Error"
-                    });
-                }
+                if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
+
+                const clearanceId = data.insertId;
+
+                // ✅ Process and insert uploaded documents
+                handleFile_Uploads(clearanceId, req.files);
+
                 const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+                con.query(selectQuery, [clearanceId], async (err, result) => {
+                    if (err) return console.error("Error fetching clearance number:", err);
 
-                con.query(selectQuery, [data.insertId], async (err, result) => {
-                    if (err) {
-                        console.error("Error fetching clearance number:", err);
-                        return;
-                    }
-                    let file = req.files.document[0];
-                    // console.log(file);
+                    if (data.affectedRows > 0) {
+                        const InsertQuery = `INSERT INTO tbl_notifications (title, description, send_to) VALUES (?,?,?)`;
+                        con.query(InsertQuery, ["New Clearance Alert!", `A Client Has Added a New Clearance. Admins, Please Review and Process Accordingly`, 5], (err, notificationData) => {
+                            if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
 
-                    const clearanceNumber = result[0].clearance_number;
-                    /* const folderId = await findOrCreateFolder(clearanceNumber);
-                    console.log(`📂 Folder ID: ${folderId}`);
+                            con.query(`SELECT * FROM tbl_users WHERE user_type='${1}'`, (err, id) => {
+                                if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
 
+                                const selectQuery1 = `SELECT * FROM tbl_clearance WHERE id = ?`;
+                                con.query(selectQuery1, [clearanceId], async (err, result1) => {
+                                    if (err) return console.error("Error fetching clearance:", err);
 
-                    const { fileId, webViewLink } = await uploadFile(folderId, file); */
-                })
-                if (data.affectedRows > 0) {
-                    const InsertQuery = `insert into tbl_notifications (title, description, send_to) values (?,?,?)`;
-                    con.query(InsertQuery, ["New Clearance Alert!", `A Client Has Added a New Clearance. Admins, Please Review and Process Accordingly`, 5], (err, notificationData) => {
-                        if (err) {
-                            // console.error('Error inserting notification:', err);
-                            return res.status(500).json({
-                                success: false,
-                                message: "Internal Server Error"
-                            });
-                        }
+                                    con.query(`SELECT * FROM tbl_users WHERE id='${result1[0].user_id}'`, (err, userrData) => {
+                                        if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
 
-                        con.query(`select * from tbl_users where user_type='${1}'`, (err, id) => {
-                            if (err) {
-                                // console.error('Error fetching admin user:', err);
-                                return res.status(500).json({
-                                    success: false,
-                                    message: "Internal Server Error"
-                                });
-                            }
-                            const selectQuery1 = `SELECT * FROM tbl_clearance WHERE id = ?`;
-
-                            con.query(selectQuery1, [data.insertId], async (err, result1) => {
-                                if (err) {
-                                    console.error("Error fetching clearance number:", err);
-                                    return;
-                                }
-                                con.query(`select * from tbl_users where id='${result1[0].user_id}'`, (err, userrData) => {
-                                    if (err) {
-                                        // console.error('Error fetching admin user:', err);
-                                        return res.status(500).json({
-                                            success: false,
-                                            message: "Internal Server Error"
+                                        const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
+                                        con.query(insertNotificationSql, [id[0].id, notificationData.insertId], (err) => {
+                                            if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
                                         });
-                                    }
-                                    const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
-                                    con.query(insertNotificationSql, [id[0].id, notificationData.insertId], (err, result) => {
-                                        if (err) {
-                                            // console.error('Error inserting notification details:', err);
-                                            return res.status(500).json({
-                                                success: false,
-                                                message: "Internal Server Error"
-                                            });
-                                        }
+
+                                        const Email = SMTP_MAIL;
+                                        const mailSubject = `New Clearance Registered by ${id[0].full_name}`;
+                                        const content = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Clearance Registered</h2>
+    <p style="font-size: 16px; color: #333;">
+        <strong>Client Name:</strong> ${userrData[0].full_name}<br>
+        <strong>Client Email:</strong> ${userrData[0].email}<br>
+        <strong>Freight Number:</strong> ${result1[0].clearance_number}<br>
+        <strong>Goods Description:</strong> ${result1[0].goods_desc}<br>
+    </p>
+    <p style="font-size: 16px; color: #333;">
+        The client has successfully registered a new clearance. Please review the clearance details in the system.
+    </p>
+    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+    <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
+</div>`;
+                                        sendMail(Email, mailSubject, content);
                                     });
-                                    Email = SMTP_MAIL;
-                                    mailSubject = `New Clearance Registered by ${id[0].full_name}`;
-                                    content = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-<h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Clearance Registered</h2>
-
-<p style="font-size: 16px; color: #333;">
-<strong>Client Name:</strong> ${userrData[0].full_name}<br>
-<strong>Client Email:</strong> ${userrData[0].email}<br>
-<strong>Freight Number:</strong> ${result1[0].clearance_number}<br>
-<strong>Goods Description:</strong> ${result1[0].goods_desc}<br>
-</p>
-
-<p style="font-size: 16px; color: #333;">
-The client has successfully registered a new clearance. Please review the clearance details in the system.
-</p>
-
-<hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-
-<p style="font-size: 14px; color: #777;">
-Regards,<br>
-<strong>Management System</strong>
-</p>
-</div>`
-                                    //content = 'Hi ' + data[0].first_name + ', <p> Please click the below button to reset your password. </p> <p> <span style="background: #6495ED; padding: 5px;"> <a style="color: white; text-decoration: none;  font-weight: 600;" href="http://localhost:3001/reset-password?token=' + randomToken + '">Click Here </a> </span> </p>';
-                                    sendMail(Email, mailSubject, content);
                                 });
-                            })
-                        })
-                    });
+                            });
+                        });
 
-                    res.status(200).send({
-                        success: true,
-                        message: "Clearance added successfully",
-                        data: data.insertId
-                    });
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "Failed to add Clearance"
-                    });
-                }
+                        res.status(200).send({
+                            success: true,
+                            message: "Clearance added successfully",
+                            data: clearanceId
+                        });
+                    } else {
+                        res.status(400).send({
+                            success: false,
+                            message: "Failed to add Clearance"
+                        });
+                    }
+                });
             });
         });
-
     } catch (error) {
         res.status(500).send({
             success: false,
@@ -813,8 +1134,45 @@ Regards,<br>
     }
 };
 
-// Utility function to generate clearance number
 
+const handleFile_Uploads = async (clearanceId, files) => {
+    try {
+        if (files) {
+            const fileKeys = Object.keys(files);
+            for (const key of fileKeys) {
+                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+                const documentName = getDocumentNames(key);
+
+                for (const file of fileArray) {
+                    const insertDocQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) VALUES (?, ?, ?)`;
+                    await new Promise((resolve, reject) => {
+                        con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+                            if (err) {
+                                console.error(`❌ Error inserting ${documentName}:`, err);
+                                return reject(err);
+                            }
+                            console.log(`✅ Uploaded: ${documentName} - ${file.originalname}`);
+                            resolve();
+                        });
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error("❌ Error processing documents:", error);
+    }
+};
+
+const getDocumentNames = (fieldName) => {
+    switch (fieldName) {
+        case 'document': return "General Document";
+        case 'packing_list': return "Packing List";
+        case 'licenses': return "Licenses";
+        case 'product_literature': return "Product Literature";
+        case 'other_documents': return "Other Documents";
+        default: return "Unknown Document";
+    }
+};
 
 const GetClearingClient = async (req, res) => {
     try {
@@ -879,6 +1237,106 @@ const GetClearingClient = async (req, res) => {
     }
 }
 
+// const EditClearing = async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//         return res.status(400).json({
+//             success: false,
+//             errors: errors.array()
+//         });
+//     }
+
+//     try {
+//         // Extract all fields from the request body for the update
+//         const { clearing_id, client, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension,
+//             total_box, total_weight, destination, loading_country, discharge_country,
+//             port_of_loading, port_of_discharge, comment_on_docs, document_name, sales_representative } = req.body;
+//         console.log(req.body);
+//         // console.log(req.files);
+
+//         // Check if a document file is provided
+//         if (req.files && req.files.document) {
+//             const UpdateQueryWithDoc = `
+//                 UPDATE tbl_clearance 
+//                 SET freight=?, user_id=?, freight_option=?, is_Import_Export=?, is_cong_shipp=?, customer_ref=?, goods_desc=?, nature_of_goods=?, 
+//                     packing_type=?, total_dimension=?, total_box=?, total_weight=?, destination=?, loading_country=?, discharge_country=?, 
+//                     port_of_loading=?, port_of_discharge=?, document_upload=?, document_name=?, comment_on_docs=?, sales_representative=?
+//                 WHERE id=?`;
+
+//             // Execute update query with document upload
+//             await con.query(UpdateQueryWithDoc, [
+//                 freight, client, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods,
+//                 packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country,
+//                 port_of_loading, port_of_discharge, req.files.document[0].filename, document_name, comment_on_docs, sales_representative, clearing_id
+//             ], (err, data) => {
+//                 if (err) throw err;
+//                 if (data.affectedRows > 0) {
+
+//                     const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+
+//                     con.query(selectQuery, [clearing_id], async (err, result) => {
+//                         if (err) {
+//                             console.error("Error fetching clearance number:", err);
+//                             return;
+//                         }
+//                         let file = req.files.document[0];
+//                         // console.log(file);
+
+//                         const clearanceNumber = result[0].clearance_number;
+//                         /*  const folderId = await findOrCreateFolder(clearanceNumber);
+//                          console.log(`📂 Folder ID: ${folderId}`);
+
+
+//                          const { fileId, webViewLink } = await uploadFile(folderId, file); */
+//                     })
+//                     res.status(200).send({
+//                         success: true,
+//                         message: "Clearance updated successfully"
+//                     });
+//                 } else {
+//                     res.status(400).send({
+//                         success: false,
+//                         message: "Failed to update clearance"
+//                     });
+//                 }
+//             });
+//         } else {
+//             // Update query when there is no document file to upload
+//             const UpdateQueryWithoutDoc = `
+//                 UPDATE tbl_clearance 
+//                 SET  freight=?, user_id=?, freight_option=?, is_Import_Export=?, is_cong_shipp=?, customer_ref=?, goods_desc=?, nature_of_goods=?, 
+//                     packing_type=?, total_dimension=?, total_box=?, total_weight=?, destination=?, loading_country=?, discharge_country=?, 
+//                     port_of_loading=?, port_of_discharge=?, comment_on_docs=?, sales_representative=?
+//                 WHERE id=?`;
+
+//             // Execute update query without document upload
+//             await con.query(UpdateQueryWithoutDoc, [
+//                 freight, client, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods,
+//                 packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country,
+//                 port_of_loading, port_of_discharge, comment_on_docs, sales_representative, clearing_id
+//             ], (err, data) => {
+//                 if (err) throw err;
+//                 if (data.affectedRows > 0) {
+//                     res.status(200).send({
+//                         success: true,
+//                         message: "Clearance updated successfully"
+//                     });
+//                 } else {
+//                     res.status(400).send({
+//                         success: false,
+//                         message: "Failed to update clearance"
+//                     });
+//                 }
+//             });
+//         }
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
 const EditClearing = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -889,93 +1347,119 @@ const EditClearing = async (req, res) => {
     }
 
     try {
-        // Extract all fields from the request body for the update
-        const { clearing_id, client, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension,
+        const {
+            clearing_id, client, freight, freight_option, is_Import_Export, is_cong_shipp,
+            customer_ref, goods_desc, nature_of_goods, packing_type, total_dimension,
             total_box, total_weight, destination, loading_country, discharge_country,
-            port_of_loading, port_of_discharge, comment_on_docs, document_name, sales_representative } = req.body;
-        console.log(req.body);
-        // console.log(req.files);
+            port_of_loading, port_of_discharge, comment_on_docs, sales_representative
+        } = req.body;
 
-        // Check if a document file is provided
-        if (req.files && req.files.document) {
-            const UpdateQueryWithDoc = `
-                UPDATE tbl_clearance 
-                SET freight=?, freight_option=?, is_Import_Export=?, is_cong_shipp=?, customer_ref=?, goods_desc=?, nature_of_goods=?, 
-                    packing_type=?, total_dimension=?, total_box=?, total_weight=?, destination=?, loading_country=?, discharge_country=?, 
-                    port_of_loading=?, port_of_discharge=?, document_upload=?, document_name=?, comment_on_docs=?, sales_representative=?
-                WHERE id=?`;
+        const updateQuery = `
+            UPDATE tbl_clearance 
+            SET freight=?, user_id=?, freight_option=?, is_Import_Export=?, is_cong_shipp=?, customer_ref=?, goods_desc=?, 
+                nature_of_goods=?, packing_type=?, total_dimension=?, total_box=?, total_weight=?, destination=?, 
+                loading_country=?, discharge_country=?, port_of_loading=?, port_of_discharge=?, comment_on_docs=?, 
+                sales_representative=?
+            WHERE id=?
+        `;
 
-            // Execute update query with document upload
-            await con.query(UpdateQueryWithDoc, [
-                freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods,
-                packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country,
-                port_of_loading, port_of_discharge, req.files.document[0].filename, document_name, comment_on_docs, sales_representative, clearing_id
-            ], (err, data) => {
-                if (err) throw err;
-                if (data.affectedRows > 0) {
+        const updateParams = [
+            freight, client, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc,
+            nature_of_goods, packing_type, total_dimension, total_box, total_weight, destination,
+            loading_country, discharge_country, port_of_loading, port_of_discharge,
+            comment_on_docs, sales_representative, clearing_id
+        ];
 
-                    const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+        con.query(updateQuery, updateParams, async (err, data) => {
+            if (err) throw err;
 
-                    con.query(selectQuery, [clearing_id], async (err, result) => {
-                        if (err) {
-                            console.error("Error fetching clearance number:", err);
-                            return;
-                        }
-                        let file = req.files.document[0];
-                        // console.log(file);
+            if (data.affectedRows > 0) {
+                const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
+                con.query(selectQuery, [clearing_id], async (err, result) => {
+                    if (err) {
+                        console.error("Error fetching clearance number:", err);
+                        return res.status(500).send({
+                            success: false,
+                            message: "Error fetching clearance number"
+                        });
+                    }
 
-                        const clearanceNumber = result[0].clearance_number;
-                       /*  const folderId = await findOrCreateFolder(clearanceNumber);
-                        console.log(`📂 Folder ID: ${folderId}`);
+                    const clearanceNumber = result[0].clearance_number;
 
+                    // Handle all uploaded documents
+                    await handle_FileUploads(clearing_id, clearanceNumber, req.files);
 
-                        const { fileId, webViewLink } = await uploadFile(folderId, file); */
-                    })
-                    res.status(200).send({
+                    return res.status(200).send({
                         success: true,
-                        message: "Clearance updated successfully"
+                        message: "Clearance updated and documents uploaded successfully"
                     });
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "Failed to update clearance"
-                    });
-                }
-            });
-        } else {
-            // Update query when there is no document file to upload
-            const UpdateQueryWithoutDoc = `
-                UPDATE tbl_clearance 
-                SET  freight=?, freight_option=?, is_Import_Export=?, is_cong_shipp=?, customer_ref=?, goods_desc=?, nature_of_goods=?, 
-                    packing_type=?, total_dimension=?, total_box=?, total_weight=?, destination=?, loading_country=?, discharge_country=?, 
-                    port_of_loading=?, port_of_discharge=?, comment_on_docs=?, sales_representative=?
-                WHERE id=?`;
-
-            // Execute update query without document upload
-            await con.query(UpdateQueryWithoutDoc, [
-                freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods,
-                packing_type, total_dimension, total_box, total_weight, destination, loading_country, discharge_country,
-                port_of_loading, port_of_discharge, comment_on_docs, sales_representative, clearing_id
-            ], (err, data) => {
-                if (err) throw err;
-                if (data.affectedRows > 0) {
-                    res.status(200).send({
-                        success: true,
-                        message: "Clearance updated successfully"
-                    });
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "Failed to update clearance"
-                    });
-                }
-            });
-        }
+                });
+            } else {
+                return res.status(400).send({
+                    success: false,
+                    message: "Failed to update clearance"
+                });
+            }
+        });
     } catch (error) {
         res.status(500).send({
             success: false,
             message: error.message
         });
+    }
+};
+
+const handle_FileUploads = async (clearanceId, clearanceNumber, files) => {
+    try {
+        if (files) {
+            const fileKeys = Object.keys(files);
+            for (const key of fileKeys) {
+                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+                const documentName = get_DocumentName(key);
+
+                await process_Files(fileArray, documentName, clearanceId, clearanceNumber);
+            }
+        }
+    } catch (error) {
+        console.error("❌ Error handling file uploads:", error);
+    }
+};
+
+const process_Files = async (fileArray, documentName, clearanceId, clearanceNumber) => {
+    for (const file of fileArray) {
+        const insertDocQuery = `
+            INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+            VALUES (?, ?, ?)
+        `;
+
+        await new Promise((resolve, reject) => {
+            con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+                if (err) {
+                    console.error(`❌ Error inserting ${documentName}:`, err);
+                    return reject(err);
+                }
+                resolve();
+            });
+        });
+
+        console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
+    }
+};
+
+const get_DocumentName = (fieldName) => {
+    switch (fieldName) {
+        case 'document':
+            return "General Document";
+        case 'packing_list':
+            return "Packing List";
+        case 'licenses':
+            return "Licenses/Permit";
+        case 'product_literature':
+            return "Product Literature";
+        case 'other_documents':
+            return "Other Documents";
+        default:
+            return "Unknown Document";
     }
 };
 
@@ -1488,7 +1972,7 @@ const AddfreightByCustomer = async (req, res) => {
                         console.log(freightNumber);
 
                         // Process all files for a given document type
-                        /* const processFiles = async (fileArray, documentName) => {
+                        const processFiles = async (fileArray, documentName) => {
                             try {
                                 for (const file of fileArray) { // Loop through all files
                                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
@@ -1506,7 +1990,7 @@ const AddfreightByCustomer = async (req, res) => {
                                     console.log(`🚀 Uploading file: ${file.originalname}`);
 
                                     // Upload the file to Google Drive
-                                    const folderId = await findOrCreateFolder(freightNumber);
+                                    /* const folderId = await findOrCreateFolder(freightNumber);
                                     console.log(`📂 Folder ID: ${folderId}`);
                                     console.log(file);
 
@@ -1527,7 +2011,7 @@ const AddfreightByCustomer = async (req, res) => {
                                             }
                                             resolve();
                                         });
-                                    });
+                                    }); */
 
                                     console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                                 }
@@ -1579,7 +2063,7 @@ const AddfreightByCustomer = async (req, res) => {
                         };
 
                         // Start processing all files
-                        handleFileUploads(); */
+                        handleFileUploads();
                     });
 
                     /*  if (req.files && req.files.supplier_invoice) {
@@ -1946,98 +2430,98 @@ const UpdatefreightByCustomer = async (req, res) => {
                     console.log(freightNumber);
 
                     // Process all files for a given document type
-                   /*  const processFiles = async (fileArray, documentName) => {
-                        try {
-                            for (const file of fileArray) { // Loop through all files
-                                const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                                await new Promise((resolve, reject) => {
-                                    con.query(docsInsertQuery, [freight_id, documentName, file.filename], (err) => {
-                                        if (err) {
-                                            console.error(`Error inserting ${documentName}:`, err);
-                                            return reject(err);
-                                        }
-                                        resolve();
-                                    });
-                                });
-
-                                console.log(`🚀 Uploading file: ${file.originalname}`);
-
-                                // Upload the file to Google Drive
-                                const folderId = await findOrCreateFolder(freightNumber);
-                                console.log(`📂 Folder ID: ${folderId}`);
-                                console.log(file);
-
-                                const { fileId, webViewLink } = await uploadFile(folderId, file);
-
-                                // Insert file details into transaction_files
-                                const insertFileQuery = `
-                                INSERT INTO transaction_files 
-                                (freight_number, file_name, drive_file_id, file_link) 
-                                VALUES (?, ?, ?, ?)
-                            `;
-
-                                await new Promise((resolve, reject) => {
-                                    con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
-                                        if (err) {
-                                            console.error("Error inserting file details:", err);
-                                            return reject(err);
-                                        }
-                                        resolve();
-                                    });
-                                });
-
-                                console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
-                            }
-                        } catch (error) {
-                            console.error(`Error processing files for ${documentName}:`, error);
-                        }
-                    };
-
-                    const handleFileUploads = async () => {
-                        try {
-                            if (req.files) {
-                                const fileKeys = Object.keys(req.files);
-
-                                for (const key of fileKeys) {
-                                    const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
-
-                                    if (files.length > 0) {
-                                        const documentName = getDocumentName(key);
-                                        console.log(files, documentName, "📂 Files to process");
-
-                                        await processFiles(files, documentName);
-                                    }
-                                }
-
-                                console.log("✅ All files processed successfully!");
-                            }
-                        } catch (error) {
-                            console.error("Error handling file uploads:", error);
-                        }
-                    };
-
-
-                    // Map field names to document names
-                    const getDocumentName = (fieldName) => {
-                        console.log(fieldName);
-
-                        switch (fieldName) {
-                            case 'supplier_invoice':
-                                return "Supplier Invoice";
-                            case 'packing_list':
-                                return "Packing List";
-                            case 'licenses':
-                                return "Licenses";
-                            case 'other_documents':
-                                return "Other Documents";
-                            default:
-                                return "Unknown Document";
-                        }
-                    };
-
-                    // Start processing all files
-                    handleFileUploads(); */
+                    /*  const processFiles = async (fileArray, documentName) => {
+                         try {
+                             for (const file of fileArray) { // Loop through all files
+                                 const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+ 
+                                 await new Promise((resolve, reject) => {
+                                     con.query(docsInsertQuery, [freight_id, documentName, file.filename], (err) => {
+                                         if (err) {
+                                             console.error(`Error inserting ${documentName}:`, err);
+                                             return reject(err);
+                                         }
+                                         resolve();
+                                     });
+                                 });
+ 
+                                 console.log(`🚀 Uploading file: ${file.originalname}`);
+ 
+                                 // Upload the file to Google Drive
+                                 const folderId = await findOrCreateFolder(freightNumber);
+                                 console.log(`📂 Folder ID: ${folderId}`);
+                                 console.log(file);
+ 
+                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
+ 
+                                 // Insert file details into transaction_files
+                                 const insertFileQuery = `
+                                 INSERT INTO transaction_files 
+                                 (freight_number, file_name, drive_file_id, file_link) 
+                                 VALUES (?, ?, ?, ?)
+                             `;
+ 
+                                 await new Promise((resolve, reject) => {
+                                     con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
+                                         if (err) {
+                                             console.error("Error inserting file details:", err);
+                                             return reject(err);
+                                         }
+                                         resolve();
+                                     });
+                                 });
+ 
+                                 console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+                             }
+                         } catch (error) {
+                             console.error(`Error processing files for ${documentName}:`, error);
+                         }
+                     };
+ 
+                     const handleFileUploads = async () => {
+                         try {
+                             if (req.files) {
+                                 const fileKeys = Object.keys(req.files);
+ 
+                                 for (const key of fileKeys) {
+                                     const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
+ 
+                                     if (files.length > 0) {
+                                         const documentName = getDocumentName(key);
+                                         console.log(files, documentName, "📂 Files to process");
+ 
+                                         await processFiles(files, documentName);
+                                     }
+                                 }
+ 
+                                 console.log("✅ All files processed successfully!");
+                             }
+                         } catch (error) {
+                             console.error("Error handling file uploads:", error);
+                         }
+                     };
+ 
+ 
+                     // Map field names to document names
+                     const getDocumentName = (fieldName) => {
+                         console.log(fieldName);
+ 
+                         switch (fieldName) {
+                             case 'supplier_invoice':
+                                 return "Supplier Invoice";
+                             case 'packing_list':
+                                 return "Packing List";
+                             case 'licenses':
+                                 return "Licenses";
+                             case 'other_documents':
+                                 return "Other Documents";
+                             default:
+                                 return "Unknown Document";
+                         }
+                     };
+ 
+                     // Start processing all files
+                     handleFileUploads(); */
                 });
                 res.status(200).send({
                     success: true,
@@ -2399,7 +2883,8 @@ Thank you for your order. You can track your order using the following tracking 
                                         } else {
                                             result.forEach((row) => {
                                                 const phone = row.cellphone || row.telephone;
-                                                sendWhatsApp(phone, message);
+                                                // 05-06-2025
+                                                /* sendWhatsApp(phone, message); */
                                                 console.log("send");
 
                                             });
@@ -2415,7 +2900,8 @@ Thank you for your order. You can track your order using the following tracking 
                                                     console.log(user);
 
                                                     const phone = user.cellphone || user.telephone;
-                                                    if (phone) sendWhatsApp(phone, message);
+                                                    // 05-06-2025
+                                                    /* if (phone) sendWhatsApp(phone, message); */
                                                     if (user.email) sendMail(user.email, mailSubject, content);
                                                 } else {
                                                     console.warn('No sales person found for the provided freight ID.');
@@ -2431,7 +2917,8 @@ Thank you for your order. You can track your order using the following tracking 
 
                                                         bookingUsers.forEach((user) => {
                                                             const phone = user.cellphone || user.telephone;
-                                                            if (phone) sendWhatsApp(phone, message);
+                                                            // 05-06-2025
+                                                            /* if (phone) sendWhatsApp(phone, message); */
                                                             if (user.email) sendMail(user.email, mailSubject, content);
                                                         });
                                                     }
@@ -2966,11 +3453,11 @@ const uploadClrearanceDOC = async (req, res) => {
                 }
                 const clearanceNumber = result[0].clearance_number;
                 const Subfolder = "Supplier Invoices"
-                const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
-                console.log(`📂 Folder ID: ${folderId}`);
-                console.log(file);
+                // const folderId = await findOrCreateFolder(clearanceNumber, Subfolder);
+                // console.log(`📂 Folder ID: ${folderId}`);
+                // console.log(file);
 
-                const { fileId, webViewLink } = await uploadFile(folderId.subfolderId, req.files.supplier_invoice[0]);
+                // const { fileId, webViewLink } = await uploadFile(folderId.subfolderId, req.files.supplier_invoice[0]);
             })
         }
         if (req.files && req.files.packing_list) {
@@ -3174,8 +3661,9 @@ const addQueries = async (req, res) => {
                             if (member.email) await sendMail(member.email, emailSubject, emailContent);
                             if (member.cellphone) {
                                 const phone = member.cellphone.startsWith("+") ? member.cellphone : `+${member.cellphone}`;
-                                await sendSms(phone, notificationMessage);
-                                await sendWhatsApp(phone, notificationMessage);
+                                // 05-06-2025
+                                /* await sendSms(phone, notificationMessage);
+                                await sendWhatsApp(phone, notificationMessage); */
                             }
                         }
 
@@ -3805,11 +4293,11 @@ const AddShipment = (req, res) => {
                     if (member.email) {
                         sendMail(member.email, mailSubject, htmlContent);
                     }
-
-                    if (member.cellphone) {
+                    // 05-06-2025
+                    /* if (member.cellphone) {
                         sendWhatsApp(member.cellphone, plainMessage);
                         sendSms(member.cellphone, plainMessage);
-                    }
+                    } */
                 }
 
 
@@ -4121,10 +4609,11 @@ const UpdateShipment = async (req, res) => {
                     if (email) {
                         sendMail(email, "Shipment status has Updated", mailContent);
                     }
-                    if (cellphone) {
+                    // 05-06-2025
+                    /* if (cellphone) {
                         sendWhatsApp(cellphone, SMSmessage);
                         sendSms(cellphone, SMSmessage);
-                    }
+                    } */
                 }
             }
 
@@ -4170,9 +4659,10 @@ const UpdateShipment = async (req, res) => {
                 if (email) {
                     sendMail(email, emailSubject, emailContent);
                 }
-                if (cellphone) {
+                // 05-06-2025
+                /* if (cellphone) {
                     sendWhatsApp(cellphone, whatsappMessage);
-                }
+                } */
             }
         }
 
@@ -5337,10 +5827,11 @@ function notifyUnrespondedDisputes() {
 
                 // Send notifications to each team member
                 teamMembers.forEach(member => {
-                    if (member.cellphone) {
+                    // 05-06-2025
+                    /* if (member.cellphone) {
                         sendWhatsApp(member.cellphone, message);
                         sendSms(member.cellphone, message);
-                    }
+                    } */
                     if (member.email) {
                         sendMail(member.email, emailSubject, emailBody);
                     }
@@ -5426,10 +5917,11 @@ function notifyDisputesUnresolved7Days() {
 
                 // Send notifications to each team member
                 teamMembers.forEach(member => {
-                    if (member.cellphone) {
+                    // 05-06-2025
+                    /* if (member.cellphone) {
                         sendWhatsApp(member.cellphone, message);
                         sendSms(member.cellphone, message);
-                    }
+                    } */
                     if (member.email) {
                         sendMail(member.email, emailSubject, emailBody);
                     }

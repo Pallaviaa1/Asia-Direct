@@ -802,7 +802,7 @@ const Addfreight = (req, res) => {
                     sendMail(Email, mailSubject, content);
 
                     // Process all files for a given document type
-                    /* const processFiles = async (fileArray, documentName) => {
+                    const processFiles = async (fileArray, documentName) => {
                         try {
 
 
@@ -822,7 +822,7 @@ const Addfreight = (req, res) => {
                                 // console.log(` Uploading file: ${file.originalname}`);
 
                                 // Upload the file to Google Drive
-                                const folderId = await findOrCreateFolder(freightNumber);
+                                /* const folderId = await findOrCreateFolder(freightNumber);
                                 console.log(` Folder ID: ${folderId}`);
                                 console.log(file);
 
@@ -843,7 +843,7 @@ const Addfreight = (req, res) => {
                                         }
                                         resolve();
                                     });
-                                });
+                                }); */
 
                                 // console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                             }
@@ -896,7 +896,7 @@ const Addfreight = (req, res) => {
                     };
 
                     // Start processing all files
-                    handleFileUploads(); */
+                    handleFileUploads();
                 });
 
             });
@@ -1192,7 +1192,8 @@ const EditFreight = async (req, res) => {
             Please check the updated details.
             `;
             const salesPersonPhone = result[0].sales_person_phone;
-            sendWhatsApp(salesPersonPhone, whatsappMessage);
+            // 05-06-2025
+            /* sendWhatsApp(salesPersonPhone, whatsappMessage); */
 
 
             // Send email and WhatsApp to all team members
@@ -1210,7 +1211,8 @@ const EditFreight = async (req, res) => {
 
                     // Send WhatsApp
                     const formattedPhone = member.cellphone.startsWith('+') ? member.cellphone : `+${member.cellphone}`;
-                    await sendWhatsApp(formattedPhone, whatsappMessage);
+                    // 05-06-2025
+                    /* await sendWhatsApp(formattedPhone, whatsappMessage); */
                 }
 
                 console.log("Notifications sent to all team members.");
@@ -1222,7 +1224,7 @@ const EditFreight = async (req, res) => {
             // sendWhatsApp(estimatesTeamPhone, whatsappMessage);
 
             // Process all files for a given document type
-            /* const processFiles = async (fileArray, documentName) => {
+            const processFiles = async (fileArray, documentName) => {
                 try {
                     for (const file of fileArray) { // Loop through all files
                         const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
@@ -1240,7 +1242,7 @@ const EditFreight = async (req, res) => {
                         console.log(` Uploading file: ${file.originalname}`);
 
                         // Upload the file to Google Drive
-                        const folderId = await findOrCreateFolder(freightNumber);
+                        /* const folderId = await findOrCreateFolder(freightNumber);
                         console.log(` Folder ID: ${folderId}`);
                         console.log(file);
 
@@ -1261,7 +1263,7 @@ const EditFreight = async (req, res) => {
                                 }
                                 resolve();
                             });
-                        });
+                        }); */
 
                         console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                     }
@@ -1300,7 +1302,7 @@ const EditFreight = async (req, res) => {
 
                 switch (fieldName) {
                     case 'supplier_invoice':
-                        return "Supplier Invoice";
+                        return "Supplier Invoices";
                     case 'packing_list':
                         return "Packing List";
                     case 'licenses':
@@ -1313,7 +1315,7 @@ const EditFreight = async (req, res) => {
             };
 
             // Start processing all files
-            handleFileUploads(); */
+            handleFileUploads();
         });
         res.status(200).json({
             success: true,
@@ -2181,8 +2183,8 @@ const DeleteShipEstimate = async (req, res) => {
 
 const SendNotification = async (req, res) => {
     try {
-        // send_to = 1(All Staff), 2(All Client), 3(Particular staff), 4(Particular client)
-        const { send_to, user_id, title, description } = req.body;
+        // send_to = 1(All Staff), 2(All Client), 3(Particular staff), 4(Particular client), 5(Multiple Users), 6(Batch Users)
+        const { send_to, user_id, title, description, batch_id } = req.body;
         if (!send_to) {
             res.status(400).send({
                 success: false,
@@ -2207,6 +2209,33 @@ const SendNotification = async (req, res) => {
                                     con.query(insertNotificationSql, [user.id, data.insertId], (err, result) => {
                                         if (err) throw err;
                                     });
+                                    const emailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                                    con.query(emailSql, [user.id], (err, emailResult) => {
+                                        if (err) return console.error(err);
+                                        if (emailResult.length > 0) {
+                                            const Email = emailResult[0].email;
+                                            const fullName = emailResult[0].full_name;
+                                            const mailSubject = title;
+                                            const content = `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+`;
+
+                                            sendMail(Email, mailSubject, content);
+                                        }
+                                    })
                                 });
 
                                 res.status(200).send({
@@ -2245,6 +2274,40 @@ const SendNotification = async (req, res) => {
                                     const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
                                     con.query(insertNotificationSql, [user.id, data.insertId], (err, result) => {
                                         if (err) throw err;
+                                    });
+
+                                    results.forEach((user) => {
+                                        const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
+                                        con.query(insertNotificationSql, [user.id, data.insertId], (err, result) => {
+                                            if (err) throw err;
+                                        });
+                                        const emailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                                        con.query(emailSql, [user.id], (err, emailResult) => {
+                                            if (err) return console.error(err);
+                                            if (emailResult.length > 0) {
+                                                const Email = emailResult[0].email;
+                                                const fullName = emailResult[0].full_name;
+                                                const mailSubject = title;
+                                                const content = `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+`;
+
+                                                sendMail(Email, mailSubject, content);
+                                            }
+                                        })
                                     });
                                 });
                                 res.status(200).send({
@@ -2285,6 +2348,34 @@ const SendNotification = async (req, res) => {
                             con.query(insertNotificationSql, [user_id, data.insertId], (err, result) => {
                                 if (err) throw err;
                             });
+
+                            const emailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                            con.query(emailSql, [user_id], (err, emailResult) => {
+                                if (err) return console.error(err);
+                                if (emailResult.length > 0) {
+                                    const Email = emailResult[0].email;
+                                    const fullName = emailResult[0].full_name;
+                                    const mailSubject = title;
+                                    const content = `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+`;
+
+                                    sendMail(Email, mailSubject, content);
+                                }
+                            })
                             res.status(200).send({
                                 success: true,
                                 message: "Send notification successfully"
@@ -2299,7 +2390,7 @@ const SendNotification = async (req, res) => {
                     })
                 }
             }
-            else {
+            else if (send_to == 4) {
                 if (!user_id) {
                     res.status(400).send({
                         success: false,
@@ -2315,6 +2406,33 @@ const SendNotification = async (req, res) => {
                             con.query(insertNotificationSql, [user_id, data.insertId], (err, result) => {
                                 if (err) throw err;
                             });
+                            const emailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                            con.query(emailSql, [user_id], (err, emailResult) => {
+                                if (err) return console.error(err);
+                                if (emailResult.length > 0) {
+                                    const Email = emailResult[0].email;
+                                    const fullName = emailResult[0].full_name;
+                                    const mailSubject = title;
+                                    const content = `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+`;
+
+                                    sendMail(Email, mailSubject, content);
+                                }
+                            })
                             res.status(200).send({
                                 success: true,
                                 message: "Send notification successfully"
@@ -2328,6 +2446,150 @@ const SendNotification = async (req, res) => {
                         }
                     })
                 }
+            }
+            else if (send_to == 5) {
+                if (!user_id) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Please provide comma-separated user IDs"
+                    });
+                }
+
+                const userIds = user_id.split(',').map(id => id.trim()).filter(Boolean);
+
+                const InsertQuery = `INSERT INTO tbl_notifications (title, description, send_to) VALUES (?, ?, ?)`;
+                con.query(InsertQuery, [title, description, 6], (err, data) => {
+                    if (err) throw err;
+
+                    if (data.affectedRows > 0) {
+                        userIds.forEach((id) => {
+                            const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
+                            con.query(insertNotificationSql, [id, data.insertId], (err) => {
+                                if (err) console.error(err);
+                            });
+
+                            // 📨 Send Email
+                            const getUserEmailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                            con.query(getUserEmailSql, [id], (err, userData) => {
+                                if (!err && userData.length > 0) {
+                                    const Email = userData[0].email;
+                                    const fullName = userData[0].full_name;
+                                    const mailSubject = title;
+                                    const content = `
+                           <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+                        `;
+                                    sendMail(Email, mailSubject, content);
+                                }
+                            });
+                        });
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Notification sent to multiple users"
+                        });
+                    } else {
+                        return res.status(400).send({
+                            success: false,
+                            message: "Failed to send notification"
+                        });
+                    }
+                });
+            }
+
+            else if (send_to == 6) {
+                const { batch_id } = req.body;
+                if (!batch_id) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Please provide batch_id"
+                    });
+                }
+
+                const getUsersSql = `
+        SELECT DISTINCT tbl_orders.client_id as user_id
+        FROM freight_assig_to_batch
+        INNER JOIN tbl_orders ON tbl_orders.id = freight_assig_to_batch.order_id
+        WHERE batch_id = ?
+    `;
+
+                con.query(getUsersSql, [batch_id], (err, results) => {
+                    if (err) throw err;
+
+                    if (results.length === 0) {
+                        return res.status(400).send({
+                            success: false,
+                            message: "No users found in the selected batch"
+                        });
+                    }
+
+                    const InsertQuery = `INSERT INTO tbl_notifications (title, description, send_to) VALUES (?, ?, ?)`;
+                    con.query(InsertQuery, [title, description, 7], (err, data) => {
+                        if (err) throw err;
+
+                        if (data.affectedRows > 0) {
+                            results.forEach((user) => {
+                                const userId = user.user_id;
+                                const insertNotificationSql = 'INSERT INTO notification_details (user_id, notification_id) VALUES (?, ?)';
+                                con.query(insertNotificationSql, [userId, data.insertId], (err) => {
+                                    if (err) console.error(err);
+                                });
+
+                                // 📨 Send Email
+                                const getUserEmailSql = 'SELECT email, full_name FROM tbl_users WHERE id = ?';
+                                con.query(getUserEmailSql, [userId], (err, userData) => {
+                                    if (!err && userData.length > 0) {
+                                        const Email = userData[0].email;
+                                        const fullName = userData[0].full_name;
+                                        const mailSubject = title;
+                                        const content = `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f4f4" style="font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; margin: 40px auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="padding: 30px; color: #333333; font-size: 16px; line-height: 1.6;">
+            <p style="margin-bottom: 20px;">Hi <strong>${fullName}</strong>,</p>
+            <p style="margin-bottom: 20px;">${description}</p>
+            <p style="margin-top: 40px;">Regards,<br><strong>AsiaDirect</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+                            `;
+                                        sendMail(Email, mailSubject, content);
+                                    }
+                                });
+                            });
+
+                            return res.status(200).send({
+                                success: true,
+                                message: "Notification sent to all batch users"
+                            });
+                        } else {
+                            return res.status(400).send({
+                                success: false,
+                                message: "Failed to send notification"
+                            });
+                        }
+                    });
+                });
             }
         }
     }
@@ -3452,8 +3714,9 @@ const UpdateOrderStatus = async (req, res) => {
                                                     const user_phoneNumber = userData[0].cellphone || userData[0].telephone;
                                                     const orderNumber = `OR000${order_id}`
                                                     const message = getOrderStatusMessage(orderNumber, fullName, status);
-                                                    const smsResponse = sendSms(user_phoneNumber, message);
-                                                    const whatsappResponse = sendWhatsApp(user_phoneNumber, message);
+                                                    // 05-06-2025
+                                                    /* const smsResponse = sendSms(user_phoneNumber, message);
+                                                    const whatsappResponse = sendWhatsApp(user_phoneNumber, message); */
                                                     // console.log(smsResponse);
                                                     // console.log(whatsappResponse);
 
@@ -3532,18 +3795,21 @@ const UpdateOrderStatus = async (req, res) => {
 
                                                                     // Send to sales person
                                                                     if (salesPersonPhone) {
-                                                                        sendSms(salesPersonPhone, messageText);
-                                                                        sendWhatsApp(salesPersonPhone, messageText);
+
+                                                                        // 05-06-2025
+                                                                        /* sendSms(salesPersonPhone, messageText);
+                                                                        sendWhatsApp(salesPersonPhone, messageText); */
                                                                         sendMail(salesEmail, "Order Status Update", opsMailContent);
 
 
                                                                     }
 
                                                                     // Send to Ops team
-                                                                    opsPhones.forEach(phone => {
+                                                                    // 05-06-2025
+                                                                    /* opsPhones.forEach(phone => {
                                                                         sendSms(phone, messageText);
                                                                         sendWhatsApp(phone, messageText);
-                                                                    });
+                                                                    }); */
                                                                     opsEmails.forEach(email => {
                                                                         sendMail(email, "Order Status Update", opsMailContent);
                                                                     });
@@ -4588,6 +4854,46 @@ const getAllBatch = async (req, res) => {
     }
 };
 
+const getBatchList = async (req, res) => {
+    try {
+        const getQuery = `
+            SELECT b.id, b.batch_number, b.batch_name
+            FROM batches as b
+            WHERE b.is_deleted = ?
+            ORDER BY b.id DESC`;
+
+        // Execute the main query
+        con.query(getQuery, [0], async (err, results) => {
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message,
+                });
+            }
+
+            if (results.length === 0) {
+                return res.status(404).send({
+                    success: false,
+                    message: 'Batch not found',
+                });
+            }
+
+            // Process each batch and fetch its freight count
+            return res.status(200).send({
+                success: true,
+                data: results,
+            });
+
+        });
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+
 
 const deleteBatch = async (req, res) => {
     try {
@@ -5109,13 +5415,15 @@ const getFreightsByBatch = async (req, res) => {
                 od.trans_reference AS delivery_trans_reference, 
                 co.name AS warehouse_origin,
                 w.warehouse_name,
-                u.full_name AS client_Name
+                u.full_name AS client_Name,
+                ws.id as warehouse_assign_order_id
             FROM freight_assig_to_batch fa
             LEFT JOIN tbl_freight f ON fa.freight_id = f.id
             LEFT JOIN tbl_orders o ON fa.freight_id = o.freight_id
             LEFT JOIN order_delivery_details od ON od.order_id = o.id
             LEFT JOIN batches b ON b.id = fa.batch_id
             LEFT JOIN warehouse_tbl w ON w.id = b.warehouse_id
+            LEFT JOIN warehouse_assign_order ws ON ws.order_id = o.id
             LEFT JOIN countries AS co ON co.id = w.country
             LEFT JOIN tbl_users AS u ON u.id = f.client_id
             ${condition}
@@ -5945,6 +6253,7 @@ const addWarehouseProduct = async (req, res) => {
             user_id,
             added_by,
             warehouse_order_id,
+            order_id,
             product_description,
             Hazardous,
             date_received,
@@ -5980,14 +6289,15 @@ const addWarehouseProduct = async (req, res) => {
 
         const insertQuery = `
             INSERT INTO warehouse_products 
-            (user_id, added_by, warehouse_order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref, 
+            (user_id, order_id, added_by, warehouse_order_id, product_description, Hazardous, date_received, package_type, packages, dimension, weight, warehouse_ref, 
             freight, groupage_batch_ref, supplier, warehouse_receipt_number, tracking_number, date_dspatched, supplier_address, warehouse_collect, 
             costs_to_collect, port_of_loading, warehouse_dispatch, warehouse_cost, cost_to_dispatch, waybill_ref, supplier_Email, Supplier_Contact) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
             user_id,
+            order_id,
             added_by,
             warehouse_order_id,
             product_description,
@@ -6022,10 +6332,12 @@ const addWarehouseProduct = async (req, res) => {
 
             // Step 2: Get freight_id from order
             const orderQuery = `SELECT freight_id FROM tbl_orders WHERE id = ?`;
-            con.query(orderQuery, [warehouse_order_id], (orderErr, orderResult) => {
+            con.query(orderQuery, [order_id], (orderErr, orderResult) => {
                 if (orderErr || orderResult.length === 0) {
-                    console.log("Product added, but could not fetch freight info");
-                    return
+                    return res.status(400).send({
+                        success: false,
+                        message: "Freight ID not found"
+                    });
                 }
 
                 const freightId = orderResult[0].freight_id;
@@ -6072,9 +6384,10 @@ const addWarehouseProduct = async (req, res) => {
                             `;
 
                             // Send mail to all recipients
-                            for (const email of allRecipients) {
-                                if (email) await sendMail(email, subject, htmlBody);
-                            }
+                            await Promise.all(allRecipients.map(email => {
+                                if (email) return sendMail(email, subject, htmlBody);
+                            }));
+
 
                             res.status(200).send({
                                 success: true,
@@ -6233,7 +6546,7 @@ const RevertOrder = async (req, res) => {
 };
 
 const GetFreightImages = async (req, res) => {
-    const { freight_id } = req.body;  // Retrieve the freight ID from the request parameters
+    const { freight_id } = req.body;
 
     try {
         // Validate the freight ID
@@ -6246,39 +6559,51 @@ const GetFreightImages = async (req, res) => {
 
         con.query(selectQuery, [freight_id], (err, docs) => {
             if (err) {
-                // Handle database errors
                 return res.status(500).send({ success: false, message: 'Database error' });
             }
 
             if (docs.length > 0) {
-                // Group documents by `document_name` if needed
-                const groupedDocuments = docs.reduce((result, doc) => {
-                    if (!result[doc.document_name]) {
-                        result[doc.document_name] = [];
+                const groupedDocuments = {};
+
+                docs.forEach((doc) => {
+                    // Normalize the document name for consistent grouping
+                    const normalizedKey = doc.document_name.trim().toLowerCase();
+
+                    if (!groupedDocuments[normalizedKey]) {
+                        groupedDocuments[normalizedKey] = {
+                            originalName: doc.document_name.trim(), // Store the original name
+                            items: []
+                        };
                     }
-                    result[doc.document_name].push({
+
+                    groupedDocuments[normalizedKey].items.push({
                         id: doc.id,
-                        document_name: doc.document_name,
+                        document_name: doc.document_name.trim(),
                         document: doc.document,
                         created_at: doc.created_at
                     });
-                    return result;
-                }, {});
+                });
 
-                // Send the final response with grouped images
-                res.status(200).send({
+                // Convert grouped result back to original structure using original names
+                const finalResult = {};
+                for (const key in groupedDocuments) {
+                    const group = groupedDocuments[key];
+                    finalResult[group.originalName] = group.items;
+                }
+
+                return res.status(200).send({
                     success: true,
-                    data: groupedDocuments
+                    data: finalResult
                 });
             } else {
-                res.status(404).send({ success: false, message: 'No images found for the given freight ID' });
+                return res.status(400).send({ success: false, message: 'No images found for the given freight ID' });
             }
         });
     } catch (error) {
-        // Handle any unexpected errors
-        res.status(500).send({ success: false, message: error.message });
+        return res.status(500).send({ success: false, message: error.message });
     }
 };
+
 
 const DeleteDocument = async (req, res) => {
     const { doc_id } = req.body;
@@ -6577,10 +6902,10 @@ function checkAndNotifyEstimateOverdue() {
             // Loop over each overdue freight and send to all Estimate team members
             freightResults.forEach(freight => {
                 const message = `*Quote overdue*\n\nQuote for client *${freight.full_name}*\nFreight: *${freight.freight_number}* has not been issued in the past 72 hours.\nPlease act urgently.`;
-
-                teamResults.forEach(member => {
+                // 05-06-2025
+                /* teamResults.forEach(member => {
                     sendWhatsApp(member.cellphone, message);
-                });
+                }); */
             });
         });
     });
@@ -6655,10 +6980,11 @@ function checkAndNotifyOverdueQuotes() {
             const whatsappMessage = `Hi ${record.sales_person_name},\nQuote has been issued and status not updated.\nPlease follow up with client.\n\nFreight Number: ${record.freight_number}\nClient Name: ${record.client_name}`;
 
             sendMail(salesEmail, subject, emailMessage);
-            if (sales_person_phone && sales_person_phone.trim() !== '') {
+            // 05-06-2025
+            /* if (sales_person_phone && sales_person_phone.trim() !== '') {
                 sendWhatsApp(sales_person_phone, whatsappMessage);
             }
-            sendWhatsApp(sales_person_phone, whatsappMessage);
+            sendWhatsApp(sales_person_phone, whatsappMessage); */
         });
     });
 }
@@ -6749,7 +7075,8 @@ function checkAndSendUnbookedShipmentAlerts() {
                     const phone = member.cellphone;
                     if (phone) {
                         const whatsappMessage = `Unbooked Shipment Alert\n\nFreight for ${order.customer_name} (Freight Number/Order Number: ${order.freight_number}/${order.order_number}) has not been delivered for over 90 days.\n\nPlease review and take action.`;
-                        sendWhatsApp(phone, whatsappMessage);
+                        // 05-06-2025
+                        /*  sendWhatsApp(phone, whatsappMessage); */
                     }
 
                     console.log(`Alert sent to ${member.full_name} for freight ${order.freight_number}`);
@@ -6821,7 +7148,8 @@ function checkAndSendUndownloadedBookingInstructions() {
             if (email) sendMail(email, mailSubject, emailTemplate);
 
             // Send WhatsApp
-            if (cellphone) sendWhatsApp(cellphone, whatsappMessage);
+            // 05-06-2025
+            /* if (cellphone) sendWhatsApp(cellphone, whatsappMessage); */
 
             console.log(`Notification sent to ${sales_name} for freight number ${freight_number}`);
         });
@@ -7063,7 +7391,7 @@ module.exports = {
     sendMessage, getMessagesList, getAllMessages, UpdateChatOnBack, UpdateChatOnEnter, countAll, countGraph,
     countofFreight, GetSupplerSelected, assignEstimatetoClient, UpdateOrderStatus, GetOrderStatus,
     StageOfShipment, socialMediaLinks, GetAllsocialLinks, getProfileAdmin, add_freight_to_warehouse, restore_order_from_warehouse,
-    client_Shipping_Estimate, GetWarehouseOrders, DeleteWarehouseOrder, createBatch, getAllBatch, deleteBatch, UpdateOrderStatusesFromBatch, moveFreightToBatch, restoreOrderFromBatch,
+    client_Shipping_Estimate, GetWarehouseOrders, DeleteWarehouseOrder, createBatch, getAllBatch, getBatchList, deleteBatch, UpdateOrderStatusesFromBatch, moveFreightToBatch, restoreOrderFromBatch,
     getFreightsByBatch, MoveToOrder, MoveToClearaneOrder, getCleranceOrder, CompleteCleranceOrder, DeleteClearanceOrder,
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, DeleteWarehouse, editWarehouseDetails, GetCountries,
     GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, updateWarehouseProduct, updateClientWarehouseProduct, DeleteWarehouseProduct, GetFreightImages,
