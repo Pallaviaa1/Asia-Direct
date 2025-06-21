@@ -243,7 +243,25 @@ const uploadFile = async (folderId, files) => {
     return uploadResults;
 };
 
-module.exports = { findOrCreateFolder, uploadFile };
+const uploadToSpecificPath = async (freightNumber, mainFolder, subFolder, file) => {
+    const drive = await authenticateGoogleDrive();
+
+    // Create or find freight folder
+    const freightFolderId = await createFolderIfNotExists(freightNumber);
+
+    // Create or find main folder (e.g., Quotations)
+    const mainFolderId = await createFolderIfNotExists(mainFolder, freightFolderId);
+
+    // Create or find subfolder (e.g., AD_Quotations)
+    const subFolderId = await createFolderIfNotExists(subFolder, mainFolderId);
+
+    // Upload file to the correct folder
+    const result = await uploadFile(subFolderId, file);
+    return result;
+};
+
+
+module.exports = { findOrCreateFolder, uploadFile, createFolderIfNotExists, uploadToSpecificPath };
 
 // Example usage
 // (Uncomment this section for testing)

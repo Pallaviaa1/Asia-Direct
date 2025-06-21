@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const sendMail = require('../helpers/sendMail')
 const rendomString = require('randomstring');
 const { assign } = require('nodemailer/lib/shared');
-const { findOrCreateFolder, uploadFile } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, uploadToSpecificPath } = require('../helpers/uploadDrive');
 const { logging } = require('googleapis/build/src/apis/logging');
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
@@ -819,6 +819,16 @@ const Addfreight = (req, res) => {
                                     });
                                 });
 
+                                // Step 2: Upload to Google Drive (or your cloud service)
+                                const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+                                const uploadResult = await uploadToSpecificPath(
+                                    freightNumber,     // Main folder: e.g., "F-20250613"
+                                    "Supplier Invoices",      // Parent folder or fixed main type
+                                    subfolderName,     // Subfolder based on document type
+                                    file               // Current file
+                                );
+
                                 // console.log(` Uploading file: ${file.originalname}`);
 
                                 // Upload the file to Google Drive
@@ -911,6 +921,22 @@ const Addfreight = (req, res) => {
         });
     }
 };
+
+const getFolderNameFromDocumentName = (documentName) => {
+    switch (documentName) {
+        case 'Supplier Invoices':
+            return 'Invoice, Packing List';
+        case 'Packing List':
+            return 'Invoice, Packing List';
+        case 'Licenses':
+            return 'Invoice, Packing List';
+        case 'Other Documents':
+            return 'Invoice, Packing List';
+        default:
+            return 'Invoice, Packing List';
+    }
+};
+
 
 function generateFreightNumber(callback) {
     try {
@@ -1240,6 +1266,15 @@ const EditFreight = async (req, res) => {
                         });
 
                         console.log(` Uploading file: ${file.originalname}`);
+
+                        const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+                        const uploadResult = await uploadToSpecificPath(
+                            freightNumber,     // Main folder: e.g., "F-20250613"
+                            "Supplier Invoices",      // Parent folder or fixed main type
+                            subfolderName,     // Subfolder based on document type
+                            file               // Current file
+                        );
 
                         // Upload the file to Google Drive
                         /* const folderId = await findOrCreateFolder(freightNumber);
@@ -4253,6 +4288,10 @@ const GetWarehouseOrders = async (req, res) => {
                 warehouse_assign_order.*, 
                 warehouse_assign_order.id AS warehouse_assign_order_id, 
                 tbl_freight.*, 
+                SUM(tbl_freight.dimension + IFNULL(wp_totals.wp_total_dimension, 0)) AS total_warehouse_dimension,
+SUM(tbl_freight.weight + IFNULL(wp_totals.wp_total_weight, 0)) AS total_warehouse_weight,
+SUM(tbl_freight.no_of_packages + IFNULL(wp_totals.wp_total_packages, 0)) AS total_warehouse_noOfPackages,
+ (COUNT(tbl_freight.id) + COUNT(wp_totals.wp_total_packages)) AS total_freight
                 tbl_freight.freight as Freight,
                 tbl_freight.id AS freight_ID,
                 tbl_orders.*, 
@@ -4282,10 +4321,22 @@ const GetWarehouseOrders = async (req, res) => {
                 ON warehouse_tbl.id = batches.warehouse_id
             LEFT JOIN countries AS c 
                 ON c.id = tbl_freight.delivery_to
+            LEFT JOIN (
+    SELECT 
+        warehouse_order_id,
+        SUM(dimension) AS wp_total_dimension,
+        SUM(weight) AS wp_total_weight,
+        SUM(packages) AS wp_total_packages
+    FROM warehouse_products
+    GROUP BY warehouse_order_id
+) AS wp_totals 
+ON wp_totals.warehouse_order_id = warehouse_assign_order.id
             LEFT JOIN countries AS co 
                 ON co.id = tbl_freight.collection_from
             ${condition}
+            GROUP BY warehouse_assign_order.id, tbl_freight.id, tbl_orders.id, batches.id, warehouse_tbl.id, shipping_estimate.id, c.name, co.name, tbl_users.full_name
             ORDER BY warehouse_assign_order.created_at DESC
+
         `;
 
         con.query(query, params, (err, data) => {
@@ -4792,14 +4843,15 @@ const getAllBatch = async (req, res) => {
             SELECT b.*, 
                    b.origin_country_id AS origin_country, 
                    b.detination_country_id AS destination_country,
-                    c.name as des_country_name, co.name as origin_country_name
-            FROM batches as b
+                   c.name AS des_country_name, 
+                   co.name AS origin_country_name
+            FROM batches AS b
             LEFT JOIN countries AS c ON c.id = b.detination_country_id
             LEFT JOIN countries AS co ON co.id = b.origin_country_id
             WHERE b.is_deleted = ?
-            ORDER BY b.id DESC`;
+            ORDER BY b.id DESC
+        `;
 
-        // Execute the main query
         con.query(getQuery, [0], async (err, results) => {
             if (err) {
                 return res.status(500).send({
@@ -4811,24 +4863,36 @@ const getAllBatch = async (req, res) => {
             if (results.length === 0) {
                 return res.status(404).send({
                     success: false,
-                    message: 'Batch not found',
+                    message: 'No batches found',
                 });
             }
 
-            // Process each batch and fetch its freight count
             try {
                 const updatedResults = await Promise.all(
                     results.map((result) => {
                         return new Promise((resolve, reject) => {
-                            const getQuery1 = `
-                                SELECT * 
-                                FROM freight_assig_to_batch 
-                                WHERE batch_id = ?`;
+                            const getFreightQuery = `
+                                SELECT 
+                                    COUNT(tbl_freight.id) AS count_freight,
+                                    SUM(tbl_freight.dimension) AS total_dimension,
+                                    SUM(tbl_freight.weight) AS total_weight,
+                                    SUM(tbl_freight.no_of_packages) AS total_packages
+                                FROM freight_assig_to_batch
+                                INNER JOIN tbl_freight 
+                                    ON tbl_freight.id = freight_assig_to_batch.freight_id
+                                WHERE freight_assig_to_batch.batch_id = ?
+                            `;
 
-                            con.query(getQuery1, [result.id], (err, data) => {
+                            con.query(getFreightQuery, [result.id], (err, data) => {
                                 if (err) return reject(err);
 
-                                result.count_freight = data.length;
+                                const totals = data[0];
+
+                                result.count_freight = totals.count_freight || 0;
+                                result.total_freight_dimension = totals.total_dimension || 0;
+                                result.total_freight_weight = totals.total_weight || 0;
+                                result.total_freight_packages = totals.total_packages || 0;
+
                                 resolve(result);
                             });
                         });
@@ -4842,17 +4906,20 @@ const getAllBatch = async (req, res) => {
             } catch (innerErr) {
                 return res.status(500).send({
                     success: false,
-                    message: innerErr.message,
+                    message: 'Failed to fetch freight summary',
+                    error: innerErr.message,
                 });
             }
         });
     } catch (error) {
         return res.status(500).send({
             success: false,
-            message: error.message,
+            message: 'Unexpected server error',
+            error: error.message,
         });
     }
 };
+
 
 const getBatchList = async (req, res) => {
     try {
@@ -6545,7 +6612,7 @@ const RevertOrder = async (req, res) => {
     }
 };
 
-const GetFreightImages = async (req, res) => {
+/* const GetFreightImages = async (req, res) => {
     const { freight_id } = req.body;
 
     try {
@@ -6603,7 +6670,77 @@ const GetFreightImages = async (req, res) => {
         return res.status(500).send({ success: false, message: error.message });
     }
 };
+ */
 
+const GetFreightImages = async (req, res) => {
+    const { freight_id, clearance_id } = req.body;
+
+    try {
+        const finalResult = {};
+
+        const groupDocuments = (docs, isClearance = false) => {
+            const groupedDocuments = {};
+
+            docs.forEach((doc) => {
+                const normalizedKey = doc.document_name.trim().toLowerCase();
+
+                if (!groupedDocuments[normalizedKey]) {
+                    groupedDocuments[normalizedKey] = {
+                        originalName: doc.document_name.trim(),
+                        items: []
+                    };
+                }
+
+                groupedDocuments[normalizedKey].items.push({
+                    id: doc.id,
+                    document_name: doc.document_name.trim(),
+                    document: isClearance ? doc.document_file : doc.document,
+                    created_at: isClearance ? doc.uploaded_at : doc.created_at
+                });
+            });
+
+            for (const key in groupedDocuments) {
+                const group = groupedDocuments[key];
+                finalResult[group.originalName] = group.items;
+            }
+        };
+
+        const fetchFreightDocs = () => {
+            return new Promise((resolve, reject) => {
+                if (!freight_id) return resolve();
+                const selectQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
+                con.query(selectQuery, [freight_id], (err, docs) => {
+                    if (err) return reject(err);
+                    if (docs.length > 0) groupDocuments(docs, false);
+                    resolve();
+                });
+            });
+        };
+
+        const fetchClearanceDocs = () => {
+            return new Promise((resolve, reject) => {
+                if (!clearance_id) return resolve();
+                const selectQuery = `SELECT * FROM clearance_docs WHERE clearance_id = ?`;
+                con.query(selectQuery, [clearance_id], (err, docs) => {
+                    if (err) return reject(err);
+                    if (docs.length > 0) groupDocuments(docs, true);
+                    resolve();
+                });
+            });
+        };
+
+        await Promise.all([fetchFreightDocs(), fetchClearanceDocs()]);
+
+        if (Object.keys(finalResult).length === 0) {
+            return res.status(404).send({ success: false, message: 'No images found for the given IDs' });
+        }
+
+        return res.status(200).send({ success: true, data: finalResult });
+
+    } catch (error) {
+        return res.status(500).send({ success: false, message: error.message });
+    }
+};
 
 const DeleteDocument = async (req, res) => {
     const { doc_id } = req.body;

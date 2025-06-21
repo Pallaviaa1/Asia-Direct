@@ -3,7 +3,7 @@ const { validationResult, Result } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const rendomString = require('randomstring');
 const sendMail = require('../helpers/sendMail')
-const { findOrCreateFolder, uploadFile } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, uploadToSpecificPath } = require('../helpers/uploadDrive');
 const { SMTP_MAIL, SMTP_PASSWORD } = process.env;
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
@@ -798,6 +798,15 @@ const processFiles = async (fileArray, documentName, clearanceId, clearanceNumbe
 
         console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
 
+        const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+        const uploadResult = await uploadToSpecificPath(
+            clearanceNumber,     // Main folder: e.g., "F-20250613"
+            "Supplier Invoices",      // Parent folder or fixed main type
+            subfolderName,     // Subfolder based on document type
+            file               // Current file
+        );
+
         // Optional: Upload to Google Drive
         /*
         const folderId = await findOrCreateFolder(clearanceNumber);
@@ -836,6 +845,38 @@ const getDocumentName = (fieldName) => {
             return "Other Documents";
         default:
             return "Unknown Document";
+    }
+};
+
+const getFolderNameFromDocumentName1 = (documentName) => {
+    switch (documentName) {
+        case 'Supplier Invoices':
+            return 'Invoice, Packing List';
+        case 'Packing List':
+            return 'Invoice, Packing List';
+        case 'Licenses':
+            return 'Invoice, Packing List';
+        case 'Other Documents':
+            return 'Invoice, Packing List';
+        default:
+            return 'Invoice, Packing List';
+    }
+};
+
+const getFolderNameFromDocumentName = (documentName) => {
+    switch (documentName) {
+        case 'General Document':
+            return 'Invoice, Packing List';
+        case 'Packing List':
+            return 'Invoice, Packing List';
+        case 'Licenses/Permit':
+            return 'roduct Literature';
+        case 'Product Literature':
+            return 'Product Literature';
+        case 'Other Documents':
+            return 'Invoice, Packing List';
+        default:
+            return 'Invoice, Packing List';
     }
 };
 
@@ -1047,6 +1088,7 @@ const AddClearingByCustomer = async (req, res) => {
                 message: "Please provide user id"
             });
         }
+        console.log(req.files);
 
         generateClearanceNumber((err, clearanceNumber) => {
             if (err) {
@@ -1063,7 +1105,7 @@ const AddClearingByCustomer = async (req, res) => {
                 const clearanceId = data.insertId;
 
                 // ✅ Process and insert uploaded documents
-                handleFile_Uploads(clearanceId, req.files);
+                handleFile_Uploads(clearanceId, req.files, clearanceNumber);
 
                 const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
                 con.query(selectQuery, [clearanceId], async (err, result) => {
@@ -1135,7 +1177,7 @@ const AddClearingByCustomer = async (req, res) => {
 };
 
 
-const handleFile_Uploads = async (clearanceId, files) => {
+const handleFile_Uploads = async (clearanceId, files, clearanceNumber) => {
     try {
         if (files) {
             const fileKeys = Object.keys(files);
@@ -1155,6 +1197,15 @@ const handleFile_Uploads = async (clearanceId, files) => {
                             resolve();
                         });
                     });
+
+                    const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+                    const uploadResult = await uploadToSpecificPath(
+                        clearanceNumber,     // Main folder: e.g., "F-20250613"
+                        "Supplier Invoices",      // Parent folder or fixed main type
+                        subfolderName,     // Subfolder based on document type
+                        file               // Current file
+                    );
                 }
             }
         }
@@ -1443,6 +1494,7 @@ const process_Files = async (fileArray, documentName, clearanceId, clearanceNumb
         });
 
         console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
+
     }
 };
 
@@ -1989,6 +2041,14 @@ const AddfreightByCustomer = async (req, res) => {
 
                                     console.log(`🚀 Uploading file: ${file.originalname}`);
 
+                                    const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+                                    const uploadResult = await uploadToSpecificPath(
+                                        freightNumber,     // Main folder: e.g., "F-20250613"
+                                        "Supplier Invoices",      // Parent folder or fixed main type
+                                        subfolderName,     // Subfolder based on document type
+                                        file               // Current file
+                                    );
                                     // Upload the file to Google Drive
                                     /* const folderId = await findOrCreateFolder(freightNumber);
                                     console.log(`📂 Folder ID: ${folderId}`);
@@ -2222,6 +2282,333 @@ const generateFreightNumber = (callback) => {
 };
 
 
+// const UpdatefreightByCustomer = async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//         return res.status(400).json({
+//             success: false,
+//             errors: errors.array()
+//         });
+//     }
+
+//     try {
+//         const {
+//             freight_id, client_id, product_desc, fcl_lcl, commodity, collection_from, freight, freight_type, shipment_ref, dimension, weight, user_type,
+//             shipment_origin, shipment_des, comment, no_of_packages, package_type, collection_address, delivery_address,
+//             nature_of_goods, delivery_to, port_of_loading, post_of_discharge, auto_calculate, add_attachments, sea_freight_option, road_freight_option, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter, send_to_warehouse, assign_warehouse, assign_to_clearing
+//         } = req.body;
+//         // console.log(req.body);
+//         console.log(req.files);
+
+//         let updateFields = [];
+//         let updateParams = [];
+
+//         // Conditionally add client_id if provided
+//         if (client_id) {
+//             updateFields.push("client_id = ?");
+//             updateParams.push(client_id);
+//         }
+
+//         // Unconditionally add other fields
+//         updateFields.push("product_desc = ?");
+//         updateParams.push(product_desc);
+
+//         updateFields.push("collection_from = ?");
+//         updateParams.push(collection_from);
+
+//         updateFields.push("freight = ?");
+//         updateParams.push(freight);
+
+//         updateFields.push("freight_type = ?");
+//         updateParams.push(freight_type);
+
+//         updateFields.push("shipment_origin = ?");
+//         updateParams.push(shipment_origin);
+
+//         updateFields.push("shipment_des = ?");
+//         updateParams.push(shipment_des);
+
+//         updateFields.push("shipment_ref = ?");
+//         updateParams.push(shipment_ref);
+
+//         updateFields.push("dimension = ?");
+//         updateParams.push(dimension);
+
+//         updateFields.push("weight = ?");
+//         updateParams.push(weight);
+
+//         updateFields.push("user_type = ?");
+//         updateParams.push(user_type);
+
+//         updateFields.push("comment = ?");
+//         updateParams.push(comment);
+
+//         updateFields.push("no_of_packages = ?");
+//         updateParams.push(no_of_packages);
+
+//         updateFields.push("package_type = ?");
+//         updateParams.push(package_type);
+
+//         updateFields.push("collection_address = ?");
+//         updateParams.push(collection_address);
+
+//         updateFields.push("delivery_address = ?");
+//         updateParams.push(delivery_address);
+
+//         updateFields.push("nature_of_goods = ?");
+//         updateParams.push(nature_of_goods);
+
+//         updateFields.push("delivery_to = ?");
+//         updateParams.push(delivery_to);
+
+//         updateFields.push("port_of_loading = ?");
+//         updateParams.push(port_of_loading);
+
+//         updateFields.push("post_of_discharge = ?");
+//         updateParams.push(post_of_discharge);
+
+//         updateFields.push("auto_calculate = ?");
+//         updateParams.push(auto_calculate);
+
+//         updateFields.push("add_attachments = ?");
+//         updateParams.push(add_attachments);
+
+//         updateFields.push("sea_freight_option = ?");
+//         updateParams.push(sea_freight_option);
+
+//         updateFields.push("road_freight_option = ?");
+//         updateParams.push(road_freight_option);
+
+//         updateFields.push("assign_for_estimate = ?");
+//         updateParams.push(assign_for_estimate);
+
+//         updateFields.push("insurance = ?");
+//         updateParams.push(insurance);
+
+//         updateFields.push("quote_received = ?");
+//         updateParams.push(quote_received);
+
+//         updateFields.push("client_quoted = ?");
+//         updateParams.push(client_quoted);
+
+//         updateFields.push("assign_to_transporter = ?");
+//         updateParams.push(assign_to_transporter);
+
+//         updateFields.push("send_to_warehouse = ?");
+//         updateParams.push(send_to_warehouse);
+
+//         updateFields.push("assign_warehouse = ?");
+//         updateParams.push(assign_warehouse);
+
+//         updateFields.push("assign_to_clearing = ?");
+//         updateParams.push(assign_to_clearing);
+
+//         updateFields.push("fcl_lcl = ?");
+//         updateParams.push(fcl_lcl);
+
+//         updateFields.push("commodity = ?")
+//         updateParams.push(commodity)
+
+//         updateParams.push(freight_id);
+
+//         const updateQuery = `UPDATE tbl_freight SET ${updateFields.join(", ")} WHERE id = ?`;
+
+//         con.query(updateQuery, updateParams, (err, data) => {
+//             if (err) {
+//                 return res.status(500).send({
+//                     success: false,
+//                     message: err.message
+//                 });
+//             }
+//             console.log(data);
+
+//             if (data.affectedRows > 0) {
+//                 // Handle document updates
+//                 /*  if (req.files && req.files.document) {
+//                      const docsInsertQuery = `update tbl_freight set add_attachment_file='${req.files.document[0].filename}' where id='${freight_id}'`;
+//                      con.query(docsInsertQuery, (err, result) => {
+//                          if (err) {
+//                              console.error('Error inserting document data:', err);
+//                              return res.status(500).json({
+//                                  success: false,
+//                                  message: "Internal Server Error"
+//                              });
+//                          }
+//                      });
+//                  } */
+//                 /* if (req.files && req.files.supplier_invoice) {
+//                     // Iterate over all uploaded files for 'supplier_invoice'
+//                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                     req.files.supplier_invoice.forEach((file) => {
+//                         con.query(docsInsertQuery, [freight_id, "Supplier Invoice", file.filename], (err, result) => {
+//                             if (err) throw err;
+//                         });
+//                     })
+//                 }
+//                 if (req.files && req.files.packing_list) {
+//                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                     req.files.packing_list.forEach((file) => {
+//                         con.query(docsInsertQuery, [freight_id, "Packing List", file.filename], (err, result) => {
+//                             if (err) throw err;
+//                         });
+//                     })
+//                 }
+//                 if (req.files && req.files.licenses) {
+//                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                     req.files.licenses.forEach((file) => {
+//                         con.query(docsInsertQuery, [freight_id, "Licenses", file.filename], (err, result) => {
+//                             if (err) throw err;
+//                         });
+//                     })
+//                 }
+//                 if (req.files && req.files.other_documents) {
+//                     const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                     req.files.other_documents.forEach((file) => {
+//                         con.query(docsInsertQuery, [freight_id, "Other Documents", file.filename], (err, result) => {
+//                             if (err) throw err;
+//                         });
+//                     })
+//                 } */
+
+//                 const selectQuery = `SELECT freight_number FROM tbl_freight WHERE id = ?`;
+
+//                 con.query(selectQuery, [freight_id], (err, result) => {
+//                     if (err) {
+//                         console.error("Error fetching freight number:", err);
+//                         return;
+//                     }
+
+//                     if (result.length === 0) {
+//                         console.error("No freight number found for the given ID.");
+//                         return;
+//                     }
+
+//                     const freightNumber = result[0].freight_number;
+//                     console.log(freightNumber);
+
+//                     // Process all files for a given document type
+//                     const processFiles = async (fileArray, documentName) => {
+//                         try {
+//                             for (const file of fileArray) { // Loop through all files
+//                                 const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                                 await new Promise((resolve, reject) => {
+//                                     con.query(docsInsertQuery, [freight_id, documentName, file.filename], (err) => {
+//                                         if (err) {
+//                                             console.error(`Error inserting ${documentName}:`, err);
+//                                             return reject(err);
+//                                         }
+//                                         resolve();
+//                                     });
+//                                 });
+
+//                                 console.log(`🚀 Uploading file: ${file.originalname}`);
+
+//                                 // Upload the file to Google Drive
+//                                 /*   const folderId = await findOrCreateFolder(freightNumber);
+//                                   console.log(`📂 Folder ID: ${folderId}`);
+//                                   console.log(file);
+
+//                                   const { fileId, webViewLink } = await uploadFile(folderId, file);
+
+//                                   // Insert file details into transaction_files
+//                                   const insertFileQuery = `
+//                                    INSERT INTO transaction_files 
+//                                    (freight_number, file_name, drive_file_id, file_link) 
+//                                    VALUES (?, ?, ?, ?)
+//                                `;
+
+//                                   await new Promise((resolve, reject) => {
+//                                       con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
+//                                           if (err) {
+//                                               console.error("Error inserting file details:", err);
+//                                               return reject(err);
+//                                           }
+//                                           resolve();
+//                                       });
+//                                   });
+
+//                                   console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`); */
+//                                 const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+//                                 const uploadResult = await uploadToSpecificPath(
+//                                     freightNumber,     // Main folder: e.g., "F-20250613"
+//                                     "Supplier Invoices",      // Parent folder or fixed main type
+//                                     subfolderName,     // Subfolder based on document type
+//                                     file               // Current file
+//                                 );
+//                             }
+//                         } catch (error) {
+//                             console.error(`Error processing files for ${documentName}:`, error);
+//                         }
+//                     };
+
+//                     const handleFileUploads = async () => {
+//                         try {
+//                             if (req.files) {
+//                                 const fileKeys = Object.keys(req.files);
+
+//                                 for (const key of fileKeys) {
+//                                     const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
+
+//                                     if (files.length > 0) {
+//                                         const documentName = getDocumentName(key);
+//                                         console.log(files, documentName, "📂 Files to process");
+
+//                                         await processFiles(files, documentName);
+//                                     }
+//                                 }
+
+//                                 console.log("✅ All files processed successfully!");
+//                             }
+//                         } catch (error) {
+//                             console.error("Error handling file uploads:", error);
+//                         }
+//                     };
+//                     // Map field names to document names
+//                     const getDocumentName = (fieldName) => {
+//                         console.log(fieldName);
+
+//                         switch (fieldName) {
+//                             case 'supplier_invoice':
+//                                 return "Supplier Invoice";
+//                             case 'packing_list':
+//                                 return "Packing List";
+//                             case 'licenses':
+//                                 return "Licenses";
+//                             case 'other_documents':
+//                                 return "Other Documents";
+//                             default:
+//                                 return "Unknown Document";
+//                         }
+//                     };
+
+//                     // Start processing all files
+//                     handleFileUploads();
+//                 });
+//                 res.status(200).send({
+//                     success: true,
+//                     message: "Freight updated successfully"
+//                 });
+//             } else {
+//                 res.status(400).send({
+//                     success: false,
+//                     message: "Failed to update Freight"
+//                 });
+//             }
+//         });
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
 const UpdatefreightByCustomer = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -2230,6 +2617,7 @@ const UpdatefreightByCustomer = async (req, res) => {
             errors: errors.array()
         });
     }
+    console.log(req.files);
 
     try {
         const {
@@ -2237,117 +2625,33 @@ const UpdatefreightByCustomer = async (req, res) => {
             shipment_origin, shipment_des, comment, no_of_packages, package_type, collection_address, delivery_address,
             nature_of_goods, delivery_to, port_of_loading, post_of_discharge, auto_calculate, add_attachments, sea_freight_option, road_freight_option, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter, send_to_warehouse, assign_warehouse, assign_to_clearing
         } = req.body;
-        // console.log(req.body);
-        // console.log(req.files);
+
+        console.log("Files received:", req.files);
 
         let updateFields = [];
         let updateParams = [];
 
-        // Conditionally add client_id if provided
         if (client_id) {
             updateFields.push("client_id = ?");
             updateParams.push(client_id);
         }
 
-        // Unconditionally add other fields
-        updateFields.push("product_desc = ?");
-        updateParams.push(product_desc);
+        updateFields.push("product_desc = ?", "collection_from = ?", "freight = ?", "freight_type = ?",
+            "shipment_origin = ?", "shipment_des = ?", "shipment_ref = ?", "dimension = ?", "weight = ?", "user_type = ?",
+            "comment = ?", "no_of_packages = ?", "package_type = ?", "collection_address = ?", "delivery_address = ?",
+            "nature_of_goods = ?", "delivery_to = ?", "port_of_loading = ?", "post_of_discharge = ?",
+            "auto_calculate = ?", "add_attachments = ?", "sea_freight_option = ?", "road_freight_option = ?",
+            "assign_for_estimate = ?", "insurance = ?", "quote_received = ?", "client_quoted = ?",
+            "assign_to_transporter = ?", "send_to_warehouse = ?", "assign_warehouse = ?", "assign_to_clearing = ?",
+            "fcl_lcl = ?", "commodity = ?");
 
-        updateFields.push("collection_from = ?");
-        updateParams.push(collection_from);
-
-        updateFields.push("freight = ?");
-        updateParams.push(freight);
-
-        updateFields.push("freight_type = ?");
-        updateParams.push(freight_type);
-
-        updateFields.push("shipment_origin = ?");
-        updateParams.push(shipment_origin);
-
-        updateFields.push("shipment_des = ?");
-        updateParams.push(shipment_des);
-
-        updateFields.push("shipment_ref = ?");
-        updateParams.push(shipment_ref);
-
-        updateFields.push("dimension = ?");
-        updateParams.push(dimension);
-
-        updateFields.push("weight = ?");
-        updateParams.push(weight);
-
-        updateFields.push("user_type = ?");
-        updateParams.push(user_type);
-
-        updateFields.push("comment = ?");
-        updateParams.push(comment);
-
-        updateFields.push("no_of_packages = ?");
-        updateParams.push(no_of_packages);
-
-        updateFields.push("package_type = ?");
-        updateParams.push(package_type);
-
-        updateFields.push("collection_address = ?");
-        updateParams.push(collection_address);
-
-        updateFields.push("delivery_address = ?");
-        updateParams.push(delivery_address);
-
-        updateFields.push("nature_of_goods = ?");
-        updateParams.push(nature_of_goods);
-
-        updateFields.push("delivery_to = ?");
-        updateParams.push(delivery_to);
-
-        updateFields.push("port_of_loading = ?");
-        updateParams.push(port_of_loading);
-
-        updateFields.push("post_of_discharge = ?");
-        updateParams.push(post_of_discharge);
-
-        updateFields.push("auto_calculate = ?");
-        updateParams.push(auto_calculate);
-
-        updateFields.push("add_attachments = ?");
-        updateParams.push(add_attachments);
-
-        updateFields.push("sea_freight_option = ?");
-        updateParams.push(sea_freight_option);
-
-        updateFields.push("road_freight_option = ?");
-        updateParams.push(road_freight_option);
-
-        updateFields.push("assign_for_estimate = ?");
-        updateParams.push(assign_for_estimate);
-
-        updateFields.push("insurance = ?");
-        updateParams.push(insurance);
-
-        updateFields.push("quote_received = ?");
-        updateParams.push(quote_received);
-
-        updateFields.push("client_quoted = ?");
-        updateParams.push(client_quoted);
-
-        updateFields.push("assign_to_transporter = ?");
-        updateParams.push(assign_to_transporter);
-
-        updateFields.push("send_to_warehouse = ?");
-        updateParams.push(send_to_warehouse);
-
-        updateFields.push("assign_warehouse = ?");
-        updateParams.push(assign_warehouse);
-
-        updateFields.push("assign_to_clearing = ?");
-        updateParams.push(assign_to_clearing);
-
-        updateFields.push("fcl_lcl = ?");
-        updateParams.push(fcl_lcl);
-
-        updateFields.push("commodity = ?")
-        updateParams.push(commodity)
+        updateParams.push(
+            product_desc, collection_from, freight, freight_type, shipment_origin, shipment_des, shipment_ref, dimension, weight,
+            user_type, comment, no_of_packages, package_type, collection_address, delivery_address, nature_of_goods,
+            delivery_to, port_of_loading, post_of_discharge, auto_calculate, add_attachments, sea_freight_option,
+            road_freight_option, assign_for_estimate, insurance, quote_received, client_quoted, assign_to_transporter,
+            send_to_warehouse, assign_warehouse, assign_to_clearing, fcl_lcl, commodity
+        );
 
         updateParams.push(freight_id);
 
@@ -2361,180 +2665,74 @@ const UpdatefreightByCustomer = async (req, res) => {
                 });
             }
 
-            if (data.affectedRows > 0) {
-                // Handle document updates
-                /*  if (req.files && req.files.document) {
-                     const docsInsertQuery = `update tbl_freight set add_attachment_file='${req.files.document[0].filename}' where id='${freight_id}'`;
-                     con.query(docsInsertQuery, (err, result) => {
-                         if (err) {
-                             console.error('Error inserting document data:', err);
-                             return res.status(500).json({
-                                 success: false,
-                                 message: "Internal Server Error"
-                             });
-                         }
-                     });
-                 } */
-                /* if (req.files && req.files.supplier_invoice) {
-                    // Iterate over all uploaded files for 'supplier_invoice'
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                    req.files.supplier_invoice.forEach((file) => {
-                        con.query(docsInsertQuery, [freight_id, "Supplier Invoice", file.filename], (err, result) => {
-                            if (err) throw err;
-                        });
-                    })
-                }
-                if (req.files && req.files.packing_list) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                    req.files.packing_list.forEach((file) => {
-                        con.query(docsInsertQuery, [freight_id, "Packing List", file.filename], (err, result) => {
-                            if (err) throw err;
-                        });
-                    })
-                }
-                if (req.files && req.files.licenses) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                    req.files.licenses.forEach((file) => {
-                        con.query(docsInsertQuery, [freight_id, "Licenses", file.filename], (err, result) => {
-                            if (err) throw err;
-                        });
-                    })
-                }
-                if (req.files && req.files.other_documents) {
-                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                    req.files.other_documents.forEach((file) => {
-                        con.query(docsInsertQuery, [freight_id, "Other Documents", file.filename], (err, result) => {
-                            if (err) throw err;
-                        });
-                    })
-                } */
-
-                const selectQuery = `SELECT freight_number FROM tbl_freight WHERE id = ?`;
-
-                con.query(selectQuery, [freight_id], (err, result) => {
-                    if (err) {
-                        console.error("Error fetching freight number:", err);
-                        return;
-                    }
-
-                    if (result.length === 0) {
-                        console.error("No freight number found for the given ID.");
-                        return;
-                    }
-
-                    const freightNumber = result[0].freight_number;
-                    console.log(freightNumber);
-
-                    // Process all files for a given document type
-                    /*  const processFiles = async (fileArray, documentName) => {
-                         try {
-                             for (const file of fileArray) { // Loop through all files
-                                 const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
- 
-                                 await new Promise((resolve, reject) => {
-                                     con.query(docsInsertQuery, [freight_id, documentName, file.filename], (err) => {
-                                         if (err) {
-                                             console.error(`Error inserting ${documentName}:`, err);
-                                             return reject(err);
-                                         }
-                                         resolve();
-                                     });
-                                 });
- 
-                                 console.log(`🚀 Uploading file: ${file.originalname}`);
- 
-                                 // Upload the file to Google Drive
-                                 const folderId = await findOrCreateFolder(freightNumber);
-                                 console.log(`📂 Folder ID: ${folderId}`);
-                                 console.log(file);
- 
-                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
- 
-                                 // Insert file details into transaction_files
-                                 const insertFileQuery = `
-                                 INSERT INTO transaction_files 
-                                 (freight_number, file_name, drive_file_id, file_link) 
-                                 VALUES (?, ?, ?, ?)
-                             `;
- 
-                                 await new Promise((resolve, reject) => {
-                                     con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
-                                         if (err) {
-                                             console.error("Error inserting file details:", err);
-                                             return reject(err);
-                                         }
-                                         resolve();
-                                     });
-                                 });
- 
-                                 console.log(`✅ ${documentName}: ${file.originalname} uploaded and recorded successfully!`);
-                             }
-                         } catch (error) {
-                             console.error(`Error processing files for ${documentName}:`, error);
-                         }
-                     };
- 
-                     const handleFileUploads = async () => {
-                         try {
-                             if (req.files) {
-                                 const fileKeys = Object.keys(req.files);
- 
-                                 for (const key of fileKeys) {
-                                     const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
- 
-                                     if (files.length > 0) {
-                                         const documentName = getDocumentName(key);
-                                         console.log(files, documentName, "📂 Files to process");
- 
-                                         await processFiles(files, documentName);
-                                     }
-                                 }
- 
-                                 console.log("✅ All files processed successfully!");
-                             }
-                         } catch (error) {
-                             console.error("Error handling file uploads:", error);
-                         }
-                     };
- 
- 
-                     // Map field names to document names
-                     const getDocumentName = (fieldName) => {
-                         console.log(fieldName);
- 
-                         switch (fieldName) {
-                             case 'supplier_invoice':
-                                 return "Supplier Invoice";
-                             case 'packing_list':
-                                 return "Packing List";
-                             case 'licenses':
-                                 return "Licenses";
-                             case 'other_documents':
-                                 return "Other Documents";
-                             default:
-                                 return "Unknown Document";
-                         }
-                     };
- 
-                     // Start processing all files
-                     handleFileUploads(); */
-                });
-                res.status(200).send({
-                    success: true,
-                    message: "Freight updated successfully"
-                });
-            } else {
-                res.status(400).send({
+            if (data.affectedRows === 0) {
+                return res.status(400).send({
                     success: false,
                     message: "Failed to update Freight"
                 });
             }
+
+            const selectQuery = `SELECT freight_number FROM tbl_freight WHERE id = ?`;
+            con.query(selectQuery, [freight_id], (err, result) => {
+                if (err || result.length === 0) {
+                    return res.status(500).json({ success: false, message: "Could not retrieve freight number" });
+                }
+
+                const freightNumber = result[0].freight_number;
+
+                // IIFE to handle async/await in this callback
+                (async () => {
+                    try {
+                        if (req.files) {
+                            const fileKeys = Object.keys(req.files);
+
+                            for (const key of fileKeys) {
+                                const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
+                                if (files.length === 0) continue;
+
+                                const documentName = getDocumentName1(key);
+
+                                for (const file of files) {
+                                    const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+                                    await new Promise((resolve, reject) => {
+                                        con.query(docsInsertQuery, [freight_id, documentName, file.filename], (err) => {
+                                            if (err) {
+                                                console.error(`Error inserting ${documentName}:`, err);
+                                                return reject(err);
+                                            }
+                                            console.log(`✅ Inserted ${file.filename} as ${documentName}`);
+                                            resolve();
+                                        });
+                                    });
+
+                                    // Optional: upload to Google Drive here (if needed)
+                                    const subfolderName = getFolderNameFromDocumentName1(documentName); // returns "AD_Quotations" etc.
+
+                                    const uploadResult = await uploadToSpecificPath(
+                                        freightNumber,     // Main folder: e.g., "F-20250613"
+                                        "Supplier Invoices",      // Parent folder or fixed main type
+                                        subfolderName,     // Subfolder based on document type
+                                        file               // Current file
+                                    );
+                                }
+                            }
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight updated successfully"
+                        });
+
+                    } catch (uploadErr) {
+                        console.error("❌ Upload processing failed:", uploadErr);
+                        return res.status(500).json({ success: false, message: uploadErr.message });
+                    }
+                })();
+            });
         });
     } catch (error) {
+        console.error("❌ Unexpected error:", error);
         res.status(500).send({
             success: false,
             message: error.message
@@ -2542,6 +2740,21 @@ const UpdatefreightByCustomer = async (req, res) => {
     }
 };
 
+// Helper to map field names to document types
+function getDocumentName1(fieldName) {
+    switch (fieldName) {
+        case 'supplier_invoice':
+            return "Supplier Invoices";
+        case 'packing_list':
+            return "Packing List";
+        case 'licenses':
+            return "Licenses";
+        case 'other_documents':
+            return "Other Documents";
+        default:
+            return "Unknown Document";
+    }
+}
 
 const GetNotificationUser = async (req, res) => {
     try {
@@ -3437,7 +3650,7 @@ const getListClearanceQuotation = async (req, res) => {
 
 //const saveClearanceQuotation
 
-const uploadClrearanceDOC = async (req, res) => {
+/* const uploadClrearanceDOC = async (req, res) => {
     try {
         const { clearance_id } = req.body;
         if (req.files && req.files.supplier_invoice) {
@@ -3469,36 +3682,85 @@ const uploadClrearanceDOC = async (req, res) => {
             con.query(`update tbl_clearance set proof_of_payment='${req.files.proof_of_payment[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.waybill) {
             con.query(`update tbl_clearance set waybill='${req.files.waybill[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.bill_of_lading) {
             con.query(`update tbl_clearance set bill_of_lading='${req.files.bill_of_lading[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.product_brochures) {
             con.query(`update tbl_clearance set product_brochures='${req.files.product_brochures[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.arrival_notification) {
             con.query(`update tbl_clearance set arrival_notification='${req.files.arrival_notification[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.product_literature) {
             con.query(`update tbl_clearance set product_literature='${req.files.product_literature[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         if (req.files && req.files.letter_of_authority) {
             con.query(`update tbl_clearance set letter_of_authority='${req.files.letter_of_authority[0].filename}' where id='${clearance_id}'`, (err, data) => {
                 if (err) throw err;
             })
+            const uploadResult = await uploadToSpecificPath(
+                freightNumber,     // Main folder: e.g., "F-20250613"
+                "Supplier Invoices",      // Parent folder or fixed main type
+                subfolderName,     // Subfolder based on document type
+                file               // Current file
+            );
+
         }
         res.status(200).send({
             success: true,
@@ -3511,6 +3773,121 @@ const uploadClrearanceDOC = async (req, res) => {
         })
     }
 }
+ */
+
+const uploadClrearanceDOC = async (req, res) => {
+    try {
+        const { clearance_id } = req.body;
+
+        // Step 1: Get clearance details
+        const [clearanceRow] = await new Promise((resolve, reject) => {
+            con.query(`SELECT clearance_number, freight_id FROM tbl_clearance WHERE id = ?`, [clearance_id], (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
+
+        let folderName = clearanceRow.clearance_number;
+
+        // If freight_id exists, get freight_number
+        if (clearanceRow.freight_id) {
+            const [freightRow] = await new Promise((resolve, reject) => {
+                con.query(`SELECT freight_number FROM tbl_freight WHERE id = ?`, [clearanceRow.freight_id], (err, result) => {
+                    if (err) return reject(err);
+                    resolve(result);
+                });
+            });
+            folderName = freightRow.freight_number;
+        }
+
+        const mainFolder = folderName;
+        const subFolder = "Supplier Invoices";
+
+        if (req.files && req.files.supplier_invoice) {
+            const file = req.files.supplier_invoice[0];
+            con.query(`UPDATE tbl_clearance SET supplier_invoice = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Invoice, Packing List", file);
+        }
+
+        if (req.files && req.files.packing_list) {
+            const file = req.files.packing_list[0];
+            con.query(`UPDATE tbl_clearance SET packing_list = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Invoice, Packing List", file);
+        }
+
+        if (req.files && req.files.proof_of_payment) {
+            const file = req.files.proof_of_payment[0];
+            con.query(`UPDATE tbl_clearance SET proof_of_payment = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Invoice, Packing List", file);
+        }
+
+        if (req.files && req.files.waybill) {
+            const file = req.files.waybill[0];
+            con.query(`UPDATE tbl_clearance SET waybill = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, "Freight documents", "Waybill", file);
+        }
+
+        if (req.files && req.files.bill_of_lading) {
+            const file = req.files.bill_of_lading[0];
+            con.query(`UPDATE tbl_clearance SET bill_of_lading = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, "Freight documents", "Waybill", file);
+        }
+
+        if (req.files && req.files.product_brochures) {
+            const file = req.files.product_brochures[0];
+            con.query(`UPDATE tbl_clearance SET product_brochures = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Invoice, Packing List", file);
+        }
+
+        if (req.files && req.files.arrival_notification) {
+            const file = req.files.arrival_notification[0];
+            con.query(`UPDATE tbl_clearance SET arrival_notification = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Invoice, Packing List", file);
+        }
+
+        if (req.files && req.files.product_literature) {
+            const file = req.files.product_literature[0];
+            con.query(`UPDATE tbl_clearance SET product_literature = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Product Literature", file);
+        }
+
+        if (req.files && req.files.letter_of_authority) {
+            const file = req.files.letter_of_authority[0];
+            con.query(`UPDATE tbl_clearance SET letter_of_authority = ? WHERE id = ?`, [file.filename, clearance_id], (err) => {
+                if (err) throw err;
+            });
+            await uploadToSpecificPath(mainFolder, subFolder, "Letters of authority", file);
+        }
+
+        res.status(200).send({
+            success: true,
+            message: "Upload successful"
+        });
+
+    } catch (error) {
+        console.error("Upload error:", error);
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 const CleranceOrderList = async (req, res) => {
     try {
