@@ -37,11 +37,13 @@ const sendSms = (to, body) => {
 // Function to send WhatsApp message
 const sendWhatsApp = (to, body) => {
      console.log(to);
-    console.log(Twilio_phone_number);
+    console.log(Twilio_Whatsapp_number);
     return client.messages.create({
         body: body,
         from: `whatsapp:${Twilio_Whatsapp_number}`, // Your Twilio WhatsApp number
+        // to: `whatsapp:${to}`, // WhatsApp number to send the message
         to: `whatsapp:${to}`, // WhatsApp number to send the message
+
     })
         .then((message) => {
             console.log(`WhatsApp message sent: ${message.sid}`);

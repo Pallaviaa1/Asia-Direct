@@ -4291,7 +4291,7 @@ const GetWarehouseOrders = async (req, res) => {
                 SUM(tbl_freight.dimension + IFNULL(wp_totals.wp_total_dimension, 0)) AS total_warehouse_dimension,
 SUM(tbl_freight.weight + IFNULL(wp_totals.wp_total_weight, 0)) AS total_warehouse_weight,
 SUM(tbl_freight.no_of_packages + IFNULL(wp_totals.wp_total_packages, 0)) AS total_warehouse_noOfPackages,
- (COUNT(tbl_freight.id) + COUNT(wp_totals.wp_total_packages)) AS total_freight
+ (COUNT(tbl_freight.id) + COUNT(wp_totals.wp_total_packages)) AS total_freight,
                 tbl_freight.freight as Freight,
                 tbl_freight.id AS freight_ID,
                 tbl_orders.*, 
@@ -5966,6 +5966,7 @@ const editWarehouse = async (req, res) => {
             mobile_number,
             warehouse_id
         } = req.body;
+        console.log(req.body);
 
         // Check if the new warehouse_number already exists for another warehouse
         const checkQuery = `
@@ -6103,9 +6104,10 @@ const editWarehouseDetails = async (req, res) => {
     try {
         const {
             warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status,
-            warehouse_collect, date_received, package_type, packages, dimension, weight,
+            warehouse_collect, date_received, package_type, no_of_packages, total_dimension, weight,
             costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch
         } = req.body;
+        console.log(req.body);
 
         // Step 1: Fetch old date_received
         con.query(`SELECT date_received, order_id as warehouse_order_id FROM warehouse_assign_order WHERE id = ?`, [warehouse_assign_id], (err, oldResult) => {
@@ -6122,7 +6124,7 @@ const editWarehouseDetails = async (req, res) => {
                 WHERE id = ?`,
                 [
                     ware_receipt_no, tracking_number, warehouse_status, warehouse_collect,
-                    date_received, weight, dimension, costs_to_collect, warehouse_cost,
+                    date_received, weight, total_dimension, costs_to_collect, warehouse_cost,
                     warehouse_dispatch, cost_to_dispatch, warehouse_assign_id
                 ],
                 (err) => {
@@ -6130,11 +6132,11 @@ const editWarehouseDetails = async (req, res) => {
 
                     // Update tbl_orders
                     con.query(`UPDATE tbl_orders SET dimensions = ?, weight = ? WHERE id = ?`,
-                        [dimension, weight, order_id]);
+                        [total_dimension, weight, order_id]);
 
                     // Update tbl_freight
                     con.query(`UPDATE tbl_freight SET no_of_packages = ?, package_type = ? WHERE id = ?`,
-                        [packages, package_type, freight_id]);
+                        [no_of_packages, package_type, freight_id]);
 
                     // === Send notification if date_received changed ===
                     if (oldDateReceived !== date_received) {
@@ -6970,6 +6972,74 @@ const OrderInvoiceList = async (req, res) => {
     }
 };
 
+const revertMovedFreight = async (req, res) => {
+    try {
+        const { freight_id, batch_id } = req.body;
+
+        // Check if freight is actually assigned to the batch
+        const checkAssignmentQuery = `
+            SELECT * FROM freight_assig_to_batch 
+            WHERE freight_id = ? AND batch_id = ?
+        `;
+        con.query(checkAssignmentQuery, [freight_id, batch_id], (err, assignmentResult) => {
+            if (err) {
+                return res.status(500).send({ success: false, message: err.message });
+            }
+
+            if (assignmentResult.length === 0) {
+                return res.status(400).send({ success: false, message: 'No such freight assigned to the batch' });
+            }
+
+            // Step 1: Delete from freight_assig_to_batch
+            const deleteQuery = `
+                DELETE FROM freight_assig_to_batch 
+                WHERE freight_id = ? AND batch_id = ?
+            `;
+            con.query(deleteQuery, [freight_id, batch_id], (err, deleteResult) => {
+                if (err) {
+                    return res.status(500).send({ success: false, message: err.message });
+                }
+
+                // Step 2: Update tbl_freight.asigned_to_batch = 0
+                const updateFreightQuery = `
+                    UPDATE tbl_freight 
+                    SET asigned_to_batch = 0 
+                    WHERE id = ?
+                `;
+                con.query(updateFreightQuery, [freight_id], (err, updateResult) => {
+                    if (err) {
+                        return res.status(500).send({ success: false, message: err.message });
+                    }
+
+                    // Step 3: Reset warehouse assignment
+                    const updateWarehouseQuery = `
+                        UPDATE warehouse_assign_order 
+                        SET assign_to_batch = 0, batch_id = NULL 
+                        WHERE freight_id = ?
+                    `;
+                    con.query(updateWarehouseQuery, [freight_id], (err, warehouseUpdateResult) => {
+                        if (err) {
+                            return res.status(500).send({ success: false, message: err.message });
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: 'Freight successfully removed from batch'
+                        });
+                    });
+                });
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
 /* function checkAndNotifyEstimateOverdue() {
     const query = `
       SELECT tbl_freight.freight_number, tbl_users.full_name
@@ -7532,6 +7602,6 @@ module.exports = {
     getFreightsByBatch, MoveToOrder, MoveToClearaneOrder, getCleranceOrder, CompleteCleranceOrder, DeleteClearanceOrder,
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, DeleteWarehouse, editWarehouseDetails, GetCountries,
     GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, updateWarehouseProduct, updateClientWarehouseProduct, DeleteWarehouseProduct, GetFreightImages,
-    DeleteDocument, GetDeliveredOrder, OrderInvoiceList
+    DeleteDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight
 
 }
