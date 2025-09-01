@@ -1827,11 +1827,17 @@ const CustomerLogin = async (req, res) => {
                     if (err) throw err;
                     if (password) {
                         if (data[0].status == 1 && data[0].is_deleted == 0) {
-                            res.status(200).send({
-                                success: true,
-                                message: "Customer Login Sucessfully !",
-                                data: data[0]
-                            })
+                            let updateLoginQuery = "UPDATE tbl_users SET LastLogin = ? WHERE id = ?";
+
+                            con.query(updateLoginQuery, [new Date(), data[0].id], (err) => {
+                                if (err) console.error('Failed to update last login:', err.message);
+                                // You can still send response even if update fails
+                                res.status(200).send({
+                                    success: true,
+                                    message: "Customer Login Successfully!",
+                                    data: data[0]
+                                });
+                            });
                         }
                         else {
                             if (data[0].is_deleted == 1) {
@@ -3031,7 +3037,8 @@ Thank you for your order. You can track your order using the following tracking 
 
                                     })
 
-                                    const createDriveFolderOnly = async (req, res) => {
+                                    /*  01-09-2025
+                                     const createDriveFolderOnly = async (req, res) => {
                                         try {
                                             const freightNumber = order_status[0].freight_number;
 
@@ -3045,7 +3052,7 @@ Thank you for your order. You can track your order using the following tracking 
                                             console.error("Error creating folder:", error);
                                         }
                                     };
-                                    createDriveFolderOnly()
+                                    createDriveFolderOnly() */
                                     // let Email = SMTP_MAIL;
                                     const mailSubject = `Order Confirmation by ${username}`;
                                     const content = `

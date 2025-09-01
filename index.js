@@ -58,14 +58,14 @@ app.use('/api', invoice_route)
 
 
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err); // ✅ log all unhandled errors
+  logger.error('Unhandled error:', err); //  log all unhandled errors
   res.status(500).json({ message: 'Internal server error' });
 });
 
 
 app.listen(PORT, (err) => {
   if (err) {
-    logger.error('Server start error:', err); // ✅ log server error
+    logger.error('Server start error:', err); //  log server error
     throw err;
   }
   else {

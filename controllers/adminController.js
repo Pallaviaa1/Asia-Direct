@@ -4,11 +4,10 @@ const bcrypt = require('bcryptjs');
 const sendMail = require('../helpers/sendMail')
 const rendomString = require('randomstring');
 const { assign } = require('nodemailer/lib/shared');
-const { findOrCreateFolder, uploadFile, uploadToSpecificPath } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId } = require('../helpers/uploadDrive');
 const { logging } = require('googleapis/build/src/apis/logging');
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
-
 async function hashPassword(password) {
     return await bcrypt.hash(password, 10);
 }
@@ -38,10 +37,15 @@ const AdminLogin = async (req, res) => {
                     if (err) throw err;
                     if (password) {
                         if (data[0].status == 1 && data[0].is_deleted == 0) {
-                            res.status(200).send({
-                                success: true,
-                                message: "Admin Login Sucessfully !",
-                                data: data[0]
+                            let updateLoginQuery = "UPDATE tbl_users SET LastLogin = ? WHERE id = ?";
+
+                            con.query(updateLoginQuery, [new Date(), data[0].id], (err) => {
+                                if (err) console.error('Failed to update last login:', err.message);
+                                res.status(200).send({
+                                    success: true,
+                                    message: "Admin Login Sucessfully !",
+                                    data: data[0]
+                                })
                             })
                         }
                         else {
@@ -696,231 +700,416 @@ const GetFreightAdmin = async (req, res) => {
 };
 
 
-const Addfreight = (req, res) => {
+// const Addfreight = (req, res) => {
+//     try {
+//         // Extracting data from req.body
+//         const {
+//             client_ref, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
+//             is_active, comment, no_of_packages, package_type, commodity, hazardous, industry, country_of_origin, destination_country,
+//             supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
+//             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, sales_representative, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments, documentName
+//         } = req.body;
+//         // console.log(req.files);
+
+//         // Generate the freight number
+//         generateFreightNumber((err, freightNumber) => {
+//             if (err) throw err;
+
+//             // Insert into the database
+//             let insertQuery;
+//             let insertParams;
+
+//             insertQuery = `INSERT INTO tbl_freight (client_id, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, 
+//             quote_received, client_quoted, is_active, comment, no_of_packages, package_type, commodity, hazardous, 
+//              collection_from, delivery_to, supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, 
+//             ready_for_collection, transit_time, priority, added_by, freight_number, shipment_details, 
+//             nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, 
+//             send_to_warehouse, shipment_origin, shipment_des, product_desc, shipment_ref, insurance, client_ref_name, sales_representative) 
+//             VALUES (?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?)`;
+//             insertParams = [
+//                 client_ref, client_email, date, type, fcl_lcl || null, freight, incoterm, dimension, weight, quote_received, client_quoted,
+//                 is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
+//                 supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
+//                 transit_time, priority, 1, freightNumber, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
+//                 assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, Product_Description, shipment_ref, insurance, client_ref_name, sales_representative
+//             ];
+
+//             con.query(insertQuery, insertParams, (err, insertResult) => {
+//                 if (err) throw err;
+//                 /* if (req.file && req.file.filename) {
+//                     const docsInsertQuery = `update tbl_freight set add_attachments='${add_attachments}', add_attachment_file='${req.file.filename}' where id='${insertResult.insertId}'`;
+//                     con.query(docsInsertQuery, (err, result) => {
+//                         if (err) {
+//                             // console.error('Error inserting document data:', err);
+//                             return res.status(500).json({
+//                                 success: false,
+//                                 message: "Internal Server Error"
+//                             });
+//                         }
+//                     });
+//                 } */
+
+//                 const selectQuery = `
+//                     SELECT tbl_freight.freight_number, tbl_freight.client_id, tbl_users.full_name
+//                     FROM tbl_freight
+//                     LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+//                     WHERE tbl_freight.id = ?
+//                   `;
+
+
+//                 con.query(selectQuery, [insertResult.insertId], (err, result) => {
+//                     if (err) {
+//                         console.error("Error fetching freight number:", err);
+//                         return;
+//                     }
+
+//                     if (result.length === 0) {
+//                         console.error("No freight number found for the given ID.");
+//                         return;
+//                     }
+
+//                     const freightNumber = result[0].freight_number;
+
+//                     const createDriveFolderOnly = async (req, res) => {
+//                         try {
+
+//                             if (!freightNumber) {
+//                                 return res.status(400).json({ message: "Missing freightNumber" });
+//                             }
+
+//                             const folderId = await findOrCreateFolder(freightNumber);
+
+//                         } catch (error) {
+//                             console.error("Error creating folder:", error);
+//                         }
+//                     };
+//                     createDriveFolderOnly()
+
+//                     const Email = client_email; // send email to customer
+//                     const mailSubject = 'New Shipment Enquiry';
+//                     const content = `
+//   <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+//     <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Shipment Enquiry</h2>
+
+//     <p style="font-size: 16px; color: #333;">
+//       Dear <strong>${result[0].full_name}</strong>,
+//     </p>
+
+//     <p style="font-size: 16px; color: #333;">
+//       We’re excited to let you know that a new shipment enquiry has been created under your profile.
+//     </p>
+
+//     <p style="font-size: 16px; color: #333;">
+//       <strong>Shipment Details:</strong><br>
+//       Freight Number: <strong>${freightNumber}</strong><br>
+//       Product Description: <strong>${Product_Description}</strong><br>
+//       Freight: <strong>${freight}</strong>
+//     </p>
+
+//     <p style="font-size: 16px; color: #333;">
+//       Our sales team will reach out to you shortly with further details. In the meantime, feel free to contact us if you have any questions.
+//     </p>
+
+//     <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+//     <p style="font-size: 14px; color: #777;">
+//       Regards,<br>
+//       <strong>Management System</strong>
+//     </p>
+//   </div>
+// `;
+
+//                     // sendMail(Email, mailSubject, content);
+
+//                     // Process all files for a given document type
+//                     const processFiles = async (fileArray, documentName) => {
+//                         try {
+
+
+//                             for (const file of fileArray) { // Loop through all files
+//                                 const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+
+//                                 await new Promise((resolve, reject) => {
+//                                     con.query(docsInsertQuery, [insertResult.insertId, documentName, file.filename], (err) => {
+//                                         if (err) {
+//                                             console.error(`Error inserting ${documentName}:`, err);
+//                                             return reject(err);
+//                                         }
+//                                         resolve();
+//                                     });
+//                                 });
+
+//                                 // Step 2: Upload to Google Drive (or your cloud service)
+//                                 const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+//                                 const uploadResult = await uploadToSpecificPath(
+//                                     freightNumber,     // Main folder: e.g., "F-20250613"
+//                                     "Supplier Invoices",      // Parent folder or fixed main type
+//                                     subfolderName,     // Subfolder based on document type
+//                                     file               // Current file
+//                                 );
+
+//                                 // console.log(` Uploading file: ${file.originalname}`);
+
+//                                 // Upload the file to Google Drive
+//                                 /* const folderId = await findOrCreateFolder(freightNumber);
+//                                 console.log(` Folder ID: ${folderId}`);
+//                                 console.log(file);
+
+//                                 const { fileId, webViewLink } = await uploadFile(folderId, file);
+
+//                                 // Insert file details into transaction_files
+//                                 const insertFileQuery = `
+//                                     INSERT INTO transaction_files 
+//                                     (freight_number, file_name, drive_file_id, file_link) 
+//                                     VALUES (?, ?, ?, ?)
+//                                 `;
+
+//                                 await new Promise((resolve, reject) => {
+//                                     con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
+//                                         if (err) {
+//                                             console.error("Error inserting file details:", err);
+//                                             return reject(err);
+//                                         }
+//                                         resolve();
+//                                     });
+//                                 }); */
+
+//                                 // console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+//                             }
+//                         } catch (error) {
+//                             console.error(`Error processing files for ${documentName}:`, error);
+//                         }
+//                     };
+
+
+//                     /* const handleFileUploads = async () => {
+//                         try {
+//                             if (req.files) {
+//                                 const fileKeys = Object.keys(req.files);
+
+//                                 for (const key of fileKeys) {
+//                                     const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
+
+//                                     if (files.length > 0) {
+//                                         const documentName = getDocumentName(key);
+//                                         // console.log(files, documentName, " Files to process");
+
+//                                         await processFiles(files, documentName);
+//                                     }
+//                                 }
+
+//                                 console.log("All files processed successfully!");
+//                             }
+//                         } catch (error) {
+//                             console.error("Error handling file uploads:", error);
+//                         }
+//                     };
+
+
+//                     // Map field names to document names
+//                     const getDocumentName = (fieldName) => {
+//                         console.log(fieldName);
+
+//                         switch (fieldName) {
+//                             case 'supplier_invoice':
+//                                 return "Supplier Invoices";
+//                             case 'packing_list':
+//                                 return "Packing List";
+//                             case 'licenses':
+//                                 return "Licenses";
+//                             case 'other_documents':
+//                                 return "Other Documents";
+//                             default:
+//                                 return "Unknown Document";
+//                         }
+//                     };
+
+//                     // Start processing all files
+//                     handleFileUploads(); */
+//                 });
+//                 await processFiles(files, documentName);
+//             });
+//             res.send({ success: true, message: "success" })
+//         });
+
+//     } catch (error) {
+//         // console.error('Error in Addfreight function:', error);
+//         return res.status(500).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+
+const nestedFolderStructure = {
+    "Clearing Documents": [
+        "Customs Documents",
+        "Supporting Documents"
+    ],
+    "Freight documents": [
+        "Waybills",
+        "Warehouse Entry Docs",
+        "Supplier Invoices"
+    ],
+    "Supplier Invoices": [
+        "Invoice, Packing List",
+        "Product Literature",
+        "Letters of authority"
+    ],
+    "Quotations": [
+        "AD_ Invoice",
+        "AD_Quotations"
+    ],
+    "Proof of Delivery": [
+        "Delivery note",
+        "Courier Waybills"
+    ]
+};
+
+const getMainFolderForDoc = (docName) => {
+    for (const [mainFolder, subFolders] of Object.entries(nestedFolderStructure)) {
+        if (subFolders.includes(docName)) return mainFolder;
+    }
+    return null; // not found
+};
+
+// Upload file to matching subfolder
+const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
+    // Map document to main folder type
+    const mainFolderName = getMainFolderForDoc(documentName);
+    if (!mainFolderName) {
+        console.log(`Document name "${documentName}" does not match any known subfolder. Upload skipped.`);
+        return null;
+    }
+
+    // Find the main freight folder by freightNumber
+    const freightFolderId = await findFolderId(freightNumber);
+    if (!freightFolderId) {
+        console.log(`Freight folder "${freightNumber}" not found. Upload skipped.`);
+        return null;
+    }
+
+    // Find main folder inside the freight folder
+    const mainFolderId = await findFolderId(mainFolderName, freightFolderId);
+    if (!mainFolderId) {
+        console.log(`Main folder "${mainFolderName}" not found inside "${freightNumber}". Upload skipped.`);
+        return null;
+    }
+
+    // Find subfolder inside the main folder
+    const subFolderId = await findFolderId(documentName, mainFolderId);
+    if (!subFolderId) {
+        console.log(`Subfolder "${documentName}" not found inside "${mainFolderName}". Upload skipped.`);
+        return null;
+    }
+
+    // Upload file to the subfolder
+    const result = await uploadFile(subFolderId, file);
+    console.log(`Uploaded ${file.originalname} to ${freightNumber}/${mainFolderName}/${documentName}`);
+    return result;
+};
+
+const Addfreight = async (req, res) => {
     try {
-        // Extracting data from req.body
         const {
             client_ref, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
             is_active, comment, no_of_packages, package_type, commodity, hazardous, industry, country_of_origin, destination_country,
             supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
-            transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, sales_representative, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments
+            transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, sales_representative, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments, documentName
         } = req.body;
-        // console.log(req.files);
+        console.log(req.body);
+        console.log(req.files);
 
-        // Generate the freight number
-        generateFreightNumber((err, freightNumber) => {
+         console.log(req.body.documentName);
+        // Generate freight number
+        generateFreightNumber(async (err, freightNumber) => {
             if (err) throw err;
 
-            // Insert into the database
-            let insertQuery;
-            let insertParams;
-
-            insertQuery = `INSERT INTO tbl_freight (client_id, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, 
+            // Insert freight into DB
+            const insertResult = await new Promise((resolve, reject) => {
+                insertQuery = `INSERT INTO tbl_freight (client_id, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, 
             quote_received, client_quoted, is_active, comment, no_of_packages, package_type, commodity, hazardous, 
              collection_from, delivery_to, supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, 
             ready_for_collection, transit_time, priority, added_by, freight_number, shipment_details, 
             nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, 
             send_to_warehouse, shipment_origin, shipment_des, product_desc, shipment_ref, insurance, client_ref_name, sales_representative) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?)`;
-            insertParams = [
-                client_ref, client_email, date, type, fcl_lcl || null, freight, incoterm, dimension, weight, quote_received, client_quoted,
-                is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
-                supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
-                transit_time, priority, 1, freightNumber, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
-                assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, Product_Description, shipment_ref, insurance, client_ref_name, sales_representative
-            ];
-
-            con.query(insertQuery, insertParams, (err, insertResult) => {
-                if (err) throw err;
-                /* if (req.file && req.file.filename) {
-                    const docsInsertQuery = `update tbl_freight set add_attachments='${add_attachments}', add_attachment_file='${req.file.filename}' where id='${insertResult.insertId}'`;
-                    con.query(docsInsertQuery, (err, result) => {
-                        if (err) {
-                            // console.error('Error inserting document data:', err);
-                            return res.status(500).json({
-                                success: false,
-                                message: "Internal Server Error"
-                            });
-                        }
-                    });
-                } */
-
-                const selectQuery = `
-                    SELECT tbl_freight.freight_number, tbl_freight.client_id, tbl_users.full_name
-                    FROM tbl_freight
-                    LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
-                    WHERE tbl_freight.id = ?
-                  `;
-
-
-                con.query(selectQuery, [insertResult.insertId], (err, result) => {
-                    if (err) {
-                        console.error("Error fetching freight number:", err);
-                        return;
-                    }
-
-                    if (result.length === 0) {
-                        console.error("No freight number found for the given ID.");
-                        return;
-                    }
-
-                    const freightNumber = result[0].freight_number;
-                    const Email = client_email; // send email to customer
-                    const mailSubject = 'New Shipment Enquiry';
-                    const content = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Shipment Enquiry</h2>
-
-    <p style="font-size: 16px; color: #333;">
-      Dear <strong>${result[0].full_name}</strong>,
-    </p>
-
-    <p style="font-size: 16px; color: #333;">
-      We’re excited to let you know that a new shipment enquiry has been created under your profile.
-    </p>
-
-    <p style="font-size: 16px; color: #333;">
-      <strong>Shipment Details:</strong><br>
-      Freight Number: <strong>${freightNumber}</strong><br>
-      Product Description: <strong>${Product_Description}</strong><br>
-      Freight: <strong>${freight}</strong>
-    </p>
-
-    <p style="font-size: 16px; color: #333;">
-      Our sales team will reach out to you shortly with further details. In the meantime, feel free to contact us if you have any questions.
-    </p>
-
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-
-    <p style="font-size: 14px; color: #777;">
-      Regards,<br>
-      <strong>Management System</strong>
-    </p>
-  </div>
-`;
-
-                    sendMail(Email, mailSubject, content);
-
-                    // Process all files for a given document type
-                    const processFiles = async (fileArray, documentName) => {
-                        try {
-
-
-                            for (const file of fileArray) { // Loop through all files
-                                const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-
-                                await new Promise((resolve, reject) => {
-                                    con.query(docsInsertQuery, [insertResult.insertId, documentName, file.filename], (err) => {
-                                        if (err) {
-                                            console.error(`Error inserting ${documentName}:`, err);
-                                            return reject(err);
-                                        }
-                                        resolve();
-                                    });
-                                });
-
-                                // Step 2: Upload to Google Drive (or your cloud service)
-                                const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
-
-                                const uploadResult = await uploadToSpecificPath(
-                                    freightNumber,     // Main folder: e.g., "F-20250613"
-                                    "Supplier Invoices",      // Parent folder or fixed main type
-                                    subfolderName,     // Subfolder based on document type
-                                    file               // Current file
-                                );
-
-                                // console.log(` Uploading file: ${file.originalname}`);
-
-                                // Upload the file to Google Drive
-                                /* const folderId = await findOrCreateFolder(freightNumber);
-                                console.log(` Folder ID: ${folderId}`);
-                                console.log(file);
-
-                                const { fileId, webViewLink } = await uploadFile(folderId, file);
-
-                                // Insert file details into transaction_files
-                                const insertFileQuery = `
-                                    INSERT INTO transaction_files 
-                                    (freight_number, file_name, drive_file_id, file_link) 
-                                    VALUES (?, ?, ?, ?)
-                                `;
-
-                                await new Promise((resolve, reject) => {
-                                    con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
-                                        if (err) {
-                                            console.error("Error inserting file details:", err);
-                                            return reject(err);
-                                        }
-                                        resolve();
-                                    });
-                                }); */
-
-                                // console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
-                            }
-                        } catch (error) {
-                            console.error(`Error processing files for ${documentName}:`, error);
-                        }
-                    };
-
-
-                    const handleFileUploads = async () => {
-                        try {
-                            if (req.files) {
-                                const fileKeys = Object.keys(req.files);
-
-                                for (const key of fileKeys) {
-                                    const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
-
-                                    if (files.length > 0) {
-                                        const documentName = getDocumentName(key);
-                                        // console.log(files, documentName, " Files to process");
-
-                                        await processFiles(files, documentName);
-                                    }
-                                }
-
-                                console.log("All files processed successfully!");
-                            }
-                        } catch (error) {
-                            console.error("Error handling file uploads:", error);
-                        }
-                    };
-
-
-                    // Map field names to document names
-                    const getDocumentName = (fieldName) => {
-                        console.log(fieldName);
-
-                        switch (fieldName) {
-                            case 'supplier_invoice':
-                                return "Supplier Invoices";
-                            case 'packing_list':
-                                return "Packing List";
-                            case 'licenses':
-                                return "Licenses";
-                            case 'other_documents':
-                                return "Other Documents";
-                            default:
-                                return "Unknown Document";
-                        }
-                    };
-
-                    // Start processing all files
-                    handleFileUploads();
+                insertParams = [
+                    client_ref, client_email, date, type, fcl_lcl || null, freight, incoterm, dimension, weight, quote_received, client_quoted,
+                    is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
+                    supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
+                    transit_time, priority, 1, freightNumber, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
+                    assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, Product_Description, shipment_ref, insurance, client_ref_name, sales_representative
+                ];
+                con.query(insertQuery, insertParams, (err, result) => {
+                    if (err) return reject(err);
+                    resolve(result);
                 });
-
             });
-            res.send({ success: true, message: "success" })
-        });
 
-    } catch (error) {
-        // console.error('Error in Addfreight function:', error);
-        return res.status(500).json({
-            success: false,
-            message: error.message
+            // Create main freight folder
+            const freightFolderId = await findOrCreateFolder(freightNumber);
+            const selectQuery = `
+            SELECT tbl_freight.freight_number, tbl_users.full_name
+            FROM tbl_freight
+            LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+            WHERE tbl_freight.id = ?
+        `;
+            con.query(selectQuery, [insertResult.insertId], async (err, result) => {
+                if (err || result.length === 0) return console.error("Error fetching client info:", err);
+
+                const Email = client_email;
+                const mailSubject = 'New Shipment Enquiry';
+                const content = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                    <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Shipment Enquiry</h2>
+                    <p>Dear <strong>${result[0].full_name}</strong>,</p>
+                    <p>We’re excited to let you know that a new shipment enquiry has been created under your profile.</p>
+                    <p><strong>Shipment Details:</strong><br>
+                        Freight Number: <strong>${result[0].freight_number}</strong><br>
+                        Product Description: <strong>${Product_Description}</strong><br>
+                        Freight: <strong>${freight}</strong>
+                    </p>
+                    <p>Our sales team will reach out to you shortly with further details.</p>
+                    <p>Regards,<br><strong>Management System</strong></p>
+                </div>
+            `;
+                // sendMail(Email, mailSubject, content);
+            
+            // Process files dynamically
+            // Example usage inside your Addfreight controller
+            if (req.files && Object.keys(req.files).length > 0) {
+                for (const fieldName of Object.keys(req.files)) {
+                    const filesArray = req.files[fieldName];
+
+                    for (const file of filesArray) {
+                        const documentName = req.body.documentName; // sent from Postman
+                        console.log(documentName);
+                        
+                        await uploadToMatchingFolder(file, documentName, result[0].freight_number);
+
+                        // Save in DB
+                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                        await new Promise((resolve, reject) => {
+                            con.query(docQuery, [insertResult.insertId, documentName, file.filename], (err) => {
+                                if (err) return reject(err);
+                                resolve();
+                            });
+                        });
+                    }
+                }
+            }
+            });
+            res.json({ success: true, message: "Freight added successfully", freightNumber });
         });
+    } catch (error) {
+        console.error('AddFreight error:', error);
+        res.status(500).json({ success: false, message: error.message });
     }
 };
+
 
 const getFolderNameFromDocumentName = (documentName) => {
     switch (documentName) {
@@ -1112,7 +1301,8 @@ const EditFreight = async (req, res) => {
             is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
             supplier_address, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
-            assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, product_desc, sales_representative
+            assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name,
+            product_desc, sales_representative
         } = req.body;
 
         // Validate input data
@@ -1161,7 +1351,7 @@ const EditFreight = async (req, res) => {
                 LEFT JOIN tbl_users as u ON u.id = tbl_freight.client_id
                 WHERE tbl_freight.id = ?`;
 
-        con.query(selectQuery, [id], (err, result) => {
+        con.query(selectQuery, [id], async (err, result) => {
             if (err) {
                 console.error("Error fetching freight number:", err);
                 return;
@@ -1204,7 +1394,7 @@ const EditFreight = async (req, res) => {
             // console.log(result[0].sales_email);
 
 
-            sendMail(result[0].sale_email, mailSubject, contentTemplate);
+            // sendMail(result[0].sale_email, mailSubject, contentTemplate);
 
 
             //sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
@@ -1233,7 +1423,7 @@ const EditFreight = async (req, res) => {
 
                 for (const member of teamMembers) {
                     // Send Email
-                    await sendMail(member.email, mailSubject, contentTemplate);
+                    // await sendMail(member.email, mailSubject, contentTemplate);
 
                     // Send WhatsApp
                     const formattedPhone = member.cellphone.startsWith('+') ? member.cellphone : `+${member.cellphone}`;
@@ -1241,7 +1431,7 @@ const EditFreight = async (req, res) => {
                     /* await sendWhatsApp(formattedPhone, whatsappMessage); */
                 }
 
-                console.log("Notifications sent to all team members.");
+                // console.log("Notifications sent to all team members.");
             });
 
 
@@ -1250,108 +1440,131 @@ const EditFreight = async (req, res) => {
             // sendWhatsApp(estimatesTeamPhone, whatsappMessage);
 
             // Process all files for a given document type
-            const processFiles = async (fileArray, documentName) => {
-                try {
-                    for (const file of fileArray) { // Loop through all files
-                        const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+            // const processFiles = async (fileArray, documentName) => {
+            //     try {
+            //         for (const file of fileArray) { // Loop through all files
+            //             const docsInsertQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
 
+            //             await new Promise((resolve, reject) => {
+            //                 con.query(docsInsertQuery, [id, documentName, file.filename], (err) => {
+            //                     if (err) {
+            //                         console.error(`Error inserting ${documentName}:`, err);
+            //                         return reject(err);
+            //                     }
+            //                     resolve();
+            //                 });
+            //             });
+
+            //             console.log(` Uploading file: ${file.originalname}`);
+
+            //             const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+
+            //             const uploadResult = await uploadToSpecificPath(
+            //                 freightNumber,     // Main folder: e.g., "F-20250613"
+            //                 "Supplier Invoices",      // Parent folder or fixed main type
+            //                 subfolderName,     // Subfolder based on document type
+            //                 file               // Current file
+            //             );
+
+            //             // Upload the file to Google Drive
+            //             /* const folderId = await findOrCreateFolder(freightNumber);
+            //             console.log(` Folder ID: ${folderId}`);
+            //             console.log(file);
+
+            //             const { fileId, webViewLink } = await uploadFile(folderId, file);
+
+            //             // Insert file details into transaction_files
+            //             const insertFileQuery = `
+            //                     INSERT INTO transaction_files 
+            //                     (freight_number, file_name, drive_file_id, file_link) 
+            //                     VALUES (?, ?, ?, ?)
+            //                 `;
+
+            //             await new Promise((resolve, reject) => {
+            //                 con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
+            //                     if (err) {
+            //                         console.error("Error inserting file details:", err);
+            //                         return reject(err);
+            //                     }
+            //                     resolve();
+            //                 });
+            //             }); */
+
+            //             console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
+            //         }
+            //     } catch (error) {
+            //         console.error(`Error processing files for ${documentName}:`, error);
+            //     }
+            // };
+
+            // const handleFileUploads = async () => {
+            //     try {
+            //         if (req.files) {
+            //             const fileKeys = Object.keys(req.files);
+
+            //             for (const key of fileKeys) {
+            //                 const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
+
+            //                 if (files.length > 0) {
+            //                     const documentName = getDocumentName(key);
+            //                     console.log(files, documentName, " Files to process");
+
+            //                     await processFiles(files, documentName);
+            //                 }
+            //             }
+
+            //             console.log("All files processed successfully!");
+            //         }
+            //     } catch (error) {
+            //         console.error("Error handling file uploads:", error);
+            //     }
+            // };
+
+
+            // // Map field names to document names
+            // const getDocumentName = (fieldName) => {
+            //     console.log(fieldName);
+
+            //     switch (fieldName) {
+            //         case 'supplier_invoice':
+            //             return "Supplier Invoices";
+            //         case 'packing_list':
+            //             return "Packing List";
+            //         case 'licenses':
+            //             return "Licenses";
+            //         case 'other_documents':
+            //             return "Other Documents";
+            //         default:
+            //             return "Unknown Document";
+            //     }
+            // };
+
+            // // Start processing all files
+            // handleFileUploads();
+
+            if (req.files && Object.keys(req.files).length > 0) {
+                for (const fieldName of Object.keys(req.files)) {
+                    const filesArray = req.files[fieldName];
+
+                    for (const file of filesArray) {
+                        const documentName = req.body.documentName; // sent from Postman
+                        console.log(file, documentName);
+
+                        await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                        // Save in DB
+                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
                         await new Promise((resolve, reject) => {
-                            con.query(docsInsertQuery, [id, documentName, file.filename], (err) => {
-                                if (err) {
-                                    console.error(`Error inserting ${documentName}:`, err);
-                                    return reject(err);
-                                }
+                            con.query(docQuery, [id, documentName, file.filename], (err) => {
+                                if (err) return reject(err);
                                 resolve();
                             });
                         });
-
-                        console.log(` Uploading file: ${file.originalname}`);
-
-                        const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
-
-                        const uploadResult = await uploadToSpecificPath(
-                            freightNumber,     // Main folder: e.g., "F-20250613"
-                            "Supplier Invoices",      // Parent folder or fixed main type
-                            subfolderName,     // Subfolder based on document type
-                            file               // Current file
-                        );
-
-                        // Upload the file to Google Drive
-                        /* const folderId = await findOrCreateFolder(freightNumber);
-                        console.log(` Folder ID: ${folderId}`);
-                        console.log(file);
-
-                        const { fileId, webViewLink } = await uploadFile(folderId, file);
-
-                        // Insert file details into transaction_files
-                        const insertFileQuery = `
-                                INSERT INTO transaction_files 
-                                (freight_number, file_name, drive_file_id, file_link) 
-                                VALUES (?, ?, ?, ?)
-                            `;
-
-                        await new Promise((resolve, reject) => {
-                            con.query(insertFileQuery, [freightNumber, file.filename, fileId, webViewLink], (err) => {
-                                if (err) {
-                                    console.error("Error inserting file details:", err);
-                                    return reject(err);
-                                }
-                                resolve();
-                            });
-                        }); */
-
-                        console.log(`${documentName}: ${file.originalname} uploaded and recorded successfully!`);
                     }
-                } catch (error) {
-                    console.error(`Error processing files for ${documentName}:`, error);
                 }
-            };
-
-            const handleFileUploads = async () => {
-                try {
-                    if (req.files) {
-                        const fileKeys = Object.keys(req.files);
-
-                        for (const key of fileKeys) {
-                            const files = Array.isArray(req.files[key]) ? req.files[key] : [req.files[key]];
-
-                            if (files.length > 0) {
-                                const documentName = getDocumentName(key);
-                                console.log(files, documentName, " Files to process");
-
-                                await processFiles(files, documentName);
-                            }
-                        }
-
-                        console.log("All files processed successfully!");
-                    }
-                } catch (error) {
-                    console.error("Error handling file uploads:", error);
-                }
-            };
-
-
-            // Map field names to document names
-            const getDocumentName = (fieldName) => {
-                console.log(fieldName);
-
-                switch (fieldName) {
-                    case 'supplier_invoice':
-                        return "Supplier Invoices";
-                    case 'packing_list':
-                        return "Packing List";
-                    case 'licenses':
-                        return "Licenses";
-                    case 'other_documents':
-                        return "Other Documents";
-                    default:
-                        return "Unknown Document";
-                }
-            };
-
-            // Start processing all files
-            handleFileUploads();
+            }
         });
+
         res.status(200).json({
             success: true,
             message: "Freight updated successfully"
@@ -2980,6 +3193,9 @@ const order_Details = async (req, res) => {
         res.status(500).send({
             success: false,
             message: error.message
+
+
+
         });
     }
 };

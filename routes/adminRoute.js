@@ -41,10 +41,10 @@ admin_route.get('/get-privacy', adminController.GetPrivacy);
 admin_route.post('/term-condition', Privacy_TermValidation, adminController.TermCondition);
 admin_route.get('/get-terms', adminController.GetTerms);
 
-admin_route.post('/add-freight', upload.fields([{ name: 'supplier_invoice', maxCount: 5 }, { name: 'packing_list', maxCount: 5 }, { name: 'licenses', maxCount: 5 }, { name: 'other_documents', maxCount: 5 }]), adminController.Addfreight);
+admin_route.post('/add-freight', upload.fields([{ name: 'document', maxCount: 5 }]), adminController.Addfreight);
 admin_route.post('/freight-list', adminController.GetFreightAdmin);
 admin_route.post('/new-freight-list', adminController.GetFreightCustomer);
-admin_route.post('/edit-freight', upload.fields([{ name: 'supplier_invoice', maxCount: 5 }, { name: 'packing_list', maxCount: 5 }, { name: 'licenses', maxCount: 5 }, { name: 'other_documents', maxCount: 5 }]), adminController.EditFreight);
+admin_route.post('/edit-freight', upload.fields([{ name: 'document', maxCount: 5 }, { name: 'supplier_invoice', maxCount: 5 }, { name: 'packing_list', maxCount: 5 }, { name: 'licenses', maxCount: 5 }, { name: 'other_documents', maxCount: 5 }]), adminController.EditFreight);
 admin_route.post('/get-freight', adminController.GetFreightById);
 admin_route.post('/delete-freight', adminController.DeleteFreight);
 

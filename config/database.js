@@ -10,7 +10,6 @@ const con = mysql.createPool(
         connectionLimit: 10,
         connectTimeout: 20000,
         acquireTimeout: 20000
-
         /*  host: '139.177.187.60', // Remote server IP
          user: 'forge',
          password: '3RpmB1HjDiLIVNF7AaI6',
