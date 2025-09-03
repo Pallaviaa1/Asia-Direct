@@ -3,7 +3,7 @@ const { validationResult, Result } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const rendomString = require('randomstring');
 const sendMail = require('../helpers/sendMail')
-const { findOrCreateFolder, uploadFile, uploadToSpecificPath } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId, createFolderIfNotExists } = require('../helpers/uploadDrive');
 const { SMTP_MAIL, SMTP_PASSWORD } = process.env;
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
@@ -11,6 +11,75 @@ const cron = require('node-cron');
 async function hashPassword(password) {
     return await bcrypt.hash(password, 10);
 }
+
+const nestedFolderStructure = {
+    "Clearing Documents": [
+        "Customs Documents",
+        "Supporting Documents"
+    ],
+    "Freight documents": [
+        "Waybills",
+        "Warehouse Entry Docs",
+        "Supplier Invoices"
+    ],
+    "Supplier Invoices": [
+        "Invoice, Packing List",
+        "Product Literature",
+        "Letters of authority"
+    ],
+    "Quotations": [
+        "AD_ Invoice",
+        "AD_Quotations"
+    ],
+    "Proof of Delivery": [
+        "Delivery note",
+        "Courier Waybills"
+    ]
+};
+
+const getMainFolderForDoc = (docName) => {
+    for (const [mainFolder, subFolders] of Object.entries(nestedFolderStructure)) {
+        if (subFolders.includes(docName)) return mainFolder;
+    }
+    return null; // not found
+};
+
+// Upload file to matching subfolder
+const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
+    // Map document to main folder type
+    const mainFolderName = getMainFolderForDoc(documentName);
+    if (!mainFolderName) {
+        console.log(`Document name "${documentName}" does not match any known subfolder. Upload skipped.`);
+        return null;
+    }
+
+    // Find the main freight folder by freightNumber
+    const freightFolderId = await findFolderId(freightNumber);
+    if (!freightFolderId) {
+        console.log(`Freight folder "${freightNumber}" not found. Upload skipped.`);
+        return null;
+    }
+
+    // Find main folder inside the freight folder
+    const mainFolderId = await findFolderId(mainFolderName, freightFolderId);
+    if (!mainFolderId) {
+        console.log(`Main folder "${mainFolderName}" not found inside "${freightNumber}". Upload skipped.`);
+        return null;
+    }
+
+    // Find subfolder inside the main folder
+    const subFolderId = await findFolderId(documentName, mainFolderId);
+    if (!subFolderId) {
+        console.log(`Subfolder "${documentName}" not found inside "${mainFolderName}". Upload skipped.`);
+        return null;
+    }
+
+    // Upload file to the subfolder
+    const result = await uploadFile(subFolderId, file);
+    console.log(`Uploaded ${file.originalname} to ${freightNumber}/${mainFolderName}/${documentName}`);
+    return result;
+};
+
 
 const AddCustomer = async (req, res) => {
     const errors = validationResult(req);
@@ -4384,9 +4453,11 @@ const AddShipment = (req, res) => {
         origin_country_id,
         des_country_id,
         details,
+        documentName
     } = req.body;
 
     console.log(req.body);
+    console.log(req.files);
     const detailALL = details ? JSON.parse(details) : null;
     let detailALL1;
     if (details !== undefined && details !== '') {
@@ -4450,7 +4521,7 @@ const AddShipment = (req, res) => {
                 data.batch_id || null,
             ]);
 
-            con.query(detailsQuery, [detailsValues], (detailsErr) => {
+            con.query(detailsQuery, [detailsValues], async (detailsErr) => {
                 if (detailsErr) {
                     return res.status(500).send({
                         success: false,
@@ -4458,6 +4529,52 @@ const AddShipment = (req, res) => {
                         error: detailsErr.message,
                     });
                 }
+                if (req.files && req.files.document && req.files.document.length > 0) {
+                    // console.log("hii");
+                    const file = req.files.document[0];
+                    const documentName = req.body.documentName;
+
+                    for (const order of detailALL) {
+                        const freightId = await new Promise((resolve, reject) => {
+                            con.query(
+                                `SELECT freight_id FROM tbl_orders WHERE id = ?`,
+                                [order.order_id],
+                                (err, result) => {
+                                    if (err) return reject(err);
+                                    if (result.length === 0) return reject(new Error("No freight_id found for order"));
+                                    resolve(result[0].freight_id);
+                                }
+                            );
+                        });
+
+                        const freightNumber = await new Promise((resolve, reject) => {
+                            con.query(
+                                `SELECT freight_number FROM tbl_freight WHERE id = ?`,
+                                [freightId],
+                                (err, result) => {
+                                    if (err) return reject(err);
+                                    if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
+                                    resolve(result[0].freight_number);
+                                }
+                            );
+                        });
+
+                        const freightFolderId = await findOrCreateFolder(freightNumber);
+                        const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                        await new Promise((resolve, reject) => {
+                            con.query(
+                                `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`,
+                                [freightId, documentName, file.filename],
+                                (err) => {
+                                    if (err) return reject(err);
+                                    resolve();
+                                }
+                            );
+                        });
+                    }
+                }
+
 
                 // Update orders and batches
                 detailALL.forEach((data) => {
@@ -5041,7 +5158,7 @@ const UpdateShipment = async (req, res) => {
                 const { email, cellphone } = member;
 
                 if (email) {
-                    sendMail(email, emailSubject, emailContent);
+                    // sendMail(email, emailSubject, emailContent);
                 }
                 // 05-06-2025
                 /* if (cellphone) {
@@ -5052,6 +5169,52 @@ const UpdateShipment = async (req, res) => {
 
 
         if (detailALL && Array.isArray(detailALL)) {
+
+            if (req.files && req.files.document && req.files.document.length > 0) {
+                // console.log("hii");
+                const file = req.files.document[0];
+                const documentName = req.body.documentName;
+
+                for (const order of detailALL) {
+                    const freightId = await new Promise((resolve, reject) => {
+                        con.query(
+                            `SELECT freight_id FROM tbl_orders WHERE id = ?`,
+                            [order.order_id],
+                            (err, result) => {
+                                if (err) return reject(err);
+                                if (result.length === 0) return reject(new Error("No freight_id found for order"));
+                                resolve(result[0].freight_id);
+                            }
+                        );
+                    });
+
+                    const freightNumber = await new Promise((resolve, reject) => {
+                        con.query(
+                            `SELECT freight_number FROM tbl_freight WHERE id = ?`,
+                            [freightId],
+                            (err, result) => {
+                                if (err) return reject(err);
+                                if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
+                                resolve(result[0].freight_number);
+                            }
+                        );
+                    });
+
+                    const freightFolderId = await findOrCreateFolder(freightNumber);
+                    const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                    await new Promise((resolve, reject) => {
+                        con.query(
+                            `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`,
+                            [freightId, documentName, file.filename],
+                            (err) => {
+                                if (err) return reject(err);
+                                resolve();
+                            }
+                        );
+                    });
+                }
+            }
             // Step 1: Delete existing shipment details
             const deleteDetailsQuery = `DELETE FROM shipment_details WHERE shipment_id = ?`;
             await executeQuery(deleteDetailsQuery, [shipment_id]);

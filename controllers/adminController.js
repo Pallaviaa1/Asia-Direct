@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const sendMail = require('../helpers/sendMail')
 const rendomString = require('randomstring');
 const { assign } = require('nodemailer/lib/shared');
-const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId, createFolderIfNotExists } = require('../helpers/uploadDrive');
 const { logging } = require('googleapis/build/src/apis/logging');
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
@@ -1022,7 +1022,7 @@ const Addfreight = async (req, res) => {
         console.log(req.body);
         console.log(req.files);
 
-         console.log(req.body.documentName);
+        console.log(req.body.documentName);
         // Generate freight number
         generateFreightNumber(async (err, freightNumber) => {
             if (err) throw err;
@@ -1077,30 +1077,30 @@ const Addfreight = async (req, res) => {
                 </div>
             `;
                 // sendMail(Email, mailSubject, content);
-            
-            // Process files dynamically
-            // Example usage inside your Addfreight controller
-            if (req.files && Object.keys(req.files).length > 0) {
-                for (const fieldName of Object.keys(req.files)) {
-                    const filesArray = req.files[fieldName];
 
-                    for (const file of filesArray) {
-                        const documentName = req.body.documentName; // sent from Postman
-                        console.log(documentName);
-                        
-                        await uploadToMatchingFolder(file, documentName, result[0].freight_number);
+                // Process files dynamically
+                // Example usage inside your Addfreight controller
+                if (req.files && Object.keys(req.files).length > 0) {
+                    for (const fieldName of Object.keys(req.files)) {
+                        const filesArray = req.files[fieldName];
 
-                        // Save in DB
-                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
-                        await new Promise((resolve, reject) => {
-                            con.query(docQuery, [insertResult.insertId, documentName, file.filename], (err) => {
-                                if (err) return reject(err);
-                                resolve();
+                        for (const file of filesArray) {
+                            const documentName = req.body.documentName; // sent from Postman
+                            console.log(documentName);
+
+                            await uploadToMatchingFolder(file, documentName, result[0].freight_number);
+
+                            // Save in DB
+                            const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                            await new Promise((resolve, reject) => {
+                                con.query(docQuery, [insertResult.insertId, documentName, file.filename], (err) => {
+                                    if (err) return reject(err);
+                                    resolve();
+                                });
                             });
-                        });
+                        }
                     }
                 }
-            }
             });
             res.json({ success: true, message: "Freight added successfully", freightNumber });
         });
@@ -1295,6 +1295,10 @@ const EditFreight = async (req, res) => {
     try {
         // Extracting data from req.body
         console.log(req.body);
+        console.log(req.files);
+        console.log(req.body.documentName);
+
+
         const {
             id, // Assuming you will pass the ID of the freight to be updated
             client_ref, client_email, date, type, freight, fcl_lcl, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
@@ -1541,7 +1545,7 @@ const EditFreight = async (req, res) => {
 
             // // Start processing all files
             // handleFileUploads();
-
+            const freightFolderId = await findOrCreateFolder(freightNumber);
             if (req.files && Object.keys(req.files).length > 0) {
                 for (const fieldName of Object.keys(req.files)) {
                     const filesArray = req.files[fieldName];

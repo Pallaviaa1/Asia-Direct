@@ -139,7 +139,7 @@ const findOrCreateFolder = async (freightNumber) => {
             // console.log(` Created: ${freightNumber}/${mainFolder}/${sub}`);
         }
     }
-
+    return freightFolderId; 
     // console.log(" Entire folder structure created.");
 };
 
@@ -247,11 +247,10 @@ const findFolderId = async (folderName, parentId = null) => {
 
         const res = await drive.files.list({
             q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}'` +
-               (parentId ? ` and '${parentId}' in parents` : ''),
+                (parentId ? ` and '${parentId}' in parents` : ''),
             fields: 'files(id, name)',
             spaces: 'drive'
         });
-
         if (res.data.files.length > 0) {
             return res.data.files[0].id;
         }
