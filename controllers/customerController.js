@@ -815,7 +815,32 @@ const AddClearing = async (req, res) => {
                 const clearanceId = result.insertId;
 
                 // Process uploaded files
-                await handleFileUploads(clearanceId, clearanceNumber, req.files);
+                // await handleFileUploads(clearanceId, clearanceNumber, req.files);
+
+                await findOrCreateFolder(clearanceNumber);
+
+                if (req.files && Object.keys(req.files).length > 0) {
+                    for (const fieldName of Object.keys(req.files)) {
+                        const filesArray = req.files[fieldName];
+
+                        for (const file of filesArray) {
+                            const documentName = req.body.documentName; // sent from Postman
+                            console.log(documentName);
+
+                            await uploadToMatchingFolder(file, documentName, clearanceNumber);
+
+                            // Save in DB
+                            const docQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+            VALUES (?, ?, ?)`;
+                            await new Promise((resolve, reject) => {
+                                con.query(docQuery, [clearanceId, documentName, file.filename], (err) => {
+                                    if (err) return reject(err);
+                                    resolve();
+                                });
+                            });
+                        }
+                    }
+                }
 
                 return res.status(200).json({
                     success: true,
@@ -832,90 +857,90 @@ const AddClearing = async (req, res) => {
     }
 };
 
-const handleFileUploads = async (clearanceId, clearanceNumber, files) => {
-    try {
-        if (files) {
-            const fileKeys = Object.keys(files);
-            for (const key of fileKeys) {
-                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
-                const documentName = getDocumentName(key);
+// const handleFileUploads = async (clearanceId, clearanceNumber, files) => {
+//     try {
+//         if (files) {
+//             const fileKeys = Object.keys(files);
+//             for (const key of fileKeys) {
+//                 const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+//                 const documentName = getDocumentName(key);
 
-                await processFiles(fileArray, documentName, clearanceId, clearanceNumber);
-            }
-        }
-    } catch (error) {
-        console.error("❌ Error handling file uploads:", error);
-    }
-};
+//                 await processFiles(fileArray, documentName, clearanceId, clearanceNumber);
+//             }
+//         }
+//     } catch (error) {
+//         console.error("❌ Error handling file uploads:", error);
+//     }
+// };
 
-const processFiles = async (fileArray, documentName, clearanceId, clearanceNumber) => {
-    for (const file of fileArray) {
-        const insertDocQuery = `
-            INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
-            VALUES (?, ?, ?)
-        `;
+// const processFiles = async (fileArray, documentName, clearanceId, clearanceNumber) => {
+//     for (const file of fileArray) {
+//         const insertDocQuery = `
+//             INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+//             VALUES (?, ?, ?)
+//         `;
 
-        await new Promise((resolve, reject) => {
-            con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
-                if (err) {
-                    console.error(`❌ Error inserting ${documentName}:`, err);
-                    return reject(err);
-                }
-                resolve();
-            });
-        });
+//         await new Promise((resolve, reject) => {
+//             con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+//                 if (err) {
+//                     console.error(`❌ Error inserting ${documentName}:`, err);
+//                     return reject(err);
+//                 }
+//                 resolve();
+//             });
+//         });
 
-        console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
+//         console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
 
-        const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+//         const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
 
-        const uploadResult = await uploadToSpecificPath(
-            clearanceNumber,     // Main folder: e.g., "F-20250613"
-            "Supplier Invoices",      // Parent folder or fixed main type
-            subfolderName,     // Subfolder based on document type
-            file               // Current file
-        );
+//         const uploadResult = await uploadToSpecificPath(
+//             clearanceNumber,     // Main folder: e.g., "F-20250613"
+//             "Supplier Invoices",      // Parent folder or fixed main type
+//             subfolderName,     // Subfolder based on document type
+//             file               // Current file
+//         );
 
-        // Optional: Upload to Google Drive
-        /*
-        const folderId = await findOrCreateFolder(clearanceNumber);
-        const { fileId, webViewLink } = await uploadFile(folderId, file);
+//         // Optional: Upload to Google Drive
+//         /*
+//         const folderId = await findOrCreateFolder(clearanceNumber);
+//         const { fileId, webViewLink } = await uploadFile(folderId, file);
 
-        const insertFileQuery = `
-            INSERT INTO transaction_files 
-            (clearance_number, file_name, drive_file_id, file_link) 
-            VALUES (?, ?, ?, ?)
-        `;
+//         const insertFileQuery = `
+//             INSERT INTO transaction_files 
+//             (clearance_number, file_name, drive_file_id, file_link) 
+//             VALUES (?, ?, ?, ?)
+//         `;
 
-        await new Promise((resolve, reject) => {
-            con.query(insertFileQuery, [clearanceNumber, file.filename, fileId, webViewLink], (err) => {
-                if (err) {
-                    console.error("❌ Error inserting file details:", err);
-                    return reject(err);
-                }
-                resolve();
-            });
-        });
-        */
-    }
-};
+//         await new Promise((resolve, reject) => {
+//             con.query(insertFileQuery, [clearanceNumber, file.filename, fileId, webViewLink], (err) => {
+//                 if (err) {
+//                     console.error("❌ Error inserting file details:", err);
+//                     return reject(err);
+//                 }
+//                 resolve();
+//             });
+//         });
+//         */
+//     }
+// };
 
-const getDocumentName = (fieldName) => {
-    switch (fieldName) {
-        case 'document':
-            return "General Document";
-        case 'packing_list':
-            return "Packing List";
-        case 'licenses':
-            return "Licenses/Permit";
-        case 'product_literature':
-            return "Product Literature";
-        case 'other_documents':
-            return "Other Documents";
-        default:
-            return "Unknown Document";
-    }
-};
+// const getDocumentName = (fieldName) => {
+//     switch (fieldName) {
+//         case 'document':
+//             return "General Document";
+//         case 'packing_list':
+//             return "Packing List";
+//         case 'licenses':
+//             return "Licenses/Permit";
+//         case 'product_literature':
+//             return "Product Literature";
+//         case 'other_documents':
+//             return "Other Documents";
+//         default:
+//             return "Unknown Document";
+//     }
+// };
 
 const getFolderNameFromDocumentName1 = (documentName) => {
     switch (documentName) {
@@ -1168,13 +1193,38 @@ const AddClearingByCustomer = async (req, res) => {
             const insertQuery = `INSERT INTO tbl_clearance (user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, added_by, clearance_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
             const insertParams = [user_id, freight, freight_option, is_Import_Export, is_cong_shipp, customer_ref || null, goods_desc, nature_of_goods, destination, loading_country, discharge_country, port_of_loading, port_of_discharge, packing_type, total_dimension, total_box, total_weight, comment_on_docs, addedByValue, clearanceNumber];
 
-            con.query(insertQuery, insertParams, (err, data) => {
+            con.query(insertQuery, insertParams, async (err, data) => {
                 if (err) return res.status(500).json({ success: false, message: "Internal Server Error" });
 
                 const clearanceId = data.insertId;
 
-                // ✅ Process and insert uploaded documents
-                handleFile_Uploads(clearanceId, req.files, clearanceNumber);
+                //  Process and insert uploaded documents
+                // handleFile_Uploads(clearanceId, req.files, clearanceNumber);
+
+                await findOrCreateFolder(clearanceNumber);
+
+                if (req.files && Object.keys(req.files).length > 0) {
+                    for (const fieldName of Object.keys(req.files)) {
+                        const filesArray = req.files[fieldName];
+
+                        for (const file of filesArray) {
+                            const documentName = req.body.documentName; // sent from Postman
+                            console.log(documentName);
+
+                            await uploadToMatchingFolder(file, documentName, clearanceNumber);
+
+                            // Save in DB
+                            const docQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+            VALUES (?, ?, ?)`;
+                            await new Promise((resolve, reject) => {
+                                con.query(docQuery, [clearanceId, documentName, file.filename], (err) => {
+                                    if (err) return reject(err);
+                                    resolve();
+                                });
+                            });
+                        }
+                    }
+                }
 
                 const selectQuery = `SELECT clearance_number FROM tbl_clearance WHERE id = ?`;
                 con.query(selectQuery, [clearanceId], async (err, result) => {
@@ -1246,53 +1296,53 @@ const AddClearingByCustomer = async (req, res) => {
 };
 
 
-const handleFile_Uploads = async (clearanceId, files, clearanceNumber) => {
-    try {
-        if (files) {
-            const fileKeys = Object.keys(files);
-            for (const key of fileKeys) {
-                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
-                const documentName = getDocumentNames(key);
+// const handleFile_Uploads = async (clearanceId, files, clearanceNumber) => {
+//     try {
+//         if (files) {
+//             const fileKeys = Object.keys(files);
+//             for (const key of fileKeys) {
+//                 const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+//                 const documentName = getDocumentNames(key);
 
-                for (const file of fileArray) {
-                    const insertDocQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) VALUES (?, ?, ?)`;
-                    await new Promise((resolve, reject) => {
-                        con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
-                            if (err) {
-                                console.error(`❌ Error inserting ${documentName}:`, err);
-                                return reject(err);
-                            }
-                            console.log(`✅ Uploaded: ${documentName} - ${file.originalname}`);
-                            resolve();
-                        });
-                    });
+//                 for (const file of fileArray) {
+//                     const insertDocQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) VALUES (?, ?, ?)`;
+//                     await new Promise((resolve, reject) => {
+//                         con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+//                             if (err) {
+//                                 console.error(`❌ Error inserting ${documentName}:`, err);
+//                                 return reject(err);
+//                             }
+//                             console.log(`✅ Uploaded: ${documentName} - ${file.originalname}`);
+//                             resolve();
+//                         });
+//                     });
 
-                    const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
+//                     const subfolderName = getFolderNameFromDocumentName(documentName); // returns "AD_Quotations" etc.
 
-                    const uploadResult = await uploadToSpecificPath(
-                        clearanceNumber,     // Main folder: e.g., "F-20250613"
-                        "Supplier Invoices",      // Parent folder or fixed main type
-                        subfolderName,     // Subfolder based on document type
-                        file               // Current file
-                    );
-                }
-            }
-        }
-    } catch (error) {
-        console.error("❌ Error processing documents:", error);
-    }
-};
+//                     const uploadResult = await uploadToSpecificPath(
+//                         clearanceNumber,     // Main folder: e.g., "F-20250613"
+//                         "Supplier Invoices",      // Parent folder or fixed main type
+//                         subfolderName,     // Subfolder based on document type
+//                         file               // Current file
+//                     );
+//                 }
+//             }
+//         }
+//     } catch (error) {
+//         console.error("❌ Error processing documents:", error);
+//     }
+// };
 
-const getDocumentNames = (fieldName) => {
-    switch (fieldName) {
-        case 'document': return "General Document";
-        case 'packing_list': return "Packing List";
-        case 'licenses': return "Licenses";
-        case 'product_literature': return "Product Literature";
-        case 'other_documents': return "Other Documents";
-        default: return "Unknown Document";
-    }
-};
+// const getDocumentNames = (fieldName) => {
+//     switch (fieldName) {
+//         case 'document': return "General Document";
+//         case 'packing_list': return "Packing List";
+//         case 'licenses': return "Licenses";
+//         case 'product_literature': return "Product Literature";
+//         case 'other_documents': return "Other Documents";
+//         default: return "Unknown Document";
+//     }
+// };
 
 const GetClearingClient = async (req, res) => {
     try {
@@ -1507,7 +1557,32 @@ const EditClearing = async (req, res) => {
                     const clearanceNumber = result[0].clearance_number;
 
                     // Handle all uploaded documents
-                    await handle_FileUploads(clearing_id, clearanceNumber, req.files);
+                    // await handle_FileUploads(clearing_id, clearanceNumber, req.files);
+
+                    await findOrCreateFolder(clearanceNumber);
+
+                    if (req.files && Object.keys(req.files).length > 0) {
+                        for (const fieldName of Object.keys(req.files)) {
+                            const filesArray = req.files[fieldName];
+
+                            for (const file of filesArray) {
+                                const documentName = req.body.documentName; // sent from Postman
+                                console.log(documentName);
+
+                                await uploadToMatchingFolder(file, documentName, clearanceNumber);
+
+                                // Save in DB
+                                const docQuery = `INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+            VALUES (?, ?, ?)`;
+                                await new Promise((resolve, reject) => {
+                                    con.query(docQuery, [clearing_id, documentName, file.filename], (err) => {
+                                        if (err) return reject(err);
+                                        resolve();
+                                    });
+                                });
+                            }
+                        }
+                    }
 
                     return res.status(200).send({
                         success: true,
@@ -1529,60 +1604,60 @@ const EditClearing = async (req, res) => {
     }
 };
 
-const handle_FileUploads = async (clearanceId, clearanceNumber, files) => {
-    try {
-        if (files) {
-            const fileKeys = Object.keys(files);
-            for (const key of fileKeys) {
-                const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
-                const documentName = get_DocumentName(key);
+// const handle_FileUploads = async (clearanceId, clearanceNumber, files) => {
+//     try {
+//         if (files) {
+//             const fileKeys = Object.keys(files);
+//             for (const key of fileKeys) {
+//                 const fileArray = Array.isArray(files[key]) ? files[key] : [files[key]];
+//                 const documentName = get_DocumentName(key);
 
-                await process_Files(fileArray, documentName, clearanceId, clearanceNumber);
-            }
-        }
-    } catch (error) {
-        console.error("❌ Error handling file uploads:", error);
-    }
-};
+//                 await process_Files(fileArray, documentName, clearanceId, clearanceNumber);
+//             }
+//         }
+//     } catch (error) {
+//         console.error("❌ Error handling file uploads:", error);
+//     }
+// };
 
-const process_Files = async (fileArray, documentName, clearanceId, clearanceNumber) => {
-    for (const file of fileArray) {
-        const insertDocQuery = `
-            INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
-            VALUES (?, ?, ?)
-        `;
+// const process_Files = async (fileArray, documentName, clearanceId, clearanceNumber) => {
+//     for (const file of fileArray) {
+//         const insertDocQuery = `
+//             INSERT INTO clearance_docs (clearance_id, document_name, document_file) 
+//             VALUES (?, ?, ?)
+//         `;
 
-        await new Promise((resolve, reject) => {
-            con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
-                if (err) {
-                    console.error(`❌ Error inserting ${documentName}:`, err);
-                    return reject(err);
-                }
-                resolve();
-            });
-        });
+//         await new Promise((resolve, reject) => {
+//             con.query(insertDocQuery, [clearanceId, documentName, file.filename], (err) => {
+//                 if (err) {
+//                     console.error(`❌ Error inserting ${documentName}:`, err);
+//                     return reject(err);
+//                 }
+//                 resolve();
+//             });
+//         });
 
-        console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
+//         console.log(`✅ Saved to DB: ${documentName} - ${file.originalname}`);
 
-    }
-};
+//     }
+// };
 
-const get_DocumentName = (fieldName) => {
-    switch (fieldName) {
-        case 'document':
-            return "General Document";
-        case 'packing_list':
-            return "Packing List";
-        case 'licenses':
-            return "Licenses/Permit";
-        case 'product_literature':
-            return "Product Literature";
-        case 'other_documents':
-            return "Other Documents";
-        default:
-            return "Unknown Document";
-    }
-};
+// const get_DocumentName = (fieldName) => {
+//     switch (fieldName) {
+//         case 'document':
+//             return "General Document";
+//         case 'packing_list':
+//             return "Packing List";
+//         case 'licenses':
+//             return "Licenses/Permit";
+//         case 'product_literature':
+//             return "Product Literature";
+//         case 'other_documents':
+//             return "Other Documents";
+//         default:
+//             return "Unknown Document";
+//     }
+// };
 
 const GetClearingList = async (req, res) => {
     try {
@@ -5158,7 +5233,7 @@ const UpdateShipment = async (req, res) => {
                 const { email, cellphone } = member;
 
                 if (email) {
-                    // sendMail(email, emailSubject, emailContent);
+                    sendMail(email, emailSubject, emailContent);
                 }
                 // 05-06-2025
                 /* if (cellphone) {

@@ -261,6 +261,5 @@ const findFolderId = async (folderName, parentId = null) => {
     }
 };
 
-
 module.exports = { findOrCreateFolder, uploadFile, createFolderIfNotExists, uploadToSpecificPath, findFolderId };
 

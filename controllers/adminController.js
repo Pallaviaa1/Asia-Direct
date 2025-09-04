@@ -1076,7 +1076,7 @@ const Addfreight = async (req, res) => {
                     <p>Regards,<br><strong>Management System</strong></p>
                 </div>
             `;
-                // sendMail(Email, mailSubject, content);
+                sendMail(Email, mailSubject, content);
 
                 // Process files dynamically
                 // Example usage inside your Addfreight controller
@@ -1398,10 +1398,10 @@ const EditFreight = async (req, res) => {
             // console.log(result[0].sales_email);
 
 
-            // sendMail(result[0].sale_email, mailSubject, contentTemplate);
+            sendMail(result[0].sale_email, mailSubject, contentTemplate);
 
 
-            //sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
+            sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
 
             const whatsappMessage = `
             Shipment details have been amended.
@@ -1427,7 +1427,7 @@ const EditFreight = async (req, res) => {
 
                 for (const member of teamMembers) {
                     // Send Email
-                    // await sendMail(member.email, mailSubject, contentTemplate);
+                    await sendMail(member.email, mailSubject, contentTemplate);
 
                     // Send WhatsApp
                     const formattedPhone = member.cellphone.startsWith('+') ? member.cellphone : `+${member.cellphone}`;
@@ -5034,14 +5034,58 @@ const createBatch = async (req, res) => {
                 total_dimensions, master_waybill, house_waybill, carrier, vessel,
                 container_no, devy_port_of_loading, devy_port_of_discharge, devy_final_des,
                 origin_carrier, des_carrier, registration_number, comment
-            ], (err, result) => {
+            ], async (err, result) => {
                 if (err) {
                     return res.status(500).send({
                         success: false,
                         message: err.message
                     });
                 }
+                if (req.files && req.files.document && req.files.document.length > 0) {
+                    // console.log("hii");
+                    const file = req.files.document[0];
+                    const documentName = req.body.documentName;
 
+
+                    const freightIds = await new Promise((resolve, reject) => {
+                        con.query(
+                            `SELECT freight_id FROM freight_assig_to_batch WHERE batch_id = ?`,
+                            [order.order_id],
+                            (err, result) => {
+                                if (err) return reject(err);
+                                if (result.length === 0) return reject(new Error("No freight_id found for order"));
+                                resolve(result[0].freight_id);
+                            }
+                        );
+                    });
+                    for (const freightId of freightIds) {
+                        const freightNumber = await new Promise((resolve, reject) => {
+                            con.query(
+                                `SELECT freight_number FROM tbl_freight WHERE id = ?`,
+                                [freightId],
+                                (err, result) => {
+                                    if (err) return reject(err);
+                                    if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
+                                    resolve(result[0].freight_number);
+                                }
+                            );
+                        });
+
+                        const freightFolderId = await findOrCreateFolder(freightNumber);
+                        const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                        await new Promise((resolve, reject) => {
+                            con.query(
+                                `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`,
+                                [freightId, documentName, file.filename],
+                                (err) => {
+                                    if (err) return reject(err);
+                                    resolve();
+                                }
+                            );
+                        });
+                    }
+                }
                 return res.status(201).send({
                     success: true,
                     message: 'Batch created successfully'
@@ -5055,6 +5099,188 @@ const createBatch = async (req, res) => {
         });
     }
 };
+
+/* const createBatch = async (req, res) => {
+    try {
+        const {
+            batch_number,
+            warehouse_id,
+            date_first_received,
+            ETD,
+            total_days_storage,
+            batch_name,
+            is_exporImport,
+            freight, // should be array of freight_ids
+            freight_option,
+            freight_speed,
+            collection_warehouse,
+            delivery_warehouse,
+            origin_country_id,
+            detination_country_id,
+            port_loading,
+            port_discharge,
+            collection_address,
+            delivery_address,
+            origin_handler,
+            des_handler,
+            costs_to_collect,
+            warehouse_cost,
+            origin_doc_costs,
+            origin_oncarriage_costs,
+            origin_Incidental_costs,
+            costs_to_collect_des,
+            warehouse_cost_des,
+            des_doc_costs,
+            des_oncarriage_costs,
+            des_Incidental_costs,
+            freight_cost,
+            no_of_shipments,
+            nature_of_good,
+            type_of_packaging,
+            total_boxes,
+            volumentric_weight,
+            total_weight,
+            total_dimensions,
+            master_waybill,
+            house_waybill,
+            carrier,
+            vessel,
+            container_no,
+            devy_port_of_loading,
+            devy_port_of_discharge,
+            devy_final_des,
+            origin_carrier,
+            des_carrier,
+            registration_number,
+            comment
+        } = req.body;
+
+        //  1. Check if batch_number already exists
+        const checkQuery = 'SELECT * FROM batches WHERE batch_number = ?';
+        con.query(checkQuery, [batch_number], (err, result) => {
+            if (err) {
+                return res.status(500).send({ success: false, message: err.message });
+            }
+
+            if (result.length > 0) {
+                return res.status(400).send({
+                    success: false,
+                    message: 'Batch number already exists'
+                });
+            }
+
+            //  2. Insert new batch
+            const insertQuery = `
+                INSERT INTO batches (
+                    batch_number, warehouse_id, date_first_received, ETD, total_days_storage, 
+                    batch_name, is_exporImport, freight_option, freight_speed, 
+                    collection_warehouse, delivery_warehouse, origin_country_id, detination_country_id, 
+                    port_loading, port_discharge, collection_address, delivery_address, 
+                    origin_handler, des_handler, costs_to_collect, warehouse_cost, 
+                    origin_doc_costs, origin_oncarriage_costs, origin_Incidental_costs, 
+                    costs_to_collect_des, warehouse_cost_des, des_doc_costs, des_oncarriage_costs, 
+                    des_Incidental_costs, freight_cost, no_of_shipments, nature_of_good, 
+                    type_of_packaging, total_boxes, volumentric_weight, total_weight, 
+                    total_dimensions, master_waybill, house_waybill, carrier, vessel, 
+                    container_no, devy_port_of_loading, devy_port_of_discharge, devy_final_des, 
+                    origin_carrier, des_carrier, registration_number, comment
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+
+            con.query(insertQuery, [
+                batch_number, warehouse_id, date_first_received, ETD, total_days_storage,
+                batch_name, is_exporImport, freight_option, freight_speed,
+                collection_warehouse, delivery_warehouse, origin_country_id, detination_country_id,
+                port_loading, port_discharge, collection_address, delivery_address,
+                origin_handler, des_handler, costs_to_collect, warehouse_cost,
+                origin_doc_costs, origin_oncarriage_costs, origin_Incidental_costs,
+                costs_to_collect_des, warehouse_cost_des, des_doc_costs, des_oncarriage_costs,
+                des_Incidental_costs, freight_cost, no_of_shipments, nature_of_good,
+                type_of_packaging, total_boxes, volumentric_weight, total_weight,
+                total_dimensions, master_waybill, house_waybill, carrier, vessel,
+                container_no, devy_port_of_loading, devy_port_of_discharge, devy_final_des,
+                origin_carrier, des_carrier, registration_number, comment
+            ], (err, result) => {
+                if (err) {
+                    return res.status(500).send({ success: false, message: err.message });
+                }
+
+                const batchId = result.insertId;
+
+                // 3. Assign freights to batch
+                if (freight && Array.isArray(freight)) {
+                    freight.forEach(freightId => {
+                        con.query(
+                            `INSERT INTO freight_assig_to_batch (batch_id, freight_id) VALUES (?, ?)`,
+                            [batchId, freightId],
+                            (err) => {
+                                if (err) console.error("Error linking freight:", err);
+                            }
+                        );
+                    });
+                }
+
+                // 4. Handle uploaded documents
+                if (req.files && Object.keys(req.files).length > 0) {
+                    for (const fieldName of Object.keys(req.files)) {
+                        const filesArray = req.files[fieldName];
+
+                        filesArray.forEach(file => {
+                            const originalName = file.originalname;
+                            const savedName = file.filename;
+
+                            // Insert into batch_documents
+                            con.query(
+                                `INSERT INTO batch_documents (batch_id, document_name, document_file) VALUES (?, ?, ?)`,
+                                [batchId, originalName, savedName],
+                                (err) => {
+                                    if (err) console.error("Error inserting batch document:", err);
+                                }
+                            );
+
+                            // For each freight, insert docs into freight_doc
+                            if (freight && Array.isArray(freight)) {
+                                freight.forEach(freightId => {
+                                    con.query(
+                                        `SELECT freight_number FROM tbl_freight WHERE id = ?`,
+                                        [freightId],
+                                        (err, freightRes) => {
+                                            if (err) {
+                                                console.error("Error fetching freight_number:", err);
+                                                return;
+                                            }
+
+                                            if (freightRes.length > 0) {
+                                                const freightNumber = freightRes[0].freight_number;
+                                                con.query(
+                                                    `INSERT INTO freight_doc (freight_id, freight_number, document_name, document_file) VALUES (?, ?, ?, ?)`,
+                                                    [freightId, freightNumber, originalName, savedName],
+                                                    (err) => {
+                                                        if (err) console.error("Error inserting freight document:", err);
+                                                    }
+                                                );
+                                            }
+                                        }
+                                    );
+                                });
+                            }
+                        });
+                    }
+                }
+
+                //  5. Respond success
+                return res.status(201).send({
+                    success: true,
+                    message: 'Batch created successfully',
+                    batchId: batchId
+                });
+            });
+        });
+    } catch (error) {
+        return res.status(500).send({ success: false, message: error.message });
+    }
+};
+ */
 
 
 const getAllBatch = async (req, res) => {
@@ -6372,7 +6598,7 @@ const editWarehouseDetails = async (req, res) => {
                             const fetchedFreightId = orderResult[0].freight_id;
 
                             // Step 4: Get sales person from tbl_freight
-                            const freightQuery = `SELECT sales_representative AS sales_person FROM tbl_freight WHERE id = ?`;
+                            const freightQuery = `SELECT sales_representative AS sales_person, freight_number FROM tbl_freight WHERE id = ?`;
                             con.query(freightQuery, [fetchedFreightId], (freightErr, freightResult) => {
                                 if (freightErr || freightResult.length === 0) {
                                     console.log("Could not fetch sales person");
@@ -6380,6 +6606,7 @@ const editWarehouseDetails = async (req, res) => {
                                 }
 
                                 const salesPersonId = freightResult[0].sales_person;
+                                const freightNumber = freightResult[0].freight_number;
 
                                 // Step 5: Get email of sales person
                                 const userQuery = `SELECT email FROM tbl_users WHERE id = ?`;
@@ -6402,7 +6629,7 @@ const editWarehouseDetails = async (req, res) => {
                                                     <li><strong>Receipt No:</strong> ${ware_receipt_no}</li>
                                                     <li><strong>Tracking No:</strong> ${tracking_number}</li>
                                                     <li><strong>New Date Received:</strong> ${date_received}</li>
-                                                    <li><strong>Packages:</strong> ${packages} (${package_type})</li>
+                                                    <li><strong>Packages:</strong> ${no_of_packages} (${package_type})</li>
                                                     <li><strong>Weight:</strong> ${weight} kg</li>
                                                 </ul>
                                                 <p>Please take necessary action.</p>
@@ -6414,8 +6641,32 @@ const editWarehouseDetails = async (req, res) => {
                                         for (const email of allRecipients) {
                                             if (email) await sendMail(email, subject, htmlBody);
                                         }
+                                        await findOrCreateFolder(freightNumber);
 
-                                        // ✅ Response after notification
+                                        if (req.files && Object.keys(req.files).length > 0) {
+                                            for (const fieldName of Object.keys(req.files)) {
+                                                const filesArray = req.files[fieldName];
+
+                                                for (const file of filesArray) {
+                                                    const documentName = req.body.documentName; // sent from Postman
+                                                    console.log(documentName);
+
+                                                    await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                                                    // Save in DB
+                                                    const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) 
+            VALUES (?, ?, ?)`;
+                                                    await new Promise((resolve, reject) => {
+                                                        con.query(docQuery, [fetchedFreightId, documentName, file.filename], (err) => {
+                                                            if (err) return reject(err);
+                                                            resolve();
+                                                        });
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        // Response after notification
                                         res.status(200).send({
                                             success: true,
                                             message: "Warehouse details updated and notifications sent."
@@ -6632,7 +6883,7 @@ const addWarehouseProduct = async (req, res) => {
                 const freightId = orderResult[0].freight_id;
 
                 // Step 3: Get sales_person_id from tbl_freight
-                const freightQuery = `SELECT sales_representative as sales_person FROM tbl_freight WHERE id = ?`;
+                const freightQuery = `SELECT sales_representative as sales_person, freight_number FROM tbl_freight WHERE id = ?`;
                 con.query(freightQuery, [freightId], (freightErr, freightResult) => {
                     if (freightErr || freightResult.length === 0) {
                         console.log("Product added, but could not fetch sales person");
@@ -6640,7 +6891,7 @@ const addWarehouseProduct = async (req, res) => {
                     }
 
                     const salesPersonId = freightResult[0].sales_person;
-
+                    const freightNumber = freightResult[0].freight_number;
                     // Step 4: Get sales person email
                     const userQuery = `SELECT email FROM tbl_users WHERE id = ?`;
                     con.query(userQuery, [salesPersonId], (userErr, userResult) => {
@@ -6674,9 +6925,32 @@ const addWarehouseProduct = async (req, res) => {
 
                             // Send mail to all recipients
                             await Promise.all(allRecipients.map(email => {
-                                if (email) return sendMail(email, subject, htmlBody);
+                                // if (email) return sendMail(email, subject, htmlBody);
                             }));
 
+                            await findOrCreateFolder(freightNumber);
+
+                            if (req.files && Object.keys(req.files).length > 0) {
+                                for (const fieldName of Object.keys(req.files)) {
+                                    const filesArray = req.files[fieldName];
+
+                                    for (const file of filesArray) {
+                                        const documentName = req.body.documentName; // sent from Postman
+                                        console.log(documentName);
+
+                                        await uploadToMatchingFolder(file, documentName, freightNumber);
+
+                                        // Save in DB
+                                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                                        await new Promise((resolve, reject) => {
+                                            con.query(docQuery, [freightId, documentName, file.filename], (err) => {
+                                                if (err) return reject(err);
+                                                resolve();
+                                            });
+                                        });
+                                    }
+                                }
+                            }
 
                             res.status(200).send({
                                 success: true,
