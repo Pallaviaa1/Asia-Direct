@@ -261,5 +261,28 @@ const findFolderId = async (folderName, parentId = null) => {
     }
 };
 
-module.exports = { findOrCreateFolder, uploadFile, createFolderIfNotExists, uploadToSpecificPath, findFolderId };
+// Delete folder by freightNumber (and everything inside)
+const deleteFolderByName = async (folderName, parentId = null) => {
+    try {
+        const drive = await authenticateGoogleDrive();
+        
+        // Step 1: Find folder ID
+        const folderId = await findFolderId(folderName, parentId);
+        if (!folderId) {
+            console.log(`❌ Folder "${folderName}" not found in Google Drive`);
+            return false;
+        }
+
+        // Step 2: Permanently delete folder
+        await drive.files.delete({ fileId: folderId });
+        console.log(`✅ Folder "${folderName}" (ID: ${folderId}) deleted from Google Drive`);
+        return true;
+    } catch (err) {
+        console.error("Error deleting folder:", err.message);
+        return false;
+    }
+};
+
+
+module.exports = { findOrCreateFolder, uploadFile, createFolderIfNotExists, uploadToSpecificPath, findFolderId, deleteFolderByName };
 

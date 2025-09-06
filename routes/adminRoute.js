@@ -132,6 +132,8 @@ admin_route.post("/DeleteWarehouseProduct", adminController.DeleteWarehouseProdu
 
 admin_route.post("/GetFreightImages", adminController.GetFreightImages)
 admin_route.post("/DeleteDocument", adminController.DeleteDocument)
+admin_route.post("/clearanceDocument", adminController.clearanceDocument)
+admin_route.post("/ShipmentDocument", adminController.ShipmentDocument)
 admin_route.get("/GetDeliveredOrder", adminController.GetDeliveredOrder)
 admin_route.get("/OrderInvoiceList", adminController.OrderInvoiceList)
 admin_route.post("/revertMovedFreight", adminController.revertMovedFreight)

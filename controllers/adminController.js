@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const sendMail = require('../helpers/sendMail')
 const rendomString = require('randomstring');
 const { assign } = require('nodemailer/lib/shared');
-const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId, createFolderIfNotExists } = require('../helpers/uploadDrive');
+const { findOrCreateFolder, uploadFile, findFolderId, deleteFolderByName } = require('../helpers/uploadDrive');
 const { logging } = require('googleapis/build/src/apis/logging');
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
@@ -1091,9 +1091,9 @@ const Addfreight = async (req, res) => {
                             await uploadToMatchingFolder(file, documentName, result[0].freight_number);
 
                             // Save in DB
-                            const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                            const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
                             await new Promise((resolve, reject) => {
-                                con.query(docQuery, [insertResult.insertId, documentName, file.filename], (err) => {
+                                con.query(docQuery, [insertResult.insertId, 1, documentName, file.filename], (err) => {
                                     if (err) return reject(err);
                                     resolve();
                                 });
@@ -1398,10 +1398,10 @@ const EditFreight = async (req, res) => {
             // console.log(result[0].sales_email);
 
 
-            sendMail(result[0].sale_email, mailSubject, contentTemplate);
+            // sendMail(result[0].sale_email, mailSubject, contentTemplate);
 
 
-            sendMail(estimatesTeamEmail, mailSubject, contentTemplate);
+            /* wrong // sendMail(estimatesTeamEmail, mailSubject, contentTemplate); */
 
             const whatsappMessage = `
             Shipment details have been amended.
@@ -1427,7 +1427,7 @@ const EditFreight = async (req, res) => {
 
                 for (const member of teamMembers) {
                     // Send Email
-                    await sendMail(member.email, mailSubject, contentTemplate);
+                    // await sendMail(member.email, mailSubject, contentTemplate);
 
                     // Send WhatsApp
                     const formattedPhone = member.cellphone.startsWith('+') ? member.cellphone : `+${member.cellphone}`;
@@ -1557,9 +1557,9 @@ const EditFreight = async (req, res) => {
                         await uploadToMatchingFolder(file, documentName, freightNumber);
 
                         // Save in DB
-                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                        const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
                         await new Promise((resolve, reject) => {
-                            con.query(docQuery, [id, documentName, file.filename], (err) => {
+                            con.query(docQuery, [id, 1, documentName, file.filename], (err) => {
                                 if (err) return reject(err);
                                 resolve();
                             });
@@ -1630,56 +1630,70 @@ const DeleteFreight = async (req, res) => {
     try {
         const { freight_id } = req.body;
         if (!freight_id) {
-            res.status(400).send({
+            return res.status(400).send({
                 success: false,
                 message: "Please provide freight id"
-            })
+            });
         }
-        else {
-            const selectQuery = `select is_deleted from tbl_freight where id=?`;
-            await con.query(selectQuery, [freight_id], (err, data) => {
+
+        const selectQuery = `SELECT is_deleted, freight_number FROM tbl_freight WHERE id = ?`;
+        con.query(selectQuery, [freight_id], (err, result) => {
+            if (err) throw err;
+
+            if (result.length === 0) {
+                return res.status(400).send({
+                    success: false,
+                    message: "Data not found"
+                });
+            }
+
+            const { is_deleted, freight_number } = result[0];
+
+            if (is_deleted == 1) {
+                return res.status(400).send({
+                    success: false,
+                    message: "Freight already deleted"
+                });
+            }
+
+            const updateQuery = `UPDATE tbl_freight SET is_deleted = ? WHERE id = ?`;
+            con.query(updateQuery, [1, freight_id], async (err, updateResult) => {
                 if (err) throw err;
-                if (data.length > 0) {
-                    if (data[0].is_deleted == 1) {
-                        res.status(400).send({
+
+                if (updateResult.affectedRows > 0) {
+                    try {
+                        // delete freight docs
+                        await con.query(`DELETE FROM freight_doc WHERE freight_id = ?`, [freight_id]);
+
+                        // delete folder by freight_number
+                        await deleteFolderByName(freight_number);
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight deleted successfully"
+                        });
+                    } catch (error) {
+                        return res.status(500).send({
                             success: false,
-                            message: "Freight already deleted"
-                        })
-                    }
-                    else {
-                        const updateQuery = `update tbl_freight set is_deleted=? where id=?`;
-                        con.query(updateQuery, [1, freight_id], (err, data) => {
-                            if (err) throw err;
-                            if (data.affectedRows > 0) {
-                                res.status(200).send({
-                                    success: true,
-                                    message: "Freight deleted successfully"
-                                })
-                            }
-                            else {
-                                res.status(400).send({
-                                    success: false,
-                                    message: "Failed to delete freight"
-                                })
-                            }
-                        })
+                            message: "Freight updated but error while deleting related files: " + error.message
+                        });
                     }
                 } else {
-                    res.status(400).send({
+                    return res.status(400).send({
                         success: false,
-                        message: "Data not found"
-                    })
+                        message: "Failed to delete freight"
+                    });
                 }
-            })
-        }
-    }
-    catch (error) {
+            });
+        });
+    } catch (error) {
         res.status(500).send({
             success: false,
             message: error.message
-        })
+        });
     }
-}
+};
+
 
 const AddCountryOrigin = async (req, res) => {
     try {
@@ -5041,51 +5055,51 @@ const createBatch = async (req, res) => {
                         message: err.message
                     });
                 }
-                if (req.files && req.files.document && req.files.document.length > 0) {
-                    // console.log("hii");
-                    const file = req.files.document[0];
-                    const documentName = req.body.documentName;
+                // if (req.files && req.files.document && req.files.document.length > 0) {
+                //     // console.log("hii");
+                //     const file = req.files.document[0];
+                //     const documentName = req.body.documentName;
 
 
-                    const freightIds = await new Promise((resolve, reject) => {
-                        con.query(
-                            `SELECT freight_id FROM freight_assig_to_batch WHERE batch_id = ?`,
-                            [order.order_id],
-                            (err, result) => {
-                                if (err) return reject(err);
-                                if (result.length === 0) return reject(new Error("No freight_id found for order"));
-                                resolve(result[0].freight_id);
-                            }
-                        );
-                    });
-                    for (const freightId of freightIds) {
-                        const freightNumber = await new Promise((resolve, reject) => {
-                            con.query(
-                                `SELECT freight_number FROM tbl_freight WHERE id = ?`,
-                                [freightId],
-                                (err, result) => {
-                                    if (err) return reject(err);
-                                    if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
-                                    resolve(result[0].freight_number);
-                                }
-                            );
-                        });
+                //     const freightIds = await new Promise((resolve, reject) => {
+                //         con.query(
+                //             `SELECT freight_id FROM freight_assig_to_batch WHERE batch_id = ?`,
+                //             [order.order_id],
+                //             (err, result) => {
+                //                 if (err) return reject(err);
+                //                 if (result.length === 0) return reject(new Error("No freight_id found for order"));
+                //                 resolve(result[0].freight_id);
+                //             }
+                //         );
+                //     });
+                //     for (const freightId of freightIds) {
+                //         const freightNumber = await new Promise((resolve, reject) => {
+                //             con.query(
+                //                 `SELECT freight_number FROM tbl_freight WHERE id = ?`,
+                //                 [freightId],
+                //                 (err, result) => {
+                //                     if (err) return reject(err);
+                //                     if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
+                //                     resolve(result[0].freight_number);
+                //                 }
+                //             );
+                //         });
 
-                        const freightFolderId = await findOrCreateFolder(freightNumber);
-                        const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
+                //         const freightFolderId = await findOrCreateFolder(freightNumber);
+                //         const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
 
-                        await new Promise((resolve, reject) => {
-                            con.query(
-                                `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`,
-                                [freightId, documentName, file.filename],
-                                (err) => {
-                                    if (err) return reject(err);
-                                    resolve();
-                                }
-                            );
-                        });
-                    }
-                }
+                //         await new Promise((resolve, reject) => {
+                //             con.query(
+                //                 `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`,
+                //                 [freightId, documentName, file.filename],
+                //                 (err) => {
+                //                     if (err) return reject(err);
+                //                     resolve();
+                //                 }
+                //             );
+                //         });
+                //     }
+                // }
                 return res.status(201).send({
                     success: true,
                     message: 'Batch created successfully'
@@ -6639,7 +6653,7 @@ const editWarehouseDetails = async (req, res) => {
 
                                         // Send email to all
                                         for (const email of allRecipients) {
-                                            if (email) await sendMail(email, subject, htmlBody);
+                                            // if (email) await sendMail(email, subject, htmlBody);
                                         }
                                         await findOrCreateFolder(freightNumber);
 
@@ -6654,10 +6668,10 @@ const editWarehouseDetails = async (req, res) => {
                                                     await uploadToMatchingFolder(file, documentName, freightNumber);
 
                                                     // Save in DB
-                                                    const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) 
-            VALUES (?, ?, ?)`;
+                                                    const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) 
+            VALUES (?, ?, ?, ?)`;
                                                     await new Promise((resolve, reject) => {
-                                                        con.query(docQuery, [fetchedFreightId, documentName, file.filename], (err) => {
+                                                        con.query(docQuery, [fetchedFreightId, 1, documentName, file.filename], (err) => {
                                                             if (err) return reject(err);
                                                             resolve();
                                                         });
@@ -6929,6 +6943,7 @@ const addWarehouseProduct = async (req, res) => {
                             }));
 
                             await findOrCreateFolder(freightNumber);
+                            console.log(req.files);
 
                             if (req.files && Object.keys(req.files).length > 0) {
                                 for (const fieldName of Object.keys(req.files)) {
@@ -6941,9 +6956,9 @@ const addWarehouseProduct = async (req, res) => {
                                         await uploadToMatchingFolder(file, documentName, freightNumber);
 
                                         // Save in DB
-                                        const docQuery = `INSERT INTO freight_doc (freight_id, document_name, document) VALUES (?, ?, ?)`;
+                                        const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
                                         await new Promise((resolve, reject) => {
-                                            con.query(docQuery, [freightId, documentName, file.filename], (err) => {
+                                            con.query(docQuery, [freightId, 1, documentName, file.filename], (err) => {
                                                 if (err) return reject(err);
                                                 resolve();
                                             });
@@ -7169,28 +7184,31 @@ const RevertOrder = async (req, res) => {
  */
 
 const GetFreightImages = async (req, res) => {
-    const { freight_id, clearance_id } = req.body;
+    const { freight_id, clearance_id, shipment_id, uploaded_by } = req.body;
+    console.log(clearance_id);
 
     try {
         const finalResult = {};
 
-        const groupDocuments = (docs, isClearance = false) => {
+        const groupDocuments = (docs, isClearance = false, isShipment = false) => {
             const groupedDocuments = {};
 
             docs.forEach((doc) => {
-                const normalizedKey = doc.document_name.trim().toLowerCase();
+                const safeName = doc.document_name ? doc.document_name.trim() : "Uncategorized";
+                const normalizedKey = safeName.toLowerCase();
 
                 if (!groupedDocuments[normalizedKey]) {
                     groupedDocuments[normalizedKey] = {
-                        originalName: doc.document_name.trim(),
+                        originalName: safeName,
                         items: []
                     };
                 }
+                console.log(doc);
 
                 groupedDocuments[normalizedKey].items.push({
                     id: doc.id,
-                    document_name: doc.document_name.trim(),
-                    document: isClearance ? doc.document_file : doc.document,
+                    document_name: safeName,
+                    document: isClearance ? doc.document_file : isShipment ? doc.document_file : doc.document,
                     created_at: isClearance ? doc.uploaded_at : doc.created_at
                 });
             });
@@ -7201,11 +7219,19 @@ const GetFreightImages = async (req, res) => {
             }
         };
 
+
         const fetchFreightDocs = () => {
             return new Promise((resolve, reject) => {
                 if (!freight_id) return resolve();
-                const selectQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
-                con.query(selectQuery, [freight_id], (err, docs) => {
+                let selectQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
+                let params = [freight_id];
+
+                if (uploaded_by == 2) {   // apply filter only if uploaded_by=2
+                    selectQuery += ` AND uploaded_by = ?`;
+                    params.push(uploaded_by);
+                }
+
+                con.query(selectQuery, params, (err, docs) => {
                     if (err) return reject(err);
                     if (docs.length > 0) groupDocuments(docs, false);
                     resolve();
@@ -7213,11 +7239,19 @@ const GetFreightImages = async (req, res) => {
             });
         };
 
+        //  Clearance Docs
         const fetchClearanceDocs = () => {
             return new Promise((resolve, reject) => {
                 if (!clearance_id) return resolve();
-                const selectQuery = `SELECT * FROM clearance_docs WHERE clearance_id = ?`;
-                con.query(selectQuery, [clearance_id], (err, docs) => {
+                let selectQuery = `SELECT * FROM clearance_docs WHERE clearance_id = ?`;
+                let params = [clearance_id];
+
+                if (uploaded_by == 2) {   //  filter only if 2
+                    selectQuery += ` AND uploaded_by = ?`;
+                    params.push(uploaded_by);
+                }
+
+                con.query(selectQuery, params, (err, docs) => {
                     if (err) return reject(err);
                     if (docs.length > 0) groupDocuments(docs, true);
                     resolve();
@@ -7225,7 +7259,27 @@ const GetFreightImages = async (req, res) => {
             });
         };
 
-        await Promise.all([fetchFreightDocs(), fetchClearanceDocs()]);
+        // Shipment Docs
+        const fetchShipmentDocs = () => {
+            return new Promise((resolve, reject) => {
+                if (!shipment_id) return resolve();
+                let selectQuery = `SELECT * FROM shipment_documents WHERE shipment_id = ?`;
+                let params = [shipment_id];
+
+                if (uploaded_by == 2) {   //  filter only if 2
+                    selectQuery += ` AND uploaded_by = ?`;
+                    params.push(uploaded_by);
+                }
+
+                con.query(selectQuery, params, (err, docs) => {
+                    if (err) return reject(err);
+                    if (docs.length > 0) groupDocuments(docs, false, true);
+                    resolve();
+                });
+            });
+        };
+
+        await Promise.all([fetchFreightDocs(), fetchClearanceDocs(), fetchShipmentDocs()]);
 
         if (Object.keys(finalResult).length === 0) {
             return res.status(404).send({ success: false, message: 'No images found for the given IDs' });
@@ -7262,6 +7316,57 @@ const DeleteDocument = async (req, res) => {
         });
     }
 }
+
+const ShipmentDocument = async (req, res) => {
+    const { doc_id } = req.body;
+    try {
+        if (!doc_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide doc_id"
+            });
+        }
+        await con.query(`DELETE FROM shipment_documents WHERE id='${doc_id}'`, (err, result) => {
+            if (err) throw err;
+
+            return res.status(200).send({
+                success: true,
+                message: "Document Deleted successfully"
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+const clearanceDocument = async (req, res) => {
+    const { doc_id } = req.body;
+    try {
+        if (!doc_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide doc_id"
+            });
+        }
+        await con.query(`DELETE FROM clearance_docs WHERE id='${doc_id}'`, (err, result) => {
+            if (err) throw err;
+
+            return res.status(200).send({
+                success: true,
+                message: "Document Deleted successfully"
+            });
+        });
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
 
 const GetDeliveredOrder = async (req, res) => {
     // WHERE tbl_orders.warehouse_status='${0}'
@@ -8096,6 +8201,6 @@ module.exports = {
     getFreightsByBatch, MoveToOrder, MoveToClearaneOrder, getCleranceOrder, CompleteCleranceOrder, DeleteClearanceOrder,
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, DeleteWarehouse, editWarehouseDetails, GetCountries,
     GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, updateWarehouseProduct, updateClientWarehouseProduct, DeleteWarehouseProduct, GetFreightImages,
-    DeleteDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight
+    DeleteDocument, clearanceDocument, ShipmentDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight
 
 }
