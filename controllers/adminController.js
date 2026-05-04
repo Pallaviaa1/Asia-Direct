@@ -40,32 +40,69 @@ const stripHtml = (html = "") => {
 //     return `+${countryCode}${phone}`;
 // };
 
+// const formatWhatsAppNumber = (country_code, phone_no) => {
+//     if (!phone_no) {
+//         throw new Error("Phone number missing");
+//     }
+
+//     let code = country_code
+//         ? country_code.toString().replace(/\D/g, '')
+//         : '91'; // default India
+
+//     let number = phone_no.toString().replace(/\D/g, '');
+//     number = number.replace(/^0+/, '');
+
+//     if (!code || !number) {
+//         throw new Error("Invalid country code or phone number");
+//     }
+
+//     const full = `+${code}${number}`;
+
+//     // Length validation (E.164 standard)
+//     if (full.length < 10 || full.length > 15) {
+//         throw new Error("Invalid phone length");
+//     }
+
+//     return full;
+// };
+
 const formatWhatsAppNumber = (country_code, phone_no) => {
-    if (!phone_no) {
-        throw new Error("Phone number missing");
+    try {
+        if (!phone_no) return null;
+
+        // Clean phone
+        let number = phone_no.toString().replace(/\D/g, '');
+
+        // Remove leading zeros
+        number = number.replace(/^0+/, '');
+
+        if (!number) return null;
+
+        // Clean country code
+        let code = country_code
+            ? country_code.toString().replace(/\D/g, '')
+            : '91'; // default India
+
+        if (!code) return null;
+
+        // If number already starts with country code, avoid duplication
+        if (number.startsWith(code)) {
+            return `+${number}`;
+        }
+
+        const fullNumber = `${code}${number}`;
+
+        // Validate E.164 (digits only)
+        if (fullNumber.length < 8 || fullNumber.length > 15) {
+            return null; // don't throw
+        }
+
+        return `+${fullNumber}`;
+    } catch (err) {
+        console.error("formatWhatsAppNumber error:", err.message);
+        return null;
     }
-
-    let code = country_code
-        ? country_code.toString().replace(/\D/g, '')
-        : '91'; // default India
-
-    let number = phone_no.toString().replace(/\D/g, '');
-    number = number.replace(/^0+/, '');
-
-    if (!code || !number) {
-        throw new Error("Invalid country code or phone number");
-    }
-
-    const full = `+${code}${number}`;
-
-    // Length validation (E.164 standard)
-    if (full.length < 10 || full.length > 15) {
-        throw new Error("Invalid phone length");
-    }
-
-    return full;
 };
-
 const formatTwilioWhatsAppNumber = (countryCode, phone) => {
     if (!phone) {
         throw new Error("Phone number missing");
@@ -5977,30 +6014,57 @@ Regards,<br><strong>AsiaDirect</strong>
                                     }
 
                                     // 📲 WHATSAPP (ONLY IF BUTTON ENABLED)
+                                    // if (send_whatsapp == 1 && supplier.phone_no) {
+
+                                    //     const whatsappTo = formatWhatsAppNumber(
+                                    //         supplier.country_code,
+                                    //         supplier.phone_no
+                                    //     );
+
+                                    //     if (!whatsappTo) return;
+
+                                    //     try {
+                                    //         await sendWhatsAppNotification(
+                                    //             whatsappTo, // +9185xxxx
+                                    //             "copy_system_notification",
+                                    //             {
+                                    //                 name: supplier.name,
+                                    //                 title: title,
+                                    //                 body: stripHtml(description) // MUST match template
+                                    //                 // media_url: mediaUrl
+                                    //             },
+                                    //             media_url
+                                    //         );
+                                    //     } catch (err) {
+                                    //         console.error(
+                                    //             `WhatsApp failed for supplier ${supplier.id}:`,
+                                    //             err.message
+                                    //         );
+                                    //     }
+                                    // }
                                     if (send_whatsapp == 1 && supplier.phone_no) {
-
-                                        const whatsappTo = formatWhatsAppNumber(
-                                            supplier.country_code,
-                                            supplier.phone_no
-                                        );
-
-                                        if (!whatsappTo) return;
-
                                         try {
+                                            const whatsappTo = formatWhatsAppNumber(
+                                                supplier.country_code,
+                                                supplier.phone_no
+                                            );
+
+                                            if (!whatsappTo) return;
+
                                             await sendWhatsAppNotification(
-                                                whatsappTo, // +9185xxxx
+                                                whatsappTo,
                                                 "copy_system_notification",
                                                 {
                                                     name: supplier.name,
                                                     title: title,
-                                                    body: stripHtml(description) // MUST match template
-                                                    // media_url: mediaUrl
+                                                    body: stripHtml(description)
                                                 },
                                                 media_url
                                             );
+
                                         } catch (err) {
                                             console.error(
-                                                `WhatsApp failed for supplier ${supplier.id}:`,
+                                                `WhatsApp skipped for supplier ${supplier.id}:`,
                                                 err.message
                                             );
                                         }
