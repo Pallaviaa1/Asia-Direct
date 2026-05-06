@@ -2551,9 +2551,9 @@ const GetFreightCustomer = async (req, res) => {
 const EditFreight = async (req, res) => {
     try {
         // Extracting data from req.body
-        console.log(req.body);
-        console.log(req.files);
-        console.log(req.body.documentName);
+        // console.log(req.body);
+        // console.log(req.files);
+        // console.log(req.body.documentName);
 
         const {
             id, // Assuming you will pass the ID of the freight to be updated
