@@ -1578,7 +1578,20 @@ const validateAndTransformDatas = async (row) => {
     for (const [excelField, dbField] of Object.entries(fieldMappingData)) {
         transformedRow[dbField] = dbField === 'date' ? parseDate(row[excelField]) : (row[excelField] || '');
     }
+    // Always set region automatically
+    transformedRow.invoice_region = getInvoiceRegion(transformedRow.document_number);
+
     return transformedRow;
+};
+
+const getInvoiceRegion = (doc) => {
+    if (!doc) return '';
+
+    if (doc.startsWith('ADINV')) return 'South Africa (ZA)';
+    if (doc.startsWith('ADZW')) return 'Zimbabwe (ZWE)';
+    if (doc.startsWith('ADZM')) return 'Zambia (ZM)';
+
+    return '';
 };
 
 // Upload and insert data while skipping duplicates
@@ -1819,6 +1832,247 @@ const GetSageInvoiceList = async (req, res) => {
     } catch (error) {
         console.error("Unexpected error:", error.message);
         res.status(500).json({ success: false, message: "An unexpected error occurred." });
+    }
+};
+
+
+const DeleteSageInvoice = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Invoice ID is required."
+            });
+        }
+
+        // Check if invoice exists
+        const checkQuery = `SELECT * FROM sage_invoice_list WHERE id = ?`;
+
+        con.query(checkQuery, [id], (checkErr, checkResult) => {
+            if (checkErr) {
+                console.error("Database error:", checkErr.message);
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query failed."
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Invoice not found."
+                });
+            }
+
+            // Optional: Check if invoice is linked with any order
+            const orderCheckQuery = `
+                SELECT id FROM tbl_orders 
+                WHERE sage_invoice_id = ?
+            `;
+
+            con.query(orderCheckQuery, [id], (orderErr, orderResult) => {
+                if (orderErr) {
+                    console.error("Database error:", orderErr.message);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Database query failed."
+                    });
+                }
+
+                if (orderResult.length > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invoice is assigned to an order and cannot be deleted."
+                    });
+                }
+
+                // Delete invoice
+                const deleteQuery = `DELETE FROM sage_invoice_list WHERE id = ?`;
+
+                con.query(deleteQuery, [id], (deleteErr, deleteResult) => {
+                    if (deleteErr) {
+                        console.error("Database error:", deleteErr.message);
+                        return res.status(500).json({
+                            success: false,
+                            message: "Failed to delete invoice."
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        message: "Invoice deleted successfully."
+                    });
+                });
+            });
+        });
+
+    } catch (error) {
+        console.error("Unexpected error:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred."
+        });
+    }
+};
+
+
+const formatRegionLabel = (region) => {
+    switch (region) {
+        case "South Africa (ZA)":
+            return "South Africa";
+        case "Zimbabwe (ZWE)":
+            return "Zimbabwe";
+        case "Zambia (ZM)":
+            return "Zambia";
+        default:
+            return "Unknown";
+    }
+};
+
+const regionMap = {
+    "South Africa": "South Africa (ZA)",
+    "Zimbabwe": "Zimbabwe (ZWE)",
+    "Zambia": "Zambia (ZM)"
+};
+
+const GetSageInvoiceListByRegion = async (req, res) => {
+    try {
+        const {
+            search,
+            page = 1,
+            limit = 10,
+            region
+        } = req.query;
+
+        const offset = (page - 1) * limit;
+
+        let searchCondition = "";
+        let searchParams = [];
+
+        // SEARCH
+        if (search) {
+            searchCondition = `
+                AND (
+                    customer_name LIKE ? OR 
+                    document_number LIKE ? OR 
+                    customer_ref LIKE ?
+                )
+            `;
+            searchParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        }
+
+        // REGION FILTER (DB VALUE)
+        let regionCondition = "";
+        let regionParams = [];
+
+        if (region) {
+            const dbRegion = regionMap[region]; // convert UI → DB
+
+            if (dbRegion) {
+                regionCondition = `AND invoice_region = ?`;
+                regionParams.push(dbRegion);
+            }
+        }
+
+        // MAIN DATA QUERY
+        const dataQuery = `
+            SELECT * FROM sage_invoice_list
+            WHERE 1
+            ${searchCondition}
+            ${regionCondition}
+            ORDER BY document_number DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const dataParams = [
+            ...searchParams,
+            ...regionParams,
+            parseInt(limit),
+            parseInt(offset)
+        ];
+
+        // COUNT QUERY
+        const countQuery = `
+            SELECT COUNT(*) AS total FROM sage_invoice_list
+            WHERE 1
+            ${searchCondition}
+            ${regionCondition}
+        `;
+
+        const countParams = [
+            ...searchParams,
+            ...regionParams
+        ];
+
+        // COUNT
+        con.query(countQuery, countParams, (err, countResult) => {
+            if (err) {
+                console.error("Count error:", err.message);
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query failed."
+                });
+            }
+
+            const totalRecords = countResult[0].total;
+            const totalPages = Math.ceil(totalRecords / limit);
+
+            // DATA
+            con.query(dataQuery, dataParams, (err, data) => {
+                if (err) {
+                    console.error("Data error:", err.message);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Database query failed."
+                    });
+                }
+
+                // GROUPING (for UI tabs)
+                const groupedData = {
+                    "South Africa": [],
+                    "Zimbabwe": [],
+                    "Zambia": []
+                };
+
+                data.forEach(item => {
+                    switch (item.invoice_region) {
+                        case "South Africa (ZA)":
+                            groupedData["South Africa"].push(item);
+                            break;
+
+                        case "Zimbabwe (ZWE)":
+                            groupedData["Zimbabwe"].push(item);
+                            break;
+
+                        case "Zambia (ZM)":
+                            groupedData["Zambia"].push(item);
+                            break;
+                    }
+                });
+                return res.status(200).json({
+                    success: true,
+                    data: region
+                        ? data
+                        : groupedData,
+                    pagination: {
+                        totalRecords,
+                        totalPages,
+                        currentPage: parseInt(page),
+                        pageSize: parseInt(limit)
+                    }
+                });
+            });
+        });
+
+    } catch (error) {
+        console.error("Unexpected error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred."
+        });
     }
 };
 
@@ -2442,5 +2696,6 @@ module.exports = {
     updateLoadDetails, updateDeliveryDetails, GetAllOrdersDetails, GetLoadingDetails,
     GetDeliveryDetails, UploadExcelShipment, UploadExcelShipmentOrder, UploadExcelFullOrderDetails,
     UploadExcelBatch, UploadExcelWarehouse, editBatch, deleteBatche, UploadSageInvoiceLlist, GetSageInvoiceList, UploadCashbookList,
-    GetCashbookList, GetSageInvoiceDetails, checkNumber, TransactionAllocation, AddOrUpdateBookingInstruction, GetBookingInstructionById
+    GetCashbookList, GetSageInvoiceDetails, checkNumber, TransactionAllocation, AddOrUpdateBookingInstruction, GetBookingInstructionById,
+    DeleteSageInvoice, GetSageInvoiceListByRegion
 }

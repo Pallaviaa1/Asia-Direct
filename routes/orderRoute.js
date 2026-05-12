@@ -47,5 +47,7 @@ order_route.post("/GetSageInvoiceDetails", orderController.GetSageInvoiceDetails
 order_route.post("/TransactionAllocation", orderController.TransactionAllocation)
 order_route.post("/AddOrUpdateBookingInstruction", orderController.AddOrUpdateBookingInstruction)
 order_route.post("/GetBookingInstructionById", orderController.GetBookingInstructionById)
+order_route.post("/delete-sage-invoice/:id", orderController.DeleteSageInvoice);
+order_route.get("/GetSageInvoiceListByRegion", orderController.GetSageInvoiceListByRegion)
 
 module.exports = order_route;
