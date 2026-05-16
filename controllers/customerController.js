@@ -6209,13 +6209,13 @@ const getShipment = async (req, res) => {
         const pageLimit = parseInt(limit);
         const offset = (pageNumber - 1) * pageLimit;
 
-        /* ===================== ALL ACCESS USERS ===================== */
+        // Users with all access
         const ALL_ACCESS_USERS = [1, 19855];
 
         let condition = '';
         let params = [];
 
-        /* ===================== SEARCH ===================== */
+        // Search fields
         if (search) {
             condition += `
                 AND (
@@ -6252,7 +6252,7 @@ const getShipment = async (req, res) => {
             );
         }
 
-        /* ===================== TYPE FILTER (TAB) ===================== */
+        // Type filter
         if (type === "active") {
             condition += ` AND LOWER(tbl_shipments.status) != 'customs released' `;
         }
@@ -6261,10 +6261,27 @@ const getShipment = async (req, res) => {
             condition += ` AND LOWER(tbl_shipments.status) = 'customs released' `;
         }
 
-        /* ===================== ALL ACCESS DATA ===================== */
-        if (ALL_ACCESS_USERS.includes(Number(user_id))) {
+        // Utility function to use STR_TO_DATE only on valid dates
+        function getOrderClause() {
+            // This clause sorts ATD by date ASC, but puts invalid or null/empty/zero ATDs last
+            // (i.e. only well-formed dates yyyy-mm-dd come at top, others go last)
+            // This matches the example order strictly by ATD date ASC as per 15/04/2026, 03/05/2026, etc.
+            return `
+                ORDER BY
+                    CASE
+                        WHEN tbl_shipments.ATD IS NULL
+                            OR tbl_shipments.ATD = ''
+                            OR tbl_shipments.ATD = '0000-00-00'
+                            OR STR_TO_DATE(tbl_shipments.ATD, '%Y-%m-%d') IS NULL
+                        THEN 1 ELSE 0
+                    END ASC,
+                    STR_TO_DATE(tbl_shipments.ATD, '%Y-%m-%d') ASC,
+                    tbl_shipments.id DESC
+            `;
+        }
 
-            /* -------- COUNT -------- */
+        // =============== ALL ACCESS: full data ===============
+        if (ALL_ACCESS_USERS.includes(Number(user_id))) {
             const countQuery = `
                 SELECT COUNT(*) as total
                 FROM tbl_shipments
@@ -6280,64 +6297,20 @@ const getShipment = async (req, res) => {
                 });
             });
 
-            /* -------- DATA -------- */
-            //         const query = `
-            //             SELECT 
-            //                 tbl_shipments.*,
-            //                 c.name AS des_country_name,
-            //                 co.name AS origin_country_name
-            //             FROM tbl_shipments
-            //             LEFT JOIN countries AS c 
-            //                 ON c.id = tbl_shipments.des_country_id
-            //             LEFT JOIN countries AS co 
-            //                 ON co.id = tbl_shipments.origin_country_id
-            //             WHERE 1=1 ${condition}
-            //             ORDER BY 
-            // CASE 
-            //     WHEN tbl_shipments.ATD IS NULL 
-            //          OR tbl_shipments.ATD = '' 
-            //          OR tbl_shipments.ATD = '0000-00-00'
-            //     THEN 1
-            //     ELSE 0
-            // END,
-            // tbl_shipments.ATD ASC
-            //             LIMIT ? OFFSET ?
-            //         `;
-
             const query = `
-    SELECT 
-        tbl_shipments.*,
-        c.name AS des_country_name,
-        co.name AS origin_country_name
-    FROM tbl_shipments
-    LEFT JOIN countries AS c 
-        ON c.id = tbl_shipments.des_country_id
-    LEFT JOIN countries AS co 
-        ON co.id = tbl_shipments.origin_country_id
-    WHERE 1=1 ${condition}
-
-    ORDER BY 
-
-        --  1. Push "Customs released" to bottom
-        CASE 
-            WHEN LOWER(tbl_shipments.status) = 'customs released' THEN 1
-            ELSE 0
-        END,
-
-        --  2. Handle invalid ETA
-        CASE 
-            WHEN tbl_shipments.ATD IS NULL 
-                 OR tbl_shipments.ATD = '' 
-                 OR tbl_shipments.ATD = '0000-00-00'
-            THEN 1
-            ELSE 0
-        END,
-
-        -- 3. FIFO by ETA
-        tbl_shipments.ATD ASC
-
-    LIMIT ? OFFSET ?
-`;
+                SELECT 
+                    tbl_shipments.*,
+                    c.name AS des_country_name,
+                    co.name AS origin_country_name
+                FROM tbl_shipments
+                LEFT JOIN countries AS c 
+                    ON c.id = tbl_shipments.des_country_id
+                LEFT JOIN countries AS co 
+                    ON co.id = tbl_shipments.origin_country_id
+                WHERE 1=1 ${condition}
+                ${getOrderClause()}
+                LIMIT ? OFFSET ?
+            `;
 
             const finalParams = [...params, pageLimit, offset];
 
@@ -6357,7 +6330,7 @@ const getShipment = async (req, res) => {
             });
         }
 
-        /* ===================== GET USER COUNTRY ===================== */
+        // =============== Country-restricted: user country ===============
         const userCountryQuery = `
             SELECT country 
             FROM tbl_users 
@@ -6380,7 +6353,6 @@ const getShipment = async (req, res) => {
 
         const userCountry = userData[0].country;
 
-        /* ===================== COUNTRY BASED COUNT ===================== */
         const countQuery = `
             SELECT COUNT(*) as total
             FROM tbl_shipments
@@ -6399,7 +6371,6 @@ const getShipment = async (req, res) => {
             });
         });
 
-        /* ===================== COUNTRY BASED DATA ===================== */
         const query = `
             SELECT 
                 tbl_shipments.*,
@@ -6414,7 +6385,7 @@ const getShipment = async (req, res) => {
                 (tbl_shipments.origin_country_id = ?
                 OR tbl_shipments.des_country_id = ?)
                 ${condition}
-            ORDER BY tbl_shipments.created_at DESC
+            ${getOrderClause()}
             LIMIT ? OFFSET ?
         `;
 
