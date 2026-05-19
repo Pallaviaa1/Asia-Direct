@@ -7072,6 +7072,177 @@ const executeQuery = (query, values) => {
 };
 
 
+const UpdateShipmentStatus = async (req, res) => {
+    try {
+        const { shipment_id, status } = req.body;
+
+        // Validation
+        if (!shipment_id || !status) {
+            return res.status(400).send({
+                success: false,
+                message: "shipment_id and status are required",
+            });
+        }
+
+        // Check shipment exists
+        const [shipment] = await executeQuery(
+            `SELECT id, status, waybill 
+             FROM tbl_shipments 
+             WHERE id = ?`,
+            [shipment_id]
+        );
+
+        if (!shipment) {
+            return res.status(404).send({
+                success: false,
+                message: "Shipment not found",
+            });
+        }
+
+        // Prevent same status update
+        if (shipment.status === status) {
+            return res.status(400).send({
+                success: false,
+                message: "Status already updated",
+            });
+        }
+
+        // Update shipment status
+        await executeQuery(
+            `UPDATE tbl_shipments 
+             SET status = ? 
+             WHERE id = ?`,
+            [status, shipment_id]
+        );
+
+        // =========================
+        // UPDATE ORDER TRACK STATUS
+        // =========================
+
+        const shipmentDetails = await executeQuery(
+            `SELECT order_id, batch_id
+             FROM shipment_details
+             WHERE shipment_id = ?`,
+            [shipment_id]
+        );
+
+        for (const item of shipmentDetails) {
+
+            // Insert order tracking
+            await executeQuery(
+                `INSERT INTO order_track 
+                (order_id, batch_id, status, description)
+                VALUES (?, ?, ?, ?)`,
+                [
+                    item.order_id,
+                    item.batch_id || null,
+                    status,
+                    null
+                ]
+            );
+
+            // Update order table
+            await executeQuery(
+                `UPDATE tbl_orders
+                 SET track_status = ?
+                 WHERE id = ?`,
+                [status, item.order_id]
+            );
+        }
+
+        // =========================
+        // UPDATE BATCH STATUS
+        // =========================
+
+        await executeQuery(
+            `UPDATE batches b
+             JOIN shipment_details sd 
+             ON b.id = sd.batch_id
+             SET b.track_status = ?
+             WHERE sd.shipment_id = ?`,
+            [status, shipment_id]
+        );
+
+        // =========================
+        // SEND NOTIFICATIONS
+        // =========================
+
+        const teamQuery = `
+            SELECT full_name, email, cellphone, country_code
+            FROM tbl_users
+            WHERE user_type = 2
+            AND FIND_IN_SET(2, assigned_roles)
+            AND is_deleted = 0
+            AND status = 1
+        `;
+
+        const opsTeamMembers = await executeQuery(teamQuery);
+
+        const SMSmessage = `*Shipment Status Updated*
+
+Waybill: ${shipment.waybill}
+New Status: ${status}`;
+
+        for (const member of opsTeamMembers) {
+
+            // Email
+            if (member.email) {
+
+                sendMail(
+                    member.email,
+                    "Shipment Status Updated",
+                    `
+                    <h3>Shipment Status Updated</h3>
+                    <p><b>Waybill:</b> ${shipment.waybill}</p>
+                    <p><b>Status:</b> ${status}</p>
+                    `
+                );
+            }
+
+            // WhatsApp + SMS
+            if (member.cellphone && member.country_code) {
+
+                const formattedPhone = formatTwilioWhatsAppNumber(
+                    member.country_code,
+                    member.cellphone
+                );
+
+                if (formattedPhone) {
+
+                    sendWhatsApp(
+                        formattedPhone,
+                        'shipment_status_update',
+                        {
+                            "1": "Team",
+                            "2": shipment.waybill,
+                            "3": status
+                        }
+                    );
+
+                    sendSms(
+                        formattedPhone.replace("whatsapp:", ""),
+                        SMSmessage
+                    );
+                }
+            }
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: "Shipment status updated successfully",
+        });
+
+    } catch (error) {
+
+        console.error("UpdateShipmentStatus Error:", error);
+
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
 
 const DeleteShipment = async (req, res) => {
     try {
@@ -8540,5 +8711,5 @@ module.exports = {
     uploadClrearanceDOC, CleranceOrderList, addQueries, getContactUs, addContactUs, updateQuery, getQueries, getQueriesByUserId, deleteQueries, addCommodity,
     getCommodities, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
     UpdateShipment, DeleteShipment, addWareProductByUser, AssignFreightToClearing, AssignToClearing, CopyShipment, DeleteShipmentDetails, GetShipmentDetails, getShipmentbyid, AssignBatchOrdersToClearing,
-    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance
+    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus
 }

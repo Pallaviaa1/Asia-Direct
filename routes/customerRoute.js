@@ -153,6 +153,7 @@ customer_route.post("/AddShipment", upload, customerController.AddShipment)
 customer_route.post("/UpdateShipment", upload, customerController.UpdateShipment)
 customer_route.post("/DeleteShipment", customerController.DeleteShipment)
 customer_route.post("/getShipment", customerController.getShipment)
+customer_route.post("/update-shipment-status", customerController.UpdateShipmentStatus);
 
 customer_route.post("/addWareProductByUser", customerController.addWareProductByUser)
 customer_route.post("/AssignToClearing", customerController.AssignToClearing)
