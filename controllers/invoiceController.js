@@ -826,55 +826,182 @@ const UpdateSageInvoiceDoc = async (req, res) => {
     }
 };
 
+// const GetRealeseDashboard = async (req, res) => {
+//     try {
+//         const page = Math.max(Number(req.body.page) || 1, 1);
+//         const limit = Math.max(Number(req.body.limit) || 10, 1);
+//         const offset = (page - 1) * limit;
+
+//         const paymentQuery = `
+//     SELECT 
+//         i.*, 
+//         tbl_users.full_name as order_user_name, 
+//         CONCAT('OR000', o.id) AS order_number, 
+//         r.id as realese_id, 
+//         r.cargo_inspection, 
+//         r.release_instruction, 
+//         r.Status as release_status, 
+//         o.track_status as order_status, 
+//         c.order_status as clearance_status, 
+//         s.customer_name as sage_customer_name, 
+//         s.document_number as sage_document_number, 
+//         s.customer_ref as sage_customer_ref, 
+//         s.date as sage_date, 
+//         s.total as sage_total 
+//     FROM tbl_invoices as i 
+//     INNER JOIN sage_invoice_list as s 
+//         ON s.id=i.sage_invoice_id
+//     LEFT JOIN clearance_order as c 
+//         ON c.order_id=i.order_id
+//     INNER JOIN tbl_orders as o 
+//         ON o.id=i.order_id
+//     LEFT JOIN realese_dashboard as r 
+//         ON r.invoice_id=i.id
+//     LEFT JOIN tbl_users 
+//         ON tbl_users.id = o.client_id
+
+//     ORDER BY i.id DESC
+
+//     LIMIT ? OFFSET ?
+// `;
+//         con.query(paymentQuery, [limit, offset], (err, paymentResult) => {
+//             if (err) {
+//                 console.error("Error fetching existing payment:", err.message);
+//                 return res.status(500).send({
+//                     success: false,
+//                     message: err.message
+//                 });
+//             }
+
+//             const Query = `SELECT COUNT(*) as total FROM tbl_invoices`;
+//             con.query(Query, (err, total) => {
+//                 if (err) {
+//                     console.error("Error fetching existing payment:", err.message);
+//                     return res.status(500).send({
+//                         success: false,
+//                         message: err.message
+//                     });
+//                 }
+//                 return res.status(200).send({
+//                     success: true,
+//                     message: "Successfully",
+//                     data: paymentResult,
+//                     page,
+//                     limit,
+//                     total: total[0].total,
+//                     totalPages: Math.ceil(total[0].total / limit)
+//                 });
+//             })
+//         })
+//     } catch (error) {
+//         return res.status(500).send({
+//             success: false,
+//             message: error.message,
+//         });
+//     }
+// }
+
 const GetRealeseDashboard = async (req, res) => {
+
     try {
-        const page = Number(req.body.page) || 1;
-        const limit = Number(req.body.limit) || 10;
+
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const limit = Math.max(Number(req.query.limit) || 10, 1);
+
         const offset = (page - 1) * limit;
 
-        const paymentQuery = `SELECT i.*, tbl_users.full_name as order_user_name, CONCAT('OR000', o.id) AS order_number, r.id as realese_id, r.cargo_inspection, r.release_instruction, r.Status as release_status, o.track_status as order_status, c.order_status as clearance_status, s.customer_name as sage_customer_name, s.document_number as sage_document_number, s.customer_ref as sage_customer_ref, s.date as sage_date, s.total as sage_total FROM tbl_invoices as i 
-        INNER JOIN sage_invoice_list as s on s.id=i.sage_invoice_id
-        LEFT JOIN clearance_order as c on c.order_id=i.order_id
-        INNER JOIN tbl_orders as o on o.id=i.order_id
-        LEFT JOIN realese_dashboard as r on r.invoice_id=i.id
-        LEFT JOIN tbl_users ON tbl_users.id = o.client_id
-        LIMIT ? OFFSET ?`;
+        const paymentQuery = `
+            SELECT 
+                i.*, 
+                tbl_users.full_name as order_user_name, 
+                CONCAT('OR000', o.id) AS order_number, 
+                r.id as realese_id, 
+                r.cargo_inspection, 
+                r.release_instruction, 
+                r.Status as release_status, 
+                o.track_status as order_status, 
+                c.order_status as clearance_status, 
+                s.customer_name as sage_customer_name, 
+                s.document_number as sage_document_number, 
+                s.customer_ref as sage_customer_ref, 
+                s.date as sage_date, 
+                s.total as sage_total 
+
+            FROM tbl_invoices as i 
+
+            INNER JOIN sage_invoice_list as s 
+                ON s.id = i.sage_invoice_id
+
+            LEFT JOIN clearance_order as c 
+                ON c.order_id = i.order_id
+
+            INNER JOIN tbl_orders as o 
+                ON o.id = i.order_id
+
+            LEFT JOIN realese_dashboard as r 
+                ON r.invoice_id = i.id
+
+            LEFT JOIN tbl_users 
+                ON tbl_users.id = o.client_id
+
+            ORDER BY i.id DESC
+
+            LIMIT ? OFFSET ?
+        `;
+
         con.query(paymentQuery, [limit, offset], (err, paymentResult) => {
+
             if (err) {
-                console.error("Error fetching existing payment:", err.message);
+
                 return res.status(500).send({
                     success: false,
                     message: err.message
                 });
+
             }
 
-            const Query = `SELECT COUNT(*) as total FROM tbl_invoices`;
-            con.query(Query, (err, total) => {
+            const countQuery = `
+                SELECT COUNT(*) as total
+                FROM tbl_invoices
+            `;
+
+            con.query(countQuery, (err, totalResult) => {
+
                 if (err) {
-                    console.error("Error fetching existing payment:", err.message);
+
                     return res.status(500).send({
                         success: false,
                         message: err.message
                     });
+
                 }
+
+                const total = totalResult[0].total;
+
                 return res.status(200).send({
                     success: true,
                     message: "Successfully",
                     data: paymentResult,
                     page,
                     limit,
-                    total: total[0].total,
-                    totalPages: Math.ceil(total[0].total / limit)
+                    total,
+                    totalPages: Math.ceil(total / limit)
                 });
-            })
-        })
+
+            });
+
+        });
+
     } catch (error) {
+
         return res.status(500).send({
             success: false,
-            message: error.message,
+            message: error.message
         });
+
     }
-}
+
+};
 
 const ManageRealeseDashboard = async (req, res) => {
     try {

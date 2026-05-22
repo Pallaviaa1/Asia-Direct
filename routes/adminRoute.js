@@ -182,5 +182,10 @@ admin_route.get("/GetDeliveredOrder", adminController.GetDeliveredOrder)
 admin_route.get("/OrderInvoiceList", adminController.OrderInvoiceList)
 admin_route.post("/revertMovedFreight", adminController.revertMovedFreight)
 admin_route.get("/createFreightFolders", adminController.createFreightFolders)
+admin_route.post("/addEstimatSupplierInvoice", adminController.addEstimatSupplierInvoice)
+admin_route.get("/getAllSupplierInvoices", adminController.getAllSupplierInvoices)
+admin_route.post("/deleteSupplierInvoice/:id", adminController.deleteSupplierInvoice)
+admin_route.get("/getWaybillDropdown", adminController.getWaybillDropdown)
+admin_route.get("/getSupplierInvoiceById/:id", adminController.getSupplierInvoiceById)
 
 module.exports = admin_route;

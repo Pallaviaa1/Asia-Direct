@@ -2769,10 +2769,228 @@ const updateOrderAndWarehouse = (req, res) => {
 //     }
 // };
 
+// const GetSupplierCreatedWarehouseOrders = async (req, res) => {
+//     try {
+//         const {
+//             supplier_id,
+//             page = 1,
+//             limit = 10
+//         } = req.body;
+
+//         const pageNo = Number(page);
+//         const pageSize = Number(limit);
+//         const offset = (pageNo - 1) * pageSize;
+
+//         // =========================
+//         // WHERE CLAUSE
+//         // =========================
+//         let whereClause = `WHERE 1=1`;
+//         let queryParams = [];
+
+//         if (supplier_id) {
+//             whereClause += ` AND s.supplier_id = ?`;
+//             queryParams.push(supplier_id);
+//         }
+
+//         // =========================
+//         // COUNT QUERY
+//         // =========================
+//         const countQuery = `
+//             SELECT COUNT(*) AS total
+//             FROM supplier_warehouse_orders s
+//             ${whereClause}
+//         `;
+
+//         const totalResult = await new Promise((resolve, reject) => {
+//             con.query(countQuery, queryParams, (err, rows) => {
+//                 if (err) return reject(err);
+//                 resolve(rows);
+//             });
+//         });
+
+//         const total = totalResult[0]?.total || 0;
+
+//         // =========================
+//         // MAIN QUERY (NO FILE JOIN)
+//         // =========================
+//         const query = `
+//             SELECT 
+//                 s.*,
+
+//                 CASE 
+//                     WHEN s.date_received IS NULL THEN 0
+
+//                     WHEN b.date_dispatch IS NOT NULL 
+//                         THEN GREATEST(DATEDIFF(b.date_dispatch, s.date_received), 0)
+
+//                     WHEN s.dispatch_date IS NOT NULL 
+//                         THEN GREATEST(DATEDIFF(s.dispatch_date, s.date_received), 0)
+
+//                     ELSE 
+//                         GREATEST(DATEDIFF(CURDATE(), s.date_received), 0)
+//                 END AS days_in_warehouse,
+
+//                 c.name AS destination_country_name,
+//                 cd.name AS collection_country_name,
+//                 w.warehouse_name,
+//                 w.warehouse_number,
+//                 su.name as supplier_name,
+//                 o.order_number,
+//                COALESCE(b.batch_number, '') AS batch_number
+
+//             FROM supplier_warehouse_orders s
+
+//             LEFT JOIN countries c ON c.id = s.destination_country
+//             LEFT JOIN countries cd ON cd.id = s.collection_from
+//             LEFT JOIN warehouse_tbl w ON w.id = s.warehouse_id
+//             LEFT JOIN tbl_suppliers su ON su.id = s.supplier_id
+//             LEFT JOIN tbl_orders o ON o.id = s.order_id
+//             LEFT JOIN batches b ON b.id = NULLIF(s.batch_id, 0)
+
+//             ${whereClause}
+
+//             ORDER BY s.created_at DESC
+//             LIMIT ? OFFSET ?
+//         `;
+
+//         const dataParams = [...queryParams, pageSize, offset];
+
+//         const rows = await new Promise((resolve, reject) => {
+//             con.query(query, dataParams, (err, rows) => {
+//                 if (err) return reject(err);
+//                 resolve(rows);
+//             });
+//         });
+
+//         // =========================
+//         // FETCH FILES SEPARATELY
+//         // =========================
+//         const ids = rows.map(r => r.id);
+
+//         let fileMap = new Map();
+
+//         if (ids.length > 0) {
+//             const fileQuery = `
+//                 SELECT 
+//                     id,
+//                     supplier_warehouse_id,
+//                     file_type,
+//                     file_name
+//                 FROM supplier_warehouse_files
+//                 WHERE supplier_warehouse_id IN (?)
+//             `;
+
+//             const files = await new Promise((resolve, reject) => {
+//                 con.query(fileQuery, [ids], (err, rows) => {
+//                     if (err) return reject(err);
+//                     resolve(rows);
+//                 });
+//             });
+
+//             files.forEach(file => {
+//                 if (!fileMap.has(file.supplier_warehouse_id)) {
+//                     fileMap.set(file.supplier_warehouse_id, []);
+//                 }
+
+//                 fileMap.get(file.supplier_warehouse_id).push({
+//                     id: file.id,
+//                     type: file.file_type,
+//                     file: file.file_name
+//                 });
+//             });
+//         }
+
+//         // =========================
+//         // FORMAT FINAL RESPONSE
+//         // =========================
+//         const result = rows.map(row => ({
+//             id: row.id,
+//             supplier_id: row.supplier_id,
+//             warehouse_id: row.warehouse_id,
+//             client_id: row.client_id,
+//             order_id: row.order_id,
+//             batch_id: row.batch_id,
+//             batch_number: row.batch_number || "",
+//             warehouse_name: row.warehouse_name,
+//             warehouse_number: row.warehouse_number,
+//             order_number: row.order_number,
+
+//             destination_country: row.destination_country,
+//             destination_country_name: row.destination_country_name,
+//             collection_from_name: row.collection_country_name,
+//             collection_from: row.collection_from,
+
+//             warehouse_order_id: row.warehouse_order_id,
+//             courier_waybill_ref: row.courier_waybill_ref,
+
+//             dispatch_date: row.dispatch_date,
+//             date_received: row.date_received,
+//             days_in_warehouse: row.days_in_warehouse,
+
+//             customer_name: row.customer_name,
+//             customer_ref: row.customer_ref,
+
+//             box_marking: row.box_marking,
+//             goods_description: row.goods_description,
+//             package_type: row.package_type,
+//             hazardous: row.hazardous,
+//             hazard_description: row.hazard_description,
+
+//             total_packages: row.total_packages,
+//             total_cbm: row.total_cbm,
+//             total_weight: row.total_weight,
+
+//             package_comment: row.package_comment,
+//             damaged_goods: row.damaged_goods,
+//             damaged_pkg_qty: row.damaged_pkg_qty,
+//             damage_comment: row.damage_comment,
+
+//             supplier_company: row.supplier_company,
+//             supplier_person: row.supplier_person,
+//             supplier_contact: row.supplier_contact,
+//             supplier_address: row.supplier_address,
+//             supplier_name: row.supplier_name,
+
+//             warehouse_collect: row.warehouse_collect,
+//             costs_to_collect: row.costs_to_collect,
+//             warehouse_storage: row.warehouse_storage,
+//             warehouse_cost: row.warehouse_cost,
+//             handling_required: row.handling_required,
+//             handling_cost: row.handling_cost,
+//             warehouse_dispatch: row.warehouse_dispatch,
+//             cost_to_dispatch: row.cost_to_dispatch,
+
+//             warehouse_comment: row.warehouse_comment,
+//             created_at: row.created_at,
+//             move_to_adminWarhouse: row.move_to_adminWarhouse,
+
+//             files: fileMap.get(row.id) || []
+//         }));
+
+//         // =========================
+//         // RESPONSE
+//         // =========================
+//         return res.status(200).json({
+//             success: true,
+//             total,
+//             page: pageNo,
+//             limit: pageSize,
+//             data: result
+//         });
+
+//     } catch (err) {
+//         return res.status(500).json({
+//             success: false,
+//             message: err.message
+//         });
+//     }
+// };
+
 const GetSupplierCreatedWarehouseOrders = async (req, res) => {
     try {
         const {
             supplier_id,
+            search = "",
             page = 1,
             limit = 10
         } = req.body;
@@ -2793,11 +3011,58 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
         }
 
         // =========================
+        // SEARCH FILTER
+        // =========================
+        if (search && search.trim() !== "") {
+            whereClause += `
+                AND (
+                    s.customer_name LIKE ?
+                    OR s.customer_ref LIKE ?
+                    OR s.warehouse_order_id LIKE ?
+                    OR s.courier_waybill_ref LIKE ?
+                    OR s.goods_description LIKE ?
+                    OR s.box_marking LIKE ?
+                    OR su.name LIKE ?
+                    OR o.order_number LIKE ?
+                    OR b.batch_number LIKE ?
+                    OR w.warehouse_name LIKE ?
+                    OR c.name LIKE ?
+                    OR cd.name LIKE ?
+                )
+            `;
+
+            const searchValue = `%${search}%`;
+
+            queryParams.push(
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        // =========================
         // COUNT QUERY
         // =========================
         const countQuery = `
             SELECT COUNT(*) AS total
             FROM supplier_warehouse_orders s
+
+            LEFT JOIN countries c ON c.id = s.destination_country
+            LEFT JOIN countries cd ON cd.id = s.collection_from
+            LEFT JOIN warehouse_tbl w ON w.id = s.warehouse_id
+            LEFT JOIN tbl_suppliers su ON su.id = s.supplier_id
+            LEFT JOIN tbl_orders o ON o.id = s.order_id
+            LEFT JOIN batches b ON b.id = NULLIF(s.batch_id, 0)
+
             ${whereClause}
         `;
 
@@ -2811,7 +3076,7 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
         const total = totalResult[0]?.total || 0;
 
         // =========================
-        // MAIN QUERY (NO FILE JOIN)
+        // MAIN QUERY
         // =========================
         const query = `
             SELECT 
@@ -2836,7 +3101,7 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
                 w.warehouse_number,
                 su.name as supplier_name,
                 o.order_number,
-               COALESCE(b.batch_number, '') AS batch_number
+                COALESCE(b.batch_number, '') AS batch_number
 
             FROM supplier_warehouse_orders s
 
@@ -2863,7 +3128,7 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
         });
 
         // =========================
-        // FETCH FILES SEPARATELY
+        // FETCH FILES
         // =========================
         const ids = rows.map(r => r.id);
 
@@ -2901,7 +3166,7 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
         }
 
         // =========================
-        // FORMAT FINAL RESPONSE
+        // FINAL RESPONSE
         // =========================
         const result = rows.map(row => ({
             id: row.id,
@@ -2967,9 +3232,6 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
             files: fileMap.get(row.id) || []
         }));
 
-        // =========================
-        // RESPONSE
-        // =========================
         return res.status(200).json({
             success: true,
             total,
@@ -6543,55 +6805,914 @@ const adminUpdateSupplierWarehouse = (req, res) => {
 //     }
 // };
 
+// const MoveSupplierWarehouseOrder = (req, res) => {
+//     const { supplier_warehouse_id, user_id } = req.body;
+
+//     if (!supplier_warehouse_id) {
+//         return res.status(400).json({
+//             success: false,
+//             message: "supplier_warehouse_id required"
+//         });
+//     }
+
+//     con.query(
+//         `SELECT * FROM supplier_warehouse_orders WHERE id=?`,
+//         [supplier_warehouse_id],
+//         (err, dataRows) => {
+
+//             if (err) {
+//                 return res.status(500).json({ success: false, message: err.message });
+//             }
+
+//             if (!dataRows.length) {
+//                 return res.status(400).json({ success: false, message: "Record not found" });
+//             }
+
+//             const data = dataRows[0];
+
+//             if (data.move_to_adminWarhouse === 1) {
+//                 return res.status(400).json({ success: false, message: "Already moved" });
+//             }
+
+//             // =========================
+//             // STEP 1: ORDER CHECK / CREATE
+//             // =========================
+//             con.query(
+//                 `SELECT * FROM tbl_orders WHERE id=?`,
+//                 [data.order_id],
+//                 (err, orderRows) => {
+
+//                     if (err) {
+//                         return res.status(500).json({ success: false, message: err.message });
+//                     }
+
+//                     if (!orderRows.length) {
+
+//                         con.query(
+//                             `INSERT INTO tbl_orders
+//                             (client_id, goods_description, dimensions, weight, warehouse_status, cartons, CBM,
+//                             collection_from, delivery_to, client_name, supplier_id, freight_type, added_by)
+//                             VALUES (?, ?,?,?,?,?,?,?,?,?,?,?,?)`,
+//                             [
+//                                 data.client_id,
+//                                 data.goods_description,
+//                                 data.total_cbm,
+//                                 data.total_weight,
+//                                 1,
+//                                 data.total_packages,
+//                                 data.total_cbm,
+//                                 data.collection_from,
+//                                 data.destination_country,
+//                                 data.customer_name,
+//                                 data.supplier_id,
+//                                 null,
+//                                 user_id || 1
+//                             ],
+//                             (err, orderResult) => {
+
+//                                 if (err) {
+//                                     return res.status(500).json({ success: false, message: err.message });
+//                                 }
+
+//                                 const order_id = orderResult.insertId;
+//                                 handleWarehouse(order_id);
+//                             }
+//                         );
+
+//                     } else {
+//                         handleWarehouse(data.order_id, data);
+//                     }
+//                 }
+//             );
+
+//             // =========================
+//             // STEP 2: WAREHOUSE CHECK / CREATE
+//             // =========================
+//             function handleWarehouse(order_id, data) {
+
+//                 con.query(
+//                     `SELECT id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
+//                     [order_id],
+//                     (err, warehouseRows) => {
+
+//                         if (err) {
+//                             return res.status(500).json({ success: false, message: err.message });
+//                         }
+
+//                         if (!warehouseRows.length) {
+
+//                             con.query(
+//                                 `INSERT INTO warehouse_assign_order
+//                                 (order_id, warehouse_status, supplier_id,
+//                                 courier_waybill_ref, date_entry_created, dispatched_date,
+//                                 warehouse_comment, customer_ref, box_marking, package_type, hazardous,
+//                                 total_packeges, hazard_description, package_comment,
+//                                 damage_goods, damaged_pkg_qty, damage_comment,
+//                                 supplier_company, supplier_person, supplier_address, supplier_contact_no,
+//                                 batch_id, assign_to_batch,
+//                                 warehouse_order_id, warehouse_collect, costs_to_collect,
+//                                 warehouse_storage, warehouse_cost, handling_required, handling_cost,
+//                                 warehouse_dispatch, cost_to_dispatch, added_by)
+//                                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+//                                         ?,?,
+//                                         ?,?,?,?,?,?,?,?,?,?,?)`,
+//                                 [
+//                                     order_id,
+//                                     1,
+//                                     data.supplier_id,
+//                                     data.courier_waybill_ref,
+//                                     data.date_entry_created,
+//                                     data.dispatch_date,
+//                                     data.warehouse_comment,
+//                                     data.customer_ref,
+//                                     data.box_marking,
+//                                     data.package_type,
+//                                     data.hazardous,
+//                                     data.total_packages,
+//                                     data.hazard_description,
+//                                     data.package_comment,
+//                                     data.damaged_goods,
+//                                     data.damaged_pkg_qty,
+//                                     data.damage_comment,
+//                                     data.supplier_company,
+//                                     data.supplier_person,
+//                                     data.supplier_address,
+//                                     data.supplier_contact,
+//                                     data.batch_id || null,
+//                                     data.batch_id ? 1 : 0,
+//                                     data.warehouse_order_id,
+//                                     data.warehouse_collect,
+//                                     data.costs_to_collect,
+//                                     data.warehouse_storage,
+//                                     data.warehouse_cost,
+//                                     data.handling_required,
+//                                     data.handling_cost,
+//                                     data.warehouse_dispatch,
+//                                     data.cost_to_dispatch,
+//                                     user_id || 1
+//                                 ],
+//                                 (err, warehouseResult) => {
+
+//                                     if (err) {
+//                                         return res.status(500).json({ success: false, message: err.message });
+//                                     }
+
+//                                     const warehouseId = warehouseResult.insertId;
+//                                     moveFilesAndProducts(data, warehouseId, order_id);
+//                                 }
+//                             );
+
+//                             con.query(`UPDATE tbl_orders SET warehouse_status=?, client_name=? WHERE id=?`,
+//                                 [1, data.customer_name, order_id]
+//                             );
+
+//                         } else {
+
+//                             const warehouseId = warehouseRows[0].id;
+//                             moveFilesAndProducts(data, warehouseId, order_id);
+//                         }
+//                     }
+//                 );
+//             }
+
+//             // =========================
+//             // STEP 3: MOVE FILES + PRODUCTS
+//             // =========================
+//             function moveFilesAndProducts(data, warehouseId, order_id) {
+
+//                 con.query(
+//                     `SELECT * FROM supplier_warehouse_files WHERE supplier_warehouse_id=?`,
+//                     [supplier_warehouse_id],
+//                     (err, files) => {
+
+//                         if (err) {
+//                             return res.status(500).json({ success: false, message: err.message });
+//                         }
+
+//                         const fileValues = files.map(f => [
+//                             warehouseId,
+//                             f.file_type,
+//                             f.file_name
+//                         ]);
+
+//                         if (fileValues.length) {
+//                             con.query(
+//                                 `INSERT INTO warehouse_files (warehouse_id, file_type, file_name) VALUES ?`,
+//                                 [fileValues],
+//                                 (err) => {
+//                                     if (err) {
+//                                         return res.status(500).json({ success: false, message: err.message });
+//                                     }
+//                                     moveProducts();
+//                                 }
+//                             );
+//                         } else {
+//                             moveProducts();
+//                         }
+//                     }
+//                 );
+
+//                 function moveProducts() {
+
+//                     con.query(
+//                         `SELECT * FROM supplier_warehouse_products WHERE supplier_warehouse_id=?`,
+//                         [supplier_warehouse_id],
+//                         (err, products) => {
+
+//                             if (err) {
+//                                 return res.status(500).json({ success: false, message: err.message });
+//                             }
+
+//                             if (!products.length) {
+//                                 return res.status(400).json({
+//                                     success: false,
+//                                     message: "No products found"
+//                                 });
+//                             }
+
+//                             // ❗ FIXED: REMOVED client_id (NOT IN YOUR TABLE)
+//                             const values = products.map(p => [
+//                                 data.order_id,          // user_id column (as per your OLD schema)
+//                                 order_id,
+//                                 warehouseId,
+//                                 p.product_description,
+//                                 p.hazardous,
+//                                 p.date_received,
+//                                 p.package_type,
+//                                 p.packages,
+//                                 p.dimension,
+//                                 p.weight,
+//                                 p.warehouse_ref,
+//                                 p.freight,
+//                                 p.groupage_batch_ref,
+//                                 p.supplier,
+//                                 p.warehouse_receipt_number,
+//                                 p.tracking_number,
+//                                 p.date_dispatched,
+//                                 p.supplier_address,
+//                                 p.supplier_email,
+//                                 p.supplier_contact,
+//                                 p.warehouse_collect,
+//                                 p.costs_to_collect,
+//                                 p.port_of_loading,
+//                                 p.warehouse_dispatch,
+//                                 p.warehouse_cost,
+//                                 p.cost_to_dispatch,
+//                                 p.waybill_ref,
+//                                 user_id || 1
+//                             ]);
+
+//                             con.query(
+//                                 `INSERT INTO warehouse_products
+//                                 (user_id, order_id, warehouse_order_id, product_description, Hazardous,
+//                                 date_received, package_type, packages, dimension, weight,
+//                                 warehouse_ref, freight, groupage_batch_ref, supplier,
+//                                 warehouse_receipt_number, tracking_number, date_dspatched,
+//                                 supplier_address, supplier_Email, Supplier_Contact,
+//                                 warehouse_collect, costs_to_collect, port_of_loading,
+//                                 warehouse_dispatch, warehouse_cost, cost_to_dispatch,
+//                                 waybill_ref, added_by)
+//                                 VALUES ?`,
+//                                 [values],
+//                                 (err) => {
+
+//                                     if (err) {
+//                                         return res.status(500).json({ success: false, message: err.message });
+//                                     }
+
+//                                     con.query(
+//                                         `UPDATE supplier_warehouse_orders 
+//                                          SET order_id=?, admin_warehouseOrder_id=?, move_to_adminWarhouse=1 
+//                                          WHERE id=?`,
+//                                         [order_id, warehouseId, supplier_warehouse_id],
+//                                         (err) => {
+
+//                                             if (err) {
+//                                                 return res.status(500).json({ success: false, message: err.message });
+//                                             }
+
+//                                             return res.status(200).json({
+//                                                 success: true,
+//                                                 message: "Order + Warehouse + Products processed successfully",
+//                                                 order_id,
+//                                                 warehouse_id: warehouseId
+//                                             });
+//                                         }
+//                                     );
+//                                 }
+//                             );
+//                         }
+//                     );
+//                 }
+//             }
+//         }
+//     );
+// };
+
+// const MoveSupplierWarehouseOrder = (req, res) => {
+//     try {
+
+//         const { supplier_warehouse_id, user_id } = req.body;
+
+//         if (!supplier_warehouse_id) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "supplier_warehouse_id required"
+//             });
+//         }
+
+//         // =====================================================
+//         // STEP 1: GET SUPPLIER WAREHOUSE ORDER
+//         // =====================================================
+
+//         con.query(
+//             `SELECT * FROM supplier_warehouse_orders WHERE id=?`,
+//             [supplier_warehouse_id],
+//             (err, dataRows) => {
+
+//                 if (err) {
+//                     console.log("STEP 1 ERROR:", err);
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: err.message
+//                     });
+//                 }
+
+//                 if (!dataRows.length) {
+//                     return res.status(404).json({
+//                         success: false,
+//                         message: "Record not found"
+//                     });
+//                 }
+
+//                 const data = dataRows[0];
+
+//                 if (data.move_to_adminWarhouse === 1) {
+//                     return res.status(400).json({
+//                         success: false,
+//                         message: "Already moved"
+//                     });
+//                 }
+
+//                 // =====================================================
+//                 // STEP 2: CHECK ORDER EXISTS
+//                 // =====================================================
+
+//                 con.query(
+//                     `SELECT * FROM tbl_orders WHERE id=?`,
+//                     [data.order_id],
+//                     (err, orderRows) => {
+
+//                         if (err) {
+//                             console.log("ORDER CHECK ERROR:", err);
+//                             return res.status(500).json({
+//                                 success: false,
+//                                 message: err.message
+//                             });
+//                         }
+
+//                         // =====================================================
+//                         // CREATE NEW ORDER
+//                         // =====================================================
+
+//                         if (!orderRows.length) {
+
+//                             const orderSql = `
+//                                 INSERT INTO tbl_orders
+//                                 (
+//                                     client_id,
+//                                     goods_description,
+//                                     dimensions,
+//                                     weight,
+//                                     warehouse_status,
+//                                     cartons,
+//                                     CBM,
+//                                     collection_from,
+//                                     delivery_to,
+//                                     client_name,
+//                                     supplier_id,
+//                                     freight_type,
+//                                     added_by
+//                                 )
+//                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+//                             `;
+
+//                             const orderValues = [
+//                                 data.client_id,
+//                                 data.goods_description,
+//                                 data.total_cbm,
+//                                 data.total_weight,
+//                                 1,
+//                                 data.total_packages,
+//                                 data.total_cbm,
+//                                 data.collection_from,
+//                                 data.destination_country,
+//                                 data.customer_name,
+//                                 data.supplier_id,
+//                                 null,
+//                                 user_id || 1
+//                             ];
+
+//                             con.query(
+//                                 orderSql,
+//                                 orderValues,
+//                                 (err, orderResult) => {
+
+//                                     if (err) {
+//                                         console.log("ORDER INSERT ERROR:", err);
+//                                         return res.status(500).json({
+//                                             success: false,
+//                                             message: err.message
+//                                         });
+//                                     }
+
+//                                     const order_id = orderResult.insertId;
+
+//                                     // ✅ FIXED
+//                                     handleWarehouse(order_id, data);
+//                                 }
+//                             );
+
+//                         } else {
+
+//                             handleWarehouse(data.order_id, data);
+//                         }
+//                     }
+//                 );
+//             }
+//         );
+
+//         // =====================================================
+//         // STEP 3: HANDLE WAREHOUSE
+//         // =====================================================
+
+//         function handleWarehouse(order_id, data) {
+
+//             con.query(
+//                 `SELECT id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
+//                 [order_id],
+//                 (err, warehouseRows) => {
+
+//                     if (err) {
+//                         console.log("WAREHOUSE CHECK ERROR:", err);
+//                         return res.status(500).json({
+//                             success: false,
+//                             message: err.message
+//                         });
+//                     }
+
+//                     // =====================================================
+//                     // CREATE WAREHOUSE
+//                     // =====================================================
+
+//                     if (!warehouseRows.length) {
+
+//                         const warehouseSql = `
+//                             INSERT INTO warehouse_assign_order
+//                             (
+//                                 order_id,
+//                                 warehouse_status,
+//                                 supplier_id,
+//                                 courier_waybill_ref,
+//                                 date_entry_created,
+//                                 dispatched_date,
+//                                 warehouse_comment,
+//                                 customer_ref,
+//                                 box_marking,
+//                                 package_type,
+//                                 hazardous,
+//                                 total_packeges,
+//                                 hazard_description,
+//                                 package_comment,
+//                                 damage_goods,
+//                                 damaged_pkg_qty,
+//                                 damage_comment,
+//                                 supplier_company,
+//                                 supplier_person,
+//                                 supplier_address,
+//                                 supplier_contact_no,
+//                                 batch_id,
+//                                 assign_to_batch,
+//                                 warehouse_order_id,
+//                                 warehouse_collect,
+//                                 costs_to_collect,
+//                                 warehouse_storage,
+//                                 warehouse_cost,
+//                                 handling_required,
+//                                 handling_cost,
+//                                 warehouse_dispatch,
+//                                 cost_to_dispatch,
+//                                 added_by
+//                             )
+//                             VALUES (
+//                                 ?,?,?,?,?,?,?,?,?,?,
+//                                 ?,?,?,?,?,?,?,?,?,?,
+//                                 ?,?,?,?,?,?,?,?,?,?,
+//                                 ?,?,?
+//                             )
+//                         `;
+
+//                         const warehouseValues = [
+//                             order_id,
+//                             1,
+//                             data.supplier_id,
+//                             data.courier_waybill_ref,
+//                             data.date_entry_created,
+//                             data.dispatch_date,
+//                             data.warehouse_comment,
+//                             data.customer_ref,
+//                             data.box_marking,
+//                             data.package_type,
+//                             data.hazardous,
+//                             data.total_packages,
+//                             data.hazard_description,
+//                             data.package_comment,
+//                             data.damaged_goods,
+//                             data.damaged_pkg_qty,
+//                             data.damage_comment,
+//                             data.supplier_company,
+//                             data.supplier_person,
+//                             data.supplier_address,
+//                             data.supplier_contact,
+//                             data.batch_id || null,
+//                             data.batch_id ? 1 : 0,
+//                             data.warehouse_order_id,
+//                             data.warehouse_collect,
+//                             data.costs_to_collect,
+//                             data.warehouse_storage,
+//                             data.warehouse_cost,
+//                             data.handling_required,
+//                             data.handling_cost,
+//                             data.warehouse_dispatch,
+//                             data.cost_to_dispatch,
+//                             user_id || 1
+//                         ];
+
+//                         console.log("WAREHOUSE VALUES:", warehouseValues.length);
+
+//                         con.query(
+//                             warehouseSql,
+//                             warehouseValues,
+//                             (err, warehouseResult) => {
+
+//                                 if (err) {
+//                                     console.log("WAREHOUSE INSERT ERROR:", err);
+//                                     return res.status(500).json({
+//                                         success: false,
+//                                         message: err.message
+//                                     });
+//                                 }
+
+//                                 const warehouseId = warehouseResult.insertId;
+
+//                                 // UPDATE ORDER STATUS
+//                                 con.query(
+//                                     `UPDATE tbl_orders SET warehouse_status=?, client_name=? WHERE id=?`,
+//                                     [1, data.customer_name, order_id],
+//                                     (err) => {
+
+//                                         if (err) {
+//                                             console.log("ORDER UPDATE ERROR:", err);
+//                                         }
+
+//                                         moveFilesAndProducts(
+//                                             data,
+//                                             warehouseId,
+//                                             order_id
+//                                         );
+//                                     }
+//                                 );
+//                             }
+//                         );
+
+//                     } else {
+
+//                         const warehouseId = warehouseRows[0].id;
+
+//                         moveFilesAndProducts(
+//                             data,
+//                             warehouseId,
+//                             order_id
+//                         );
+//                     }
+//                 }
+//             );
+//         }
+
+//         // =====================================================
+//         // STEP 4: MOVE FILES + PRODUCTS
+//         // =====================================================
+
+//         function moveFilesAndProducts(data, warehouseId, order_id) {
+
+//             con.query(
+//                 `SELECT * FROM supplier_warehouse_files WHERE supplier_warehouse_id=?`,
+//                 [supplier_warehouse_id],
+//                 (err, files) => {
+
+//                     if (err) {
+//                         console.log("FILES ERROR:", err);
+
+//                         return res.status(500).json({
+//                             success: false,
+//                             message: err.message
+//                         });
+//                     }
+
+//                     const fileValues = files.map(f => [
+//                         warehouseId,
+//                         f.file_type,
+//                         f.file_name
+//                     ]);
+
+//                     // =====================================================
+//                     // INSERT FILES
+//                     // =====================================================
+
+//                     if (fileValues.length > 0) {
+
+//                         con.query(
+//                             `INSERT INTO warehouse_files 
+//                             (warehouse_id, file_type, file_name) 
+//                             VALUES ?`,
+//                             [fileValues],
+//                             (err) => {
+
+//                                 if (err) {
+//                                     console.log("FILES INSERT ERROR:", err);
+
+//                                     return res.status(500).json({
+//                                         success: false,
+//                                         message: err.message
+//                                     });
+//                                 }
+
+//                                 moveProducts();
+//                             }
+//                         );
+
+//                     } else {
+
+//                         moveProducts();
+//                     }
+//                 }
+//             );
+
+//             // =====================================================
+//             // MOVE PRODUCTS
+//             // =====================================================
+
+//             function moveProducts() {
+
+//                 con.query(
+//                     `SELECT * FROM supplier_warehouse_products WHERE supplier_warehouse_id=?`,
+//                     [supplier_warehouse_id],
+//                     (err, products) => {
+
+//                         if (err) {
+//                             console.log("PRODUCT FETCH ERROR:", err);
+
+//                             return res.status(500).json({
+//                                 success: false,
+//                                 message: err.message
+//                             });
+//                         }
+
+//                         if (!products.length) {
+//                             return res.status(400).json({
+//                                 success: false,
+//                                 message: "No products found"
+//                             });
+//                         }
+
+//                         const values = products.map(p => [
+//                             order_id, // ✅ FIXED
+//                             order_id,
+//                             warehouseId,
+//                             p.product_description,
+//                             p.hazardous,
+//                             p.date_received,
+//                             p.package_type,
+//                             p.packages,
+//                             p.dimension,
+//                             p.weight,
+//                             p.warehouse_ref,
+//                             p.freight,
+//                             p.groupage_batch_ref,
+//                             p.supplier,
+//                             p.warehouse_receipt_number,
+//                             p.tracking_number,
+//                             p.date_dispatched,
+//                             p.supplier_address,
+//                             p.supplier_email,
+//                             p.supplier_contact,
+//                             p.warehouse_collect,
+//                             p.costs_to_collect,
+//                             p.port_of_loading,
+//                             p.warehouse_dispatch,
+//                             p.warehouse_cost,
+//                             p.cost_to_dispatch,
+//                             p.waybill_ref,
+//                             user_id || 1
+//                         ]);
+
+//                         console.log("PRODUCT VALUES:", values.length);
+
+//                         const productSql = `
+//                             INSERT INTO warehouse_products
+//                             (
+//                                 user_id,
+//                                 order_id,
+//                                 warehouse_order_id,
+//                                 product_description,
+//                                 Hazardous,
+//                                 date_received,
+//                                 package_type,
+//                                 packages,
+//                                 dimension,
+//                                 weight,
+//                                 warehouse_ref,
+//                                 freight,
+//                                 groupage_batch_ref,
+//                                 supplier,
+//                                 warehouse_receipt_number,
+//                                 tracking_number,
+//                                 date_dspatched,
+//                                 supplier_address,
+//                                 supplier_Email,
+//                                 Supplier_Contact,
+//                                 warehouse_collect,
+//                                 costs_to_collect,
+//                                 port_of_loading,
+//                                 warehouse_dispatch,
+//                                 warehouse_cost,
+//                                 cost_to_dispatch,
+//                                 waybill_ref,
+//                                 added_by
+//                             )
+//                             VALUES ?
+//                         `;
+
+//                         con.query(
+//                             productSql,
+//                             [values],
+//                             (err) => {
+
+//                                 if (err) {
+//                                     console.log("PRODUCT INSERT ERROR:", err);
+
+//                                     return res.status(500).json({
+//                                         success: false,
+//                                         message: err.message
+//                                     });
+//                                 }
+
+//                                 // =====================================================
+//                                 // FINAL UPDATE
+//                                 // =====================================================
+
+//                                 con.query(
+//                                     `UPDATE supplier_warehouse_orders 
+//                                      SET 
+//                                         order_id=?, 
+//                                         admin_warehouseOrder_id=?, 
+//                                         move_to_adminWarhouse=1 
+//                                      WHERE id=?`,
+//                                     [
+//                                         order_id,
+//                                         warehouseId,
+//                                         supplier_warehouse_id
+//                                     ],
+//                                     (err) => {
+
+//                                         if (err) {
+//                                             console.log("FINAL UPDATE ERROR:", err);
+
+//                                             return res.status(500).json({
+//                                                 success: false,
+//                                                 message: err.message
+//                                             });
+//                                         }
+
+//                                         return res.status(200).json({
+//                                             success: true,
+//                                             message: "Order moved successfully",
+//                                             order_id,
+//                                             warehouse_id: warehouseId
+//                                         });
+//                                     }
+//                                 );
+//                             }
+//                         );
+//                     }
+//                 );
+//             }
+//         }
+
+//     } catch (error) {
+
+//         console.log("MAIN ERROR:", error);
+
+//         return res.status(500).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
 const MoveSupplierWarehouseOrder = (req, res) => {
-    const { supplier_warehouse_id, user_id } = req.body;
 
-    if (!supplier_warehouse_id) {
-        return res.status(400).json({
-            success: false,
-            message: "supplier_warehouse_id required"
-        });
-    }
+    try {
 
-    con.query(
-        `SELECT * FROM supplier_warehouse_orders WHERE id=?`,
-        [supplier_warehouse_id],
-        (err, dataRows) => {
+        const { supplier_warehouse_id, user_id } = req.body;
 
-            if (err) {
-                return res.status(500).json({ success: false, message: err.message });
-            }
+        if (!supplier_warehouse_id) {
+            return res.status(400).json({
+                success: false,
+                message: "supplier_warehouse_id required"
+            });
+        }
 
-            if (!dataRows.length) {
-                return res.status(400).json({ success: false, message: "Record not found" });
-            }
+        // =====================================================
+        // STEP 1: GET SUPPLIER WAREHOUSE ORDER
+        // =====================================================
 
-            const data = dataRows[0];
+        con.query(
+            `SELECT * FROM supplier_warehouse_orders WHERE id=?`,
+            [supplier_warehouse_id],
+            (err, dataRows) => {
 
-            if (data.move_to_adminWarhouse === 1) {
-                return res.status(400).json({ success: false, message: "Already moved" });
-            }
+                if (err) {
+                    console.log("STEP 1 ERROR:", err);
 
-            // =========================
-            // STEP 1: ORDER CHECK / CREATE
-            // =========================
-            con.query(
-                `SELECT * FROM tbl_orders WHERE id=?`,
-                [data.order_id],
-                (err, orderRows) => {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
 
-                    if (err) {
-                        return res.status(500).json({ success: false, message: err.message });
-                    }
+                if (!dataRows.length) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Record not found"
+                    });
+                }
 
-                    if (!orderRows.length) {
+                const data = dataRows[0];
 
-                        con.query(
-                            `INSERT INTO tbl_orders
-                            (client_id, goods_description, dimensions, weight, warehouse_status, cartons, CBM,
-                            collection_from, delivery_to, client_name, supplier_id, freight_type, added_by)
-                            VALUES (?, ?,?,?,?,?,?,?,?,?,?,?,?)`,
-                            [
+                if (data.move_to_adminWarhouse === 1) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Already moved"
+                    });
+                }
+
+                // =====================================================
+                // STEP 2: CHECK ORDER EXISTS
+                // =====================================================
+
+                con.query(
+                    `SELECT * FROM tbl_orders WHERE id=?`,
+                    [data.order_id],
+                    (err, orderRows) => {
+
+                        if (err) {
+
+                            console.log("ORDER CHECK ERROR:", err);
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+                        }
+
+                        // =====================================================
+                        // CREATE ORDER
+                        // =====================================================
+
+                        if (!orderRows.length) {
+
+                            const orderSql = `
+                                INSERT INTO tbl_orders
+                                (
+                                    client_id,
+                                    goods_description,
+                                    dimensions,
+                                    weight,
+                                    warehouse_status,
+                                    cartons,
+                                    CBM,
+                                    collection_from,
+                                    delivery_to,
+                                    client_name,
+                                    supplier_id,
+                                    freight_type,
+                                    added_by
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `;
+
+                            const orderValues = [
                                 data.client_id,
                                 data.goods_description,
                                 data.total_cbm,
@@ -6605,246 +7726,527 @@ const MoveSupplierWarehouseOrder = (req, res) => {
                                 data.supplier_id,
                                 null,
                                 user_id || 1
-                            ],
-                            (err, orderResult) => {
+                            ];
+
+                            con.query(
+                                orderSql,
+                                orderValues,
+                                (err, orderResult) => {
+
+                                    if (err) {
+
+                                        console.log("ORDER INSERT ERROR:", err);
+
+                                        return res.status(500).json({
+                                            success: false,
+                                            message: err.message
+                                        });
+                                    }
+
+                                    const order_id = orderResult.insertId;
+
+                                    handleWarehouse(order_id, data);
+                                }
+                            );
+
+                        } else {
+
+                            handleWarehouse(data.order_id, data);
+                        }
+                    }
+                );
+            }
+        );
+
+        // =====================================================
+        // STEP 3: HANDLE WAREHOUSE
+        // =====================================================
+
+        function handleWarehouse(order_id, data) {
+
+            con.query(
+                `SELECT id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
+                [order_id],
+                (err, warehouseRows) => {
+
+                    if (err) {
+
+                        console.log("WAREHOUSE CHECK ERROR:", err);
+
+                        return res.status(500).json({
+                            success: false,
+                            message: err.message
+                        });
+                    }
+
+                    // =====================================================
+                    // CREATE WAREHOUSE
+                    // =====================================================
+
+                    if (!warehouseRows.length) {
+
+                        const warehouseSql = `
+                            INSERT INTO warehouse_assign_order
+                            (
+                                order_id,
+                                warehouse_status,
+                                supplier_id,
+                                courier_waybill_ref,
+                                date_entry_created,
+                                dispatched_date,
+                                warehouse_comment,
+                                customer_ref,
+                                box_marking,
+                                package_type,
+                                hazardous,
+                                total_packeges,
+                                hazard_description,
+                                package_comment,
+                                damage_goods,
+                                damaged_pkg_qty,
+                                damage_comment,
+                                supplier_company,
+                                supplier_person,
+                                supplier_address,
+                                supplier_contact_no,
+                                batch_id,
+                                assign_to_batch,
+                                warehouse_order_id,
+                                warehouse_collect,
+                                costs_to_collect,
+                                warehouse_storage,
+                                warehouse_cost,
+                                handling_required,
+                                handling_cost,
+                                warehouse_dispatch,
+                                cost_to_dispatch,
+                                added_by
+                            )
+                            VALUES (
+                                ?,?,?,?,?,?,?,?,?,?,
+                                ?,?,?,?,?,?,?,?,?,?,
+                                ?,?,?,?,?,?,?,?,?,?,
+                                ?,?,?
+                            )
+                        `;
+
+                        const warehouseValues = [
+                            order_id,
+                            1,
+                            data.supplier_id,
+                            data.courier_waybill_ref,
+                            data.date_entry_created,
+                            data.dispatch_date,
+                            data.warehouse_comment,
+                            data.customer_ref,
+                            data.box_marking,
+                            data.package_type,
+                            data.hazardous,
+                            data.total_packages,
+                            data.hazard_description,
+                            data.package_comment,
+                            data.damaged_goods,
+                            data.damaged_pkg_qty,
+                            data.damage_comment,
+                            data.supplier_company,
+                            data.supplier_person,
+                            data.supplier_address,
+                            data.supplier_contact,
+                            data.batch_id || null,
+                            data.batch_id ? 1 : 0,
+                            data.warehouse_order_id,
+                            data.warehouse_collect,
+                            data.costs_to_collect,
+                            data.warehouse_storage,
+                            data.warehouse_cost,
+                            data.handling_required,
+                            data.handling_cost,
+                            data.warehouse_dispatch,
+                            data.cost_to_dispatch,
+                            user_id || 1
+                        ];
+
+                        con.query(
+                            warehouseSql,
+                            warehouseValues,
+                            (err, warehouseResult) => {
 
                                 if (err) {
-                                    return res.status(500).json({ success: false, message: err.message });
+
+                                    console.log("WAREHOUSE INSERT ERROR:", err);
+
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: err.message
+                                    });
                                 }
 
-                                const order_id = orderResult.insertId;
-                                handleWarehouse(order_id);
+                                const warehouseId = warehouseResult.insertId;
+
+                                // UPDATE ORDER
+
+                                con.query(
+                                    `UPDATE tbl_orders 
+                                     SET warehouse_status=?, client_name=? 
+                                     WHERE id=?`,
+                                    [1, data.customer_name, order_id],
+                                    (err) => {
+
+                                        if (err) {
+                                            console.log("ORDER UPDATE ERROR:", err);
+                                        }
+
+                                        moveFilesAndProducts(
+                                            data,
+                                            warehouseId,
+                                            order_id
+                                        );
+                                    }
+                                );
                             }
                         );
 
                     } else {
-                        handleWarehouse(data.order_id, data);
+
+                        const warehouseId = warehouseRows[0].id;
+
+                        moveFilesAndProducts(
+                            data,
+                            warehouseId,
+                            order_id
+                        );
+                    }
+                }
+            );
+        }
+
+        // =====================================================
+        // STEP 4: MOVE FILES + PRODUCTS
+        // =====================================================
+
+        function moveFilesAndProducts(data, warehouseId, order_id) {
+
+            con.query(
+                `SELECT * FROM supplier_warehouse_files WHERE supplier_warehouse_id=?`,
+                [supplier_warehouse_id],
+                (err, files) => {
+
+                    if (err) {
+
+                        console.log("FILES ERROR:", err);
+
+                        return res.status(500).json({
+                            success: false,
+                            message: err.message
+                        });
+                    }
+
+                    const fileValues = files.map(f => [
+                        warehouseId,
+                        f.file_type,
+                        f.file_name
+                    ]);
+
+                    // =====================================================
+                    // INSERT FILES
+                    // =====================================================
+
+                    if (fileValues.length > 0) {
+
+                        con.query(
+                            `INSERT INTO warehouse_files
+                            (warehouse_id, file_type, file_name)
+                            VALUES ?`,
+                            [fileValues],
+                            (err) => {
+
+                                if (err) {
+
+                                    console.log("FILES INSERT ERROR:", err);
+
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: err.message
+                                    });
+                                }
+
+                                moveProducts();
+                            }
+                        );
+
+                    } else {
+
+                        moveProducts();
                     }
                 }
             );
 
-            // =========================
-            // STEP 2: WAREHOUSE CHECK / CREATE
-            // =========================
-            function handleWarehouse(order_id, data) {
+            // =====================================================
+            // MOVE PRODUCTS
+            // =====================================================
+
+            function moveProducts() {
 
                 con.query(
-                    `SELECT id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
-                    [order_id],
-                    (err, warehouseRows) => {
-
-                        if (err) {
-                            return res.status(500).json({ success: false, message: err.message });
-                        }
-
-                        if (!warehouseRows.length) {
-
-                            con.query(
-                                `INSERT INTO warehouse_assign_order
-                                (order_id, warehouse_status, supplier_id,
-                                courier_waybill_ref, date_entry_created, dispatched_date,
-                                warehouse_comment, customer_ref, box_marking, package_type, hazardous,
-                                total_packeges, hazard_description, package_comment,
-                                damage_goods, damaged_pkg_qty, damage_comment,
-                                supplier_company, supplier_person, supplier_address, supplier_contact_no,
-                                batch_id, assign_to_batch,
-                                warehouse_order_id, warehouse_collect, costs_to_collect,
-                                warehouse_storage, warehouse_cost, handling_required, handling_cost,
-                                warehouse_dispatch, cost_to_dispatch, added_by)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                                        ?,?,
-                                        ?,?,?,?,?,?,?,?,?,?,?)`,
-                                [
-                                    order_id,
-                                    1,
-                                    data.supplier_id,
-                                    data.courier_waybill_ref,
-                                    data.date_entry_created,
-                                    data.dispatch_date,
-                                    data.warehouse_comment,
-                                    data.customer_ref,
-                                    data.box_marking,
-                                    data.package_type,
-                                    data.hazardous,
-                                    data.total_packages,
-                                    data.hazard_description,
-                                    data.package_comment,
-                                    data.damaged_goods,
-                                    data.damaged_pkg_qty,
-                                    data.damage_comment,
-                                    data.supplier_company,
-                                    data.supplier_person,
-                                    data.supplier_address,
-                                    data.supplier_contact,
-                                    data.batch_id || null,
-                                    data.batch_id ? 1 : 0,
-                                    data.warehouse_order_id,
-                                    data.warehouse_collect,
-                                    data.costs_to_collect,
-                                    data.warehouse_storage,
-                                    data.warehouse_cost,
-                                    data.handling_required,
-                                    data.handling_cost,
-                                    data.warehouse_dispatch,
-                                    data.cost_to_dispatch,
-                                    user_id || 1
-                                ],
-                                (err, warehouseResult) => {
-
-                                    if (err) {
-                                        return res.status(500).json({ success: false, message: err.message });
-                                    }
-
-                                    const warehouseId = warehouseResult.insertId;
-                                    moveFilesAndProducts(data, warehouseId, order_id);
-                                }
-                            );
-
-                            con.query(`UPDATE tbl_orders SET warehouse_status=?, client_name=? WHERE id=?`,
-                                [1, data.customer_name, order_id]
-                            );
-
-                        } else {
-
-                            const warehouseId = warehouseRows[0].id;
-                            moveFilesAndProducts(data, warehouseId, order_id);
-                        }
-                    }
-                );
-            }
-
-            // =========================
-            // STEP 3: MOVE FILES + PRODUCTS
-            // =========================
-            function moveFilesAndProducts(data, warehouseId, order_id) {
-
-                con.query(
-                    `SELECT * FROM supplier_warehouse_files WHERE supplier_warehouse_id=?`,
+                    `SELECT * FROM supplier_warehouse_products WHERE supplier_warehouse_id=?`,
                     [supplier_warehouse_id],
-                    (err, files) => {
+                    (err, products) => {
 
                         if (err) {
-                            return res.status(500).json({ success: false, message: err.message });
+
+                            console.log("PRODUCT FETCH ERROR:", err);
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
                         }
 
-                        const fileValues = files.map(f => [
+                        if (!products.length) {
+
+                            return res.status(400).json({
+                                success: false,
+                                message: "No products found"
+                            });
+                        }
+
+                        const values = products.map(p => [
+
+                            order_id,
+                            order_id,
                             warehouseId,
-                            f.file_type,
-                            f.file_name
+                            p.product_description,
+                            p.hazardous,
+                            p.date_received,
+                            p.package_type,
+                            p.packages,
+                            p.dimension,
+                            p.weight,
+                            p.warehouse_ref,
+                            p.freight,
+                            p.groupage_batch_ref,
+                            p.supplier,
+                            p.warehouse_receipt_number,
+                            p.tracking_number,
+                            p.date_dispatched,
+                            p.supplier_address,
+                            p.supplier_email,
+                            p.supplier_contact,
+                            p.warehouse_collect,
+                            p.costs_to_collect,
+                            p.port_of_loading,
+                            p.warehouse_dispatch,
+                            p.warehouse_cost,
+                            p.cost_to_dispatch,
+                            p.waybill_ref,
+                            user_id || 1
                         ]);
 
-                        if (fileValues.length) {
-                            con.query(
-                                `INSERT INTO warehouse_files (warehouse_id, file_type, file_name) VALUES ?`,
-                                [fileValues],
-                                (err) => {
-                                    if (err) {
-                                        return res.status(500).json({ success: false, message: err.message });
-                                    }
-                                    moveProducts();
+                        const productSql = `
+                            INSERT INTO warehouse_products
+                            (
+                                user_id,
+                                order_id,
+                                warehouse_order_id,
+                                product_description,
+                                Hazardous,
+                                date_received,
+                                package_type,
+                                packages,
+                                dimension,
+                                weight,
+                                warehouse_ref,
+                                freight,
+                                groupage_batch_ref,
+                                supplier,
+                                warehouse_receipt_number,
+                                tracking_number,
+                                date_dspatched,
+                                supplier_address,
+                                supplier_Email,
+                                Supplier_Contact,
+                                warehouse_collect,
+                                costs_to_collect,
+                                port_of_loading,
+                                warehouse_dispatch,
+                                warehouse_cost,
+                                cost_to_dispatch,
+                                waybill_ref,
+                                added_by
+                            )
+                            VALUES ?
+                        `;
+
+                        con.query(
+                            productSql,
+                            [values],
+                            (err) => {
+
+                                if (err) {
+
+                                    console.log("PRODUCT INSERT ERROR:", err);
+
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: err.message
+                                    });
                                 }
-                            );
-                        } else {
-                            moveProducts();
-                        }
+
+                                assignOrderToBatch();
+                            }
+                        );
                     }
                 );
+            }
 
-                function moveProducts() {
+            // =====================================================
+            // ASSIGN TO BATCH
+            // =====================================================
 
-                    con.query(
-                        `SELECT * FROM supplier_warehouse_products WHERE supplier_warehouse_id=?`,
-                        [supplier_warehouse_id],
-                        (err, products) => {
+            function assignOrderToBatch() {
 
-                            if (err) {
-                                return res.status(500).json({ success: false, message: err.message });
-                            }
+                // NO BATCH
+                if (!data.batch_id) {
+                    return finalUpdate();
+                }
 
-                            if (!products.length) {
-                                return res.status(400).json({
-                                    success: false,
-                                    message: "No products found"
-                                });
-                            }
+                // CHECK EXISTING ASSIGNMENT
 
-                            // ❗ FIXED: REMOVED client_id (NOT IN YOUR TABLE)
-                            const values = products.map(p => [
-                                data.order_id,          // user_id column (as per your OLD schema)
-                                order_id,
-                                warehouseId,
-                                p.product_description,
-                                p.hazardous,
-                                p.date_received,
-                                p.package_type,
-                                p.packages,
-                                p.dimension,
-                                p.weight,
-                                p.warehouse_ref,
-                                p.freight,
-                                p.groupage_batch_ref,
-                                p.supplier,
-                                p.warehouse_receipt_number,
-                                p.tracking_number,
-                                p.date_dispatched,
-                                p.supplier_address,
-                                p.supplier_email,
-                                p.supplier_contact,
-                                p.warehouse_collect,
-                                p.costs_to_collect,
-                                p.port_of_loading,
-                                p.warehouse_dispatch,
-                                p.warehouse_cost,
-                                p.cost_to_dispatch,
-                                p.waybill_ref,
-                                user_id || 1
-                            ]);
+                con.query(
+                    `SELECT id FROM freight_assig_to_batch WHERE order_id=?`,
+                    [order_id],
+                    (err, batchRows) => {
 
-                            con.query(
-                                `INSERT INTO warehouse_products
-                                (user_id, order_id, warehouse_order_id, product_description, Hazardous,
-                                date_received, package_type, packages, dimension, weight,
-                                warehouse_ref, freight, groupage_batch_ref, supplier,
-                                warehouse_receipt_number, tracking_number, date_dspatched,
-                                supplier_address, supplier_Email, Supplier_Contact,
-                                warehouse_collect, costs_to_collect, port_of_loading,
-                                warehouse_dispatch, warehouse_cost, cost_to_dispatch,
-                                waybill_ref, added_by)
-                                VALUES ?`,
-                                [values],
-                                (err) => {
+                        if (err) {
 
-                                    if (err) {
-                                        return res.status(500).json({ success: false, message: err.message });
-                                    }
+                            console.log("BATCH CHECK ERROR:", err);
 
-                                    con.query(
-                                        `UPDATE supplier_warehouse_orders 
-                                         SET order_id=?, admin_warehouseOrder_id=?, move_to_adminWarhouse=1 
-                                         WHERE id=?`,
-                                        [order_id, warehouseId, supplier_warehouse_id],
-                                        (err) => {
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+                        }
 
-                                            if (err) {
-                                                return res.status(500).json({ success: false, message: err.message });
-                                            }
+                        // ALREADY EXISTS
 
-                                            return res.status(200).json({
-                                                success: true,
-                                                message: "Order + Warehouse + Products processed successfully",
-                                                order_id,
-                                                warehouse_id: warehouseId
+                        if (batchRows.length > 0) {
+                            return finalUpdate();
+                        }
+
+                        // INSERT INTO freight_assig_to_batch
+
+                        const batchAssignSql = `
+                            INSERT INTO freight_assig_to_batch
+                            (
+                                freight_id,
+                                batch_id,
+                                order_id
+                            )
+                            VALUES (?, ?, ?)
+                        `;
+
+                        con.query(
+                            batchAssignSql,
+                            [
+                                null,
+                                data.batch_id,
+                                order_id
+                            ],
+                            (err) => {
+
+                                if (err) {
+
+                                    console.log("BATCH INSERT ERROR:", err);
+
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: err.message
+                                    });
+                                }
+
+                                // UPDATE WAREHOUSE
+
+                                con.query(
+                                    `UPDATE warehouse_assign_order
+                                     SET
+                                        batch_id=?,
+                                        assign_to_batch=1
+                                     WHERE order_id=?`,
+                                    [
+                                        data.batch_id,
+                                        order_id
+                                    ],
+                                    (err) => {
+
+                                        if (err) {
+
+                                            console.log("WAREHOUSE BATCH UPDATE ERROR:", err);
+
+                                            return res.status(500).json({
+                                                success: false,
+                                                message: err.message
                                             });
                                         }
-                                    );
-                                }
-                            );
+
+                                        finalUpdate();
+                                    }
+                                );
+                            }
+                        );
+                    }
+                );
+            }
+
+            // =====================================================
+            // FINAL UPDATE
+            // =====================================================
+
+            function finalUpdate() {
+
+                con.query(
+                    `UPDATE supplier_warehouse_orders
+                     SET
+                        order_id=?,
+                        admin_warehouseOrder_id=?,
+                        move_to_adminWarhouse=1
+                     WHERE id=?`,
+                    [
+                        order_id,
+                        warehouseId,
+                        supplier_warehouse_id
+                    ],
+                    (err) => {
+
+                        if (err) {
+
+                            console.log("FINAL UPDATE ERROR:", err);
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
                         }
-                    );
-                }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Order moved successfully",
+                            order_id,
+                            warehouse_id: warehouseId
+                        });
+                    }
+                );
             }
         }
-    );
+
+    } catch (error) {
+
+        console.log("MAIN ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
 };
 
 const AllOrderNumbers = async (req, res) => {

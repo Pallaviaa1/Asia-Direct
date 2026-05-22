@@ -165,5 +165,4 @@ customer_route.post("/GetShipmentDetails", customerController.GetShipmentDetails
 customer_route.post("/getShipmentbyid", customerController.getShipmentbyid)
 customer_route.post("/AssignBatchToClearing", customerController.AssignBatchOrdersToClearing)
 
-
 module.exports = customer_route;
