@@ -22,7 +22,11 @@ const AddSupplier = (req, res) => {
             country,
             country_code,
             phone_no,
-            user_type = 1   // default supplier
+            user_type = 1,
+            company_name,
+            address,
+            country_based,
+            service_type,
         } = req.body;
 
         const selectQuery = `
@@ -47,8 +51,8 @@ const AddSupplier = (req, res) => {
 
             const insertQuery = `
                 INSERT INTO tbl_suppliers 
-                (name, email, password, country, country_code, phone_no, user_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (name, email, password, country, country_code, phone_no, user_type, company_name, address, country_based, service_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             con.query(
@@ -60,7 +64,11 @@ const AddSupplier = (req, res) => {
                     country,
                     country_code,
                     phone_no,
-                    user_type
+                    user_type,
+                    company_name,
+                    address,
+                    country_based,
+                    service_type
                 ],
                 (err, result) => {
                     if (err) {
@@ -313,7 +321,12 @@ const NewSupplierList = async (req, res) => {
                 tbl_suppliers.email, 
                 tbl_suppliers.country, 
                 tbl_suppliers.country_code, 
-                tbl_suppliers.phone_no, 
+                tbl_suppliers.phone_no,
+                tbl_suppliers.user_type,
+                tbl_suppliers.company_name,
+                tbl_suppliers.address,
+                tbl_suppliers.country_based,
+                tbl_suppliers.service_type,
                 c.name AS country_name
             ${baseQuery}
             ORDER BY tbl_suppliers.created_at DESC
@@ -357,7 +370,11 @@ const UpdateSupplier = async (req, res) => {
             country,
             country_code,
             phone_no,
-            password
+            password,
+            company_name,
+            address,
+            country_based,
+            service_type
         } = req.body;
 
         if (!supplier_id || !supplier_email || !supplier_name) {
@@ -369,7 +386,7 @@ const UpdateSupplier = async (req, res) => {
 
         let profile = req.file ? req.file.filename : null;
 
-        // 1️⃣ Check email already exists for another supplier
+        //  Check email already exists for another supplier
         const checkEmailSql = `
             SELECT id
             FROM tbl_suppliers
@@ -392,12 +409,12 @@ const UpdateSupplier = async (req, res) => {
                 });
             }
 
-            // 2️⃣ Build update query dynamically
+            //  Build update query dynamically
             let updateQuery = `
                 UPDATE tbl_suppliers
-                SET name = ?, email = ?, country = ?, country_code = ?, phone_no = ?
+                SET name = ?, email = ?, country = ?, country_code = ?, phone_no = ?, user_type = ?, company_name = ?, address = ?, country_based = ?, service_type = ?
             `;
-            let params = [supplier_name, supplier_email, country, country_code, phone_no];
+            let params = [supplier_name, supplier_email, country, country_code, phone_no, user_type, company_name, address, country_based, service_type];
 
             // profile update
             if (profile) {
@@ -415,7 +432,7 @@ const UpdateSupplier = async (req, res) => {
             updateQuery += ` WHERE id = ?`;
             params.push(supplier_id);
 
-            // 3️⃣ Execute update
+            //  Execute update
             con.query(updateQuery, params, (err, updateData) => {
                 if (err) {
                     return res.status(500).send({

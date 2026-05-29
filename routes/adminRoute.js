@@ -23,7 +23,10 @@ const storage = multer.diskStorage({
             "Letters of authority",
             "AD_Quotations",
             "Supplier Invoices",
-            "Warehouse Entry Docs"
+            "Warehouse Entry Docs",
+            "Invoice (AD)",
+            "POP (AD)",
+            "Delivery note"
 
         ];
 
@@ -58,12 +61,16 @@ admin_route.post('/term-condition', Privacy_TermValidation, adminController.Term
 admin_route.get('/get-terms', adminController.GetTerms);
 
 admin_route.post('/add-freight', upload.fields([{ name: 'Customs Documents', maxCount: 5 }, { name: 'Waybills', maxCount: 5 }, { name: 'Supporting Documents', maxCount: 5 }, { name: 'Invoice, Packing List', maxCount: 5 },
-{ name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }]), adminController.Addfreight);
+{ name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }, { name: 'Invoice (AD)', maxCount: 5 },
+{ name: 'POP (AD)', maxCount: 5 }, { name: 'Delivery note', maxCount: 5 }]), adminController.Addfreight);
 admin_route.post('/freight-list', adminController.GetFreightAdmin);
+admin_route.post("/GetReadyFreightAdmin", adminController.GetReadyFreightAdmin)
+admin_route.post("/ManageFreightStatus", adminController.ManageFreightStatus)
 admin_route.post('/freight-list-byId', adminController.GetFreightAdminById);
 admin_route.post('/new-freight-list', adminController.GetFreightCustomer);
 admin_route.post('/edit-freight', upload.fields([{ name: 'Customs Documents', maxCount: 5 }, { name: 'Waybills', maxCount: 5 }, { name: 'Supporting Documents', maxCount: 5 }, { name: 'Invoice, Packing List', maxCount: 5 },
-{ name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }]), adminController.EditFreight);
+{ name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }, { name: 'Invoice (AD)', maxCount: 5 },
+{ name: 'POP (AD)', maxCount: 5 }, { name: 'Delivery note', maxCount: 5 }]), adminController.EditFreight);
 admin_route.post('/get-freight', adminController.GetFreightById);
 admin_route.post('/delete-freight', adminController.DeleteFreight);
 
@@ -187,5 +194,6 @@ admin_route.get("/getAllSupplierInvoices", adminController.getAllSupplierInvoice
 admin_route.post("/deleteSupplierInvoice/:id", adminController.deleteSupplierInvoice)
 admin_route.get("/getWaybillDropdown", adminController.getWaybillDropdown)
 admin_route.get("/getSupplierInvoiceById/:id", adminController.getSupplierInvoiceById)
+admin_route.post("/copySupplierInvoice", adminController.copySupplierInvoice);
 
 module.exports = admin_route;

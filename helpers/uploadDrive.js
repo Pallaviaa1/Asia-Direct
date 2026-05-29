@@ -111,7 +111,8 @@ const nestedFolderStructure = {
     "Freight documents": [
         "Waybills",
         "Warehouse Entry Docs",
-        "Supplier Invoices"
+        "Supplier Invoices",
+        "Delivery note"
     ],
     "Supplier Invoices": [
         "Invoice, Packing List",
@@ -120,7 +121,9 @@ const nestedFolderStructure = {
     ],
     "Quotations": [
         "AD_Invoice",
-        "AD_Quotations"
+        "AD_Quotations",
+        "Invoice (AD)",
+        "POP (AD)"
     ],
     "Proof of Delivery": [
         "Delivery note",
@@ -143,7 +146,7 @@ const findOrCreateFolder = async (freightNumber) => {
             // console.log(` Created: ${freightNumber}/${mainFolder}/${sub}`);
         }
     }
-    return freightFolderId; 
+    return freightFolderId;
     // console.log(" Entire folder structure created.");
 };
 
@@ -269,7 +272,7 @@ const findFolderId = async (folderName, parentId = null) => {
 const deleteFolderByName = async (folderName, parentId = null) => {
     try {
         const drive = await authenticateGoogleDrive();
-        
+
         // Step 1: Find folder ID
         const folderId = await findFolderId(folderName, parentId);
         if (!folderId) {

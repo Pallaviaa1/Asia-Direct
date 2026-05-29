@@ -1508,6 +1508,349 @@ const GetFreightAdmin = (req, res) => {
     });
 };
 
+const GetReadyFreightAdmin = (req, res) => {
+
+    const {
+        user_id,
+        user_type,
+        search,
+        page = 1,
+        limit = 10
+    } = req.body;
+
+    const offset = (page - 1) * limit;
+    const All_access_USER_ID = 19855;
+
+    let accessCountries = [];
+
+    /* ==================== USER ACCESS ==================== */
+
+    const getUserCountry = (cb) => {
+
+        if (!user_id) return cb();
+
+        if (user_id === All_access_USER_ID) {
+            accessCountries = [];
+            return cb();
+        }
+
+        con.query(
+            `
+            SELECT access_country
+            FROM tbl_users
+            WHERE id = ?
+            AND is_deleted = 0
+            `,
+            [user_id],
+            (err, rows) => {
+
+                if (err) return cb(err);
+
+                if (!rows.length) {
+                    return res.status(404).send({
+                        success: false,
+                        message: "User not found"
+                    });
+                }
+
+                if (rows[0].access_country) {
+                    accessCountries = rows[0].access_country
+                        .split(',')
+                        .map(id => Number(id.trim()));
+                }
+
+                cb();
+            }
+        );
+    };
+
+    /* ==================== BUILD CONDITION ==================== */
+
+    const buildCondition = () => {
+
+        let condition = `
+            WHERE tbl_freight.is_deleted = 0
+            AND tbl_freight.added_by IN (1, 2)
+            AND tbl_freight.order_status = 0
+            AND (
+                tbl_freight.ready_for_collection = 'Yes'
+                OR tbl_freight.require_for_delivery = 'Yes'
+            )
+        `;
+
+        let params = [];
+
+        // country filter
+        if (user_id !== All_access_USER_ID && accessCountries.length) {
+
+            const placeholders = accessCountries.map(() => '?').join(',');
+
+            condition += `
+                AND (
+                    tbl_freight.collection_from IN (${placeholders})
+                    OR tbl_freight.delivery_to IN (${placeholders})
+                )
+            `;
+
+            params.push(...accessCountries, ...accessCountries);
+        }
+
+        // sales filter
+        if (user_type === 2 && user_id && user_id !== All_access_USER_ID) {
+
+            condition += `
+                AND (
+                    tbl_freight.user_id = ?
+                    OR tbl_freight.sales_representative = ?
+                )
+            `;
+
+            params.push(user_id, user_id);
+        }
+
+        // search
+        if (search) {
+
+            condition += `
+                AND (
+                    tbl_freight.freight_number LIKE ?
+                    OR u.full_name LIKE ?
+                    OR c.name LIKE ?
+                    OR co.name LIKE ?
+                )
+            `;
+
+            const searchParam = `%${search}%`;
+
+            params.push(
+                searchParam,
+                searchParam,
+                searchParam,
+                searchParam
+            );
+        }
+
+        return { condition, params };
+    };
+
+    /* ==================== COUNT ==================== */
+
+    const getCount = (condition, params, cb) => {
+
+        const countQuery = `
+            SELECT COUNT(DISTINCT tbl_freight.id) AS total
+            FROM tbl_freight
+
+            LEFT JOIN tbl_users u ON u.id = tbl_freight.client_id
+            LEFT JOIN tbl_suppliers cs 
+    ON cs.id = tbl_freight.collection_supplier_id
+    LEFT JOIN tbl_suppliers ds 
+    ON ds.id = tbl_freight.delivery_supplier_id
+            LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
+            LEFT JOIN countries co ON co.id = tbl_freight.collection_from
+
+            ${condition}
+        `;
+
+        con.query(countQuery, params, (err, rows) => {
+
+            if (err) return cb(err);
+
+            cb(null, rows[0].total);
+        });
+    };
+
+    /* ==================== DATA ==================== */
+
+    const getData = (condition, params, total) => {
+
+        const dataQuery = `
+            SELECT DISTINCT
+
+                tbl_freight.id AS freight_id,
+                tbl_freight.freight_number,
+                tbl_freight.date,
+                tbl_freight.created_at,
+
+                tbl_freight.ready_for_collection,
+                tbl_freight.ready_for_collection_status,
+                tbl_freight.collection_supplier_id,
+
+                tbl_freight.require_for_delivery,
+                tbl_freight.require_for_delivery_status,
+                tbl_freight.delivery_supplier_id,
+
+                tbl_freight.type,
+                tbl_freight.freight,
+                tbl_freight.product_desc,
+
+                u.full_name AS client_name,
+                cs.name AS collection_supplier_name,
+                ds.name AS delivery_supplier_name,
+                c.name AS delivery_to_name,
+                co.name AS collection_from_name
+
+            FROM tbl_freight
+
+            LEFT JOIN tbl_users u ON u.id = tbl_freight.client_id
+            LEFT JOIN tbl_suppliers s ON s.id = tbl_freight.supplier_task_assign_id
+            LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
+            LEFT JOIN countries co ON co.id = tbl_freight.collection_from
+            LEFT JOIN tbl_suppliers cs 
+    ON cs.id = tbl_freight.collection_supplier_id
+    LEFT JOIN tbl_suppliers ds 
+    ON ds.id = tbl_freight.delivery_supplier_id
+
+            ${condition}
+
+            GROUP BY tbl_freight.id
+            ORDER BY tbl_freight.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        con.query(
+            dataQuery,
+            [...params, Number(limit), Number(offset)],
+            (err, data) => {
+
+                if (err) {
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                res.status(200).send({
+                    success: true,
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    data
+                });
+            }
+        );
+    };
+
+    /* ==================== FLOW ==================== */
+
+    getUserCountry((err) => {
+
+        if (err) {
+            return res.status(500).send({
+                success: false,
+                message: err.message
+            });
+        }
+
+        const { condition, params } = buildCondition();
+
+        getCount(condition, params, (err, total) => {
+
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            getData(condition, params, total);
+        });
+    });
+};
+
+const ManageFreightStatus = (req, res) => {
+    try {
+        const {
+            freight_id,
+            type,
+            status,
+            supplier_id
+        } = req.body;
+
+        if (!freight_id || !type || !status) {
+            return res.status(400).send({
+                success: false,
+                message: "freight_id, type, status required"
+            });
+        }
+
+        let statusColumn = "";
+        let supplierColumn = "";
+
+        // COLLECTION FLOW
+        if (type === "collection") {
+
+            statusColumn = "ready_for_collection_status";
+            supplierColumn = "collection_supplier_id";
+        }
+
+        // DELIVERY FLOW
+        else if (type === "delivery") {
+
+            statusColumn = "require_for_delivery_status";
+            supplierColumn = "delivery_supplier_id";
+        }
+
+        else {
+            return res.status(400).send({
+                success: false,
+                message: "type must be collection or delivery"
+            });
+        }
+
+        let updateQuery = `
+            UPDATE tbl_freight
+            SET ${statusColumn} = ?
+        `;
+
+        let params = [status];
+
+        // Assign supplier only when Assigned
+        if (status === "Assigned") {
+
+            if (!supplier_id) {
+                return res.status(400).send({
+                    success: false,
+                    message: "supplier_id required when status is Assigned"
+                });
+            }
+
+            updateQuery += `, ${supplierColumn} = ?`;
+            params.push(supplier_id);
+        }
+
+        updateQuery += ` WHERE id = ?`;
+        params.push(freight_id);
+
+        con.query(updateQuery, params, (err, result) => {
+
+            if (err) {
+
+                console.log("DB ERROR:", err);
+
+                return res.status(500).send({
+                    success: false,
+                    message: err.sqlMessage || err.message
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                message: "Status updated successfully"
+            });
+        });
+
+    } catch (error) {
+
+        console.log("SERVER ERROR:", error);
+
+        return res.status(500).send({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
 const GetFreightAdminById = async (req, res) => {
     const { freight_id, status, priority, origin, destination, startDate, endDate, freightType, freightSpeed, user_id, user_type } = req.body;
 
@@ -1617,7 +1960,7 @@ const GetFreightAdminById = async (req, res) => {
                 tbl_freight.client_id as client_ref, tbl_freight.date, tbl_freight.type, tbl_freight.freight, tbl_freight.incoterm, tbl_freight.dimension, tbl_freight.weight,
                 tbl_freight.quote_received, tbl_freight.client_quoted, tbl_freight.status, tbl_freight.comment, tbl_freight.no_of_packages, tbl_freight.package_type,
                 tbl_freight.commodity, cm.name as commodity_name, tbl_freight.shipper_name, tbl_freight.hazardous, tbl_freight.collection_from as country_of_origin, tbl_freight.delivery_to as destination_country, tbl_freight.supplier_address, tbl_freight.shipment_origin, tbl_freight.shipment_des,
-                tbl_freight.port_of_loading, tbl_freight.post_of_discharge, tbl_freight.place_of_delivery, tbl_freight.ready_for_collection,
+                tbl_freight.port_of_loading, tbl_freight.post_of_discharge, tbl_freight.place_of_delivery, tbl_freight.ready_for_collection,  tbl_freight.require_for_delivery,
                 tbl_freight.transit_time, tbl_freight.priority, tbl_freight.added_by, tbl_freight.freight_number, tbl_freight.shipment_details,
                 tbl_freight.nature_of_hazard, tbl_freight.volumetric_weight, tbl_freight.assign_for_estimate, tbl_freight.assign_to_transporter,
                 tbl_freight.is_active, tbl_freight.add_attachments, tbl_freight.add_attachment_file, tbl_freight.assign_warehouse, tbl_freight.order_status, tbl_freight.created_at as freight_created_at, tbl_freight.assign_to_clearing, tbl_freight.send_to_warehouse, tbl_freight.client_ref_name, tbl_freight.shipment_ref, tbl_freight.insurance, c.name as delivery_to_name, co.name as collection_from_name, 
@@ -1952,7 +2295,8 @@ const nestedFolderStructure = {
     "Freight documents": [
         "Waybills",
         "Warehouse Entry Docs",
-        "Supplier Invoices"
+        "Supplier Invoices",
+        "Delivery note"
     ],
     "Supplier Invoices": [
         "Invoice, Packing List",
@@ -1961,7 +2305,9 @@ const nestedFolderStructure = {
     ],
     "Quotations": [
         "AD_ Invoice",
-        "AD_Quotations"
+        "AD_Quotations",
+        "Invoice (AD)",
+        "POP (AD)"
     ],
     "Proof of Delivery": [
         "Delivery note",
@@ -1975,6 +2321,7 @@ const getMainFolderForDoc = (docName) => {
     }
     return null; // not found
 };
+
 
 // Upload file to matching subfolder
 const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
@@ -2012,212 +2359,608 @@ const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
     return result;
 };
 
+
+// const Addfreight = async (req, res) => {
+//     try {
+//         const {
+//             client_ref, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
+//             is_active, comment, no_of_packages, package_type, commodity, hazardous, industry, country_of_origin, destination_country,
+//             supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
+//             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, sales_representative, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments, documentName, weight_unit, dimension_unit, user_id
+//         } = req.body;
+//         // console.log(req.body);
+//         console.log(req.files);
+
+//         // console.log(req.body.documentName);
+//         // Generate freight number
+//         generateFreightNumber(async (err, freightNumber) => {
+//             if (err) throw err;
+
+//             // Insert freight into DB
+//             const insertResult = await new Promise((resolve, reject) => {
+//                 insertQuery = `INSERT INTO tbl_freight (client_id, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, 
+//             quote_received, client_quoted, is_active, comment, no_of_packages, package_type, commodity, hazardous, 
+//              collection_from, delivery_to, supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, 
+//             ready_for_collection, transit_time, priority, added_by, freight_number, shipment_details, 
+//             nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, 
+//             send_to_warehouse, shipment_origin, shipment_des, product_desc, shipment_ref, insurance, client_ref_name, sales_representative, weight_unit, dimension_unit, user_id ) 
+//             VALUES (?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?, ?, ?, ?)`;
+//                 insertParams = [
+//                     client_ref, client_email, date, type, fcl_lcl || null, freight, incoterm, dimension, weight, quote_received, client_quoted,
+//                     is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
+//                     supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
+//                     transit_time, priority, 1, freightNumber, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
+//                     assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, Product_Description, shipment_ref, insurance, client_ref_name, sales_representative, weight_unit || null, dimension_unit || null, user_id || null
+//                 ];
+//                 con.query(insertQuery, insertParams, (err, result) => {
+//                     if (err) return reject(err);
+//                     resolve(result);
+//                 });
+//             });
+
+//             // Create main freight folder
+//             const freightFolderId = await findOrCreateFolder(freightNumber);
+//             const selectQuery = `
+//             SELECT tbl_freight.freight_number, tbl_users.full_name, c.name AS collection_from_country, 
+//                    co.name AS delivery_to_country
+//             FROM tbl_freight
+//             LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+//              LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
+//             LEFT JOIN countries AS co ON co.id = tbl_freight.delivery_to
+//             WHERE tbl_freight.id = ?
+//         `;
+//             con.query(selectQuery, [insertResult.insertId], async (err, result) => {
+//                 if (err || result.length === 0) return console.error("Error fetching client info:", err);
+
+//                 const Email = client_email;
+//                 const mailSubject = 'New Shipment Enquiry';
+//                 //                 const content = `
+//                 //                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+//                 //     <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
+//                 //         New Shipment Enquiry
+//                 //     </h2>
+
+//                 //     <p>Dear <strong>${result[0].full_name}</strong>,</p>
+
+//                 //     <p>
+//                 //         We’re excited to let you know that a new shipment enquiry has been created under your profile.
+//                 //     </p>
+
+//                 //     <p><strong>Shipment Details:</strong></p>
+
+//                 //     <p>
+//                 //         Freight Number: <strong>${result[0].freight_number}</strong><br>
+//                 //         Product Description: <strong>${Product_Description}</strong><br>
+//                 //         Freight: <strong>${freight}</strong><br>
+//                 //         Type: <strong>${type}</strong><br>
+//                 //         Origin: <strong>${result[0].collection_from_country}</strong><br>
+//                 //         Port of Loading: <strong>${port_of_loading}</strong><br>
+//                 //         Port of Discharge: <strong>${post_of_discharge}</strong><br>
+//                 //         Final Destination: <strong>${result[0].delivery_to_country}</strong>
+//                 //     </p>
+
+//                 //     <p>
+//                 //         Our sales team will reach out to you shortly with further details.  
+//                 //         In the meantime, feel free to contact us if you have any questions or log in at  
+//                 //         <a href="https://www.ship.asiadirect.africa" target="_blank">www.ship.asiadirect.africa</a>.
+//                 //     </p>
+
+//                 //     <p>
+//                 //         Regards,<br>
+//                 //         <strong>Management System</strong>
+//                 //     </p>
+//                 // </div>
+
+//                 //             `;
+
+//                 const content = `
+//                 <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 20px auto; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 25px; color: #333; font-size: 15px; line-height: 1.5;">
+
+//   <!-- Logo -->
+//   <div style="text-align: center; margin-bottom: 20px;">
+//     <img src="http://ship.asiadirect.africa/Admin/static/media/logotransparent.40e77f3a4e8fb45b5543.png" alt="Asia Direct" style="height: 80px;">
+//   </div>
+
+//   <!-- Heading -->
+//   <h2 style="border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 0; color: #222;">New Shipment Enquiry</h2>
+
+//   <!-- Greeting -->
+//   <p>Dear <strong>${result[0].full_name || 'Customer'}</strong>,</p>
+
+//   <!-- Message -->
+//   <p>We’re excited to let you know that a new shipment enquiry has been created under your profile.</p>
+
+//   <!-- Shipment Details Table -->
+//   <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif;">
+//   <tr>
+//     <td style="width: 50%; vertical-align: top; padding-right: 15px;">
+//       <div style="padding: 3px 5px;"><strong>Freight Number:</strong> ${result[0].freight_number}</div>
+//       <div style="padding: 3px 5px;"><strong>Product Description:</strong> ${Product_Description}</div>
+//       <div style="padding: 3px 5px;"><strong>Freight:</strong> ${freight}</div>
+//       <div style="padding: 3px 5px;"><strong>Type:</strong> ${type}</div>
+//     </td>
+//     <td style="width: 50%; vertical-align: top; padding-left: 15px;">
+//       <div style="padding: 3px 5px;"><strong>Origin:</strong> ${result[0].collection_from_country}</div>
+//       <div style="padding: 3px 5px;"><strong>Port of Loading:</strong> ${port_of_loading}</div>
+//       <div style="padding: 3px 5px;"><strong>Port of Discharge:</strong> ${post_of_discharge}</div>
+//       <div style="padding: 3px 5px;"><strong>Final Destination:</strong> ${result[0].delivery_to_country}</div>
+//     </td>
+//   </tr>
+// </table>
+
+
+//   <p>Our sales team will reach out to you shortly with further details. In the meantime, feel free to contact us if you have any further questions or alternatively log in at <a href="https://www.ship.asiadirect.africa" style="color: #1e3a8a; font-weight: bold; text-decoration: underline;">www.ship.asiadirect.africa</a>.</p>
+
+//   <p>Best Regards,<br><strong>The Asia Direct Africa Team</strong></p>
+// </div> `;
+//                 /*  <table style="width: 100%; border-collapse: collapse; margin: 20px 0;  font-family: Arial, sans-serif;">
+//                     <tr>
+//                       <td style="width: 50%; vertical-align: top; padding-right: 15px;">
+//                         <table style="width: 100%; border-collapse: collapse;">
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Freight Number:</td><td style="padding: 3px 0px;">${result[0].freight_number}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Product Description:</td><td style="padding: 3px 0px;">${Product_Description}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Freight:</td><td style="padding: 3px 0px;">${freight}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Type:</td><td style="padding: 3px 0px;">${type}</td></tr>
+//                         </table>
+//                       </td>
+//                       <td style="width: 50%; vertical-align: top; padding-left: 15px;">
+//                         <table style="width: 100%; border-collapse: collapse; text-align: left;">
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Origin:</td><td style="padding: 3px 0px;">${result[0].collection_from_country}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Port of Loading:</td><td style="padding: 3px 0px;">${port_of_loading}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Port of Discharge:</td><td style="padding: 3px 0px;">${post_of_discharge}</td></tr>
+//                           <tr><td style="font-weight: bold; padding: 3px 5px;">Final Destination:</td><td style="padding: 3px 0px;">${result[0].delivery_to_country}</td></tr>
+//                         </table>
+//                       </td>
+//                     </tr>
+//                   </table> */
+
+//                 sendMail(Email, mailSubject, content);
+
+//                 // Process files dynamically
+//                 // Example usage inside your Addfreight controller
+//                 // if (req.files && Object.keys(req.files).length > 0) {
+//                 //     for (const fieldName of Object.keys(req.files)) {
+//                 //         const filesArray = req.files[fieldName];
+
+//                 //         for (const file of filesArray) {
+//                 //             const documentName = req.body.documentName; // sent from Postman
+//                 //             console.log(documentName);
+
+//                 //             await uploadToMatchingFolder(file, documentName, result[0].freight_number);
+
+//                 //             // Save in DB
+//                 //             const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
+//                 //             await new Promise((resolve, reject) => {
+//                 //                 con.query(docQuery, [insertResult.insertId, 1, documentName, file.filename], (err) => {
+//                 //                     if (err) return reject(err);
+//                 //                     resolve();
+//                 //                 });
+//                 //             });
+//                 //         }
+//                 //     }
+//                 // }
+//                 if (req.files && Object.keys(req.files).length > 0) {
+//                     for (const fieldName of Object.keys(req.files)) {
+//                         const filesArray = req.files[fieldName];
+
+//                         for (const file of filesArray) {
+//                             // Use fieldName as the document name for folder mapping
+//                             await uploadToMatchingFolder(file, fieldName, result[0].freight_number);
+
+//                             // Save in DB
+//                             const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
+//                             await new Promise((resolve, reject) => {
+//                                 con.query(docQuery, [insertResult.insertId, 1, fieldName, file.filename], (err) => {
+//                                     if (err) return reject(err);
+//                                     resolve();
+//                                 });
+//                             });
+//                         }
+//                     }
+//                 }
+
+//             });
+//             res.json({ success: true, message: "Freight added successfully", freightNumber });
+//         });
+//     } catch (error) {
+//         console.error('AddFreight error:', error);
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
+
 const Addfreight = async (req, res) => {
+
     try {
+
         const {
-            client_ref, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
-            is_active, comment, no_of_packages, package_type, commodity, hazardous, industry, country_of_origin, destination_country,
-            supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, Product_Description,
-            transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate, sales_representative, assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, add_attachments, documentName, weight_unit, dimension_unit, user_id
+            client_ref,
+            client_email,
+            date,
+            type,
+            fcl_lcl,
+            freight,
+            incoterm,
+            dimension,
+            weight,
+            quote_received,
+            client_quoted,
+            shipment_ref,
+            insurance,
+            is_active,
+            comment,
+            no_of_packages,
+            package_type,
+            commodity,
+            hazardous,
+            industry,
+            country_of_origin,
+            destination_country,
+            supplier_address,
+            shipper_name,
+            port_of_loading,
+            post_of_discharge,
+            place_of_delivery,
+            ready_for_collection,
+            require_for_delivery,
+            Product_Description,
+            transit_time,
+            priority,
+            shipment_details,
+            nature_of_hazard,
+            volumetric_weight,
+            assign_for_estimate,
+            sales_representative,
+            assign_to_transporter,
+            assign_warehouse,
+            assign_to_clearing,
+            send_to_warehouse,
+            shipment_origin,
+            shipment_des,
+            client_ref_name,
+            add_attachments,
+            documentName,
+            weight_unit,
+            dimension_unit,
+            user_id
+
         } = req.body;
-        // console.log(req.body);
+
         console.log(req.files);
 
-        // console.log(req.body.documentName);
-        // Generate freight number
-        generateFreightNumber(async (err, freightNumber) => {
-            if (err) throw err;
+        /* ================= STATUS ================= */
 
-            // Insert freight into DB
-            const insertResult = await new Promise((resolve, reject) => {
-                insertQuery = `INSERT INTO tbl_freight (client_id, client_email, date, type, fcl_lcl, freight, incoterm, dimension, weight, 
-            quote_received, client_quoted, is_active, comment, no_of_packages, package_type, commodity, hazardous, 
-             collection_from, delivery_to, supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, 
-            ready_for_collection, transit_time, priority, added_by, freight_number, shipment_details, 
-            nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse, assign_to_clearing, 
-            send_to_warehouse, shipment_origin, shipment_des, product_desc, shipment_ref, insurance, client_ref_name, sales_representative, weight_unit, dimension_unit, user_id ) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?, ?, ?, ?)`;
-                insertParams = [
-                    client_ref, client_email, date, type, fcl_lcl || null, freight, incoterm, dimension, weight, quote_received, client_quoted,
-                    is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
-                    supplier_address, shipper_name, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
-                    transit_time, priority, 1, freightNumber, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
-                    assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, Product_Description, shipment_ref, insurance, client_ref_name, sales_representative, weight_unit || null, dimension_unit || null, user_id || null
-                ];
-                con.query(insertQuery, insertParams, (err, result) => {
-                    if (err) return reject(err);
-                    resolve(result);
-                });
+        let ready_for_collection_status = 'Not Required';
+        let require_for_delivery_status = 'Not Required';
+
+        if (ready_for_collection === 'Yes') {
+            ready_for_collection_status = 'Pending';
+        }
+
+        if (require_for_delivery === 'Yes') {
+            require_for_delivery_status = 'Pending';
+        }
+
+        /* ================= FREIGHT NUMBER ================= */
+
+        const freightNumber = await new Promise((resolve, reject) => {
+
+            generateFreightNumber((err, number) => {
+
+                if (err) return reject(err);
+
+                resolve(number);
+
             });
 
-            // Create main freight folder
-            const freightFolderId = await findOrCreateFolder(freightNumber);
-            const selectQuery = `
-            SELECT tbl_freight.freight_number, tbl_users.full_name, c.name AS collection_from_country, 
-                   co.name AS delivery_to_country
-            FROM tbl_freight
-            LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
-             LEFT JOIN countries AS c ON c.id = tbl_freight.collection_from
-            LEFT JOIN countries AS co ON co.id = tbl_freight.delivery_to
-            WHERE tbl_freight.id = ?
+        });
+
+        /* ================= INSERT QUERY ================= */
+
+        const insertQuery = `
+            INSERT INTO tbl_freight (
+
+                client_id,
+                client_email,
+                date,
+                type,
+                fcl_lcl,
+                freight,
+                incoterm,
+                dimension,
+                weight,
+                quote_received,
+                client_quoted,
+                is_active,
+                comment,
+                no_of_packages,
+                package_type,
+                commodity,
+                hazardous,
+                collection_from,
+                delivery_to,
+                supplier_address,
+                shipper_name,
+                port_of_loading,
+                post_of_discharge,
+                place_of_delivery,
+
+                ready_for_collection,
+                ready_for_collection_status,
+
+                require_for_delivery,
+                require_for_delivery_status,
+
+                transit_time,
+                priority,
+                added_by,
+                freight_number,
+                shipment_details,
+                nature_of_hazard,
+                volumetric_weight,
+                assign_for_estimate,
+                assign_to_transporter,
+                assign_warehouse,
+                assign_to_clearing,
+                send_to_warehouse,
+                shipment_origin,
+                shipment_des,
+                product_desc,
+                shipment_ref,
+                insurance,
+                client_ref_name,
+                sales_representative,
+                weight_unit,
+                dimension_unit,
+                user_id
+
+            )
+
+            VALUES (
+
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?
+
+            )
         `;
-            con.query(selectQuery, [insertResult.insertId], async (err, result) => {
-                if (err || result.length === 0) return console.error("Error fetching client info:", err);
 
-                const Email = client_email;
-                const mailSubject = 'New Shipment Enquiry';
-                //                 const content = `
-                //                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-                //     <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
-                //         New Shipment Enquiry
-                //     </h2>
+        const insertParams = [
 
-                //     <p>Dear <strong>${result[0].full_name}</strong>,</p>
+            client_ref,
+            client_email,
+            date,
+            type,
+            fcl_lcl || null,
+            freight,
+            incoterm,
+            dimension,
+            weight,
+            quote_received,
+            client_quoted,
+            is_active,
+            comment,
+            no_of_packages,
+            package_type,
+            commodity,
+            hazardous,
+            country_of_origin,
+            destination_country,
+            supplier_address,
+            shipper_name,
+            port_of_loading,
+            post_of_discharge,
+            place_of_delivery,
 
-                //     <p>
-                //         We’re excited to let you know that a new shipment enquiry has been created under your profile.
-                //     </p>
+            ready_for_collection,
+            ready_for_collection_status,
 
-                //     <p><strong>Shipment Details:</strong></p>
+            require_for_delivery,
+            require_for_delivery_status,
 
-                //     <p>
-                //         Freight Number: <strong>${result[0].freight_number}</strong><br>
-                //         Product Description: <strong>${Product_Description}</strong><br>
-                //         Freight: <strong>${freight}</strong><br>
-                //         Type: <strong>${type}</strong><br>
-                //         Origin: <strong>${result[0].collection_from_country}</strong><br>
-                //         Port of Loading: <strong>${port_of_loading}</strong><br>
-                //         Port of Discharge: <strong>${post_of_discharge}</strong><br>
-                //         Final Destination: <strong>${result[0].delivery_to_country}</strong>
-                //     </p>
+            transit_time,
+            priority,
+            1,
+            freightNumber,
+            shipment_details,
+            nature_of_hazard,
+            volumetric_weight,
+            assign_for_estimate,
+            assign_to_transporter,
+            assign_warehouse,
+            assign_to_clearing,
+            send_to_warehouse,
+            shipment_origin,
+            shipment_des,
+            Product_Description,
+            shipment_ref,
+            insurance,
+            client_ref_name,
+            sales_representative,
+            weight_unit || null,
+            dimension_unit || null,
+            user_id || null
 
-                //     <p>
-                //         Our sales team will reach out to you shortly with further details.  
-                //         In the meantime, feel free to contact us if you have any questions or log in at  
-                //         <a href="https://www.ship.asiadirect.africa" target="_blank">www.ship.asiadirect.africa</a>.
-                //     </p>
+        ];
 
-                //     <p>
-                //         Regards,<br>
-                //         <strong>Management System</strong>
-                //     </p>
-                // </div>
+        console.log("TOTAL PARAMS:", insertParams.length);
 
-                //             `;
+        /* ================= INSERT ================= */
 
-                const content = `
-                <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 20px auto; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 25px; color: #333; font-size: 15px; line-height: 1.5;">
+        const insertResult = await new Promise((resolve, reject) => {
 
-  <!-- Logo -->
-  <div style="text-align: center; margin-bottom: 20px;">
-    <img src="http://ship.asiadirect.africa/Admin/static/media/logotransparent.40e77f3a4e8fb45b5543.png" alt="Asia Direct" style="height: 80px;">
-  </div>
+            con.query(insertQuery, insertParams, (err, result) => {
 
-  <!-- Heading -->
-  <h2 style="border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 0; color: #222;">New Shipment Enquiry</h2>
+                if (err) {
 
-  <!-- Greeting -->
-  <p>Dear <strong>${result[0].full_name || 'Customer'}</strong>,</p>
+                    console.log("INSERT ERROR:", err);
 
-  <!-- Message -->
-  <p>We’re excited to let you know that a new shipment enquiry has been created under your profile.</p>
+                    return reject(err);
 
-  <!-- Shipment Details Table -->
-  <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif;">
-  <tr>
-    <td style="width: 50%; vertical-align: top; padding-right: 15px;">
-      <div style="padding: 3px 5px;"><strong>Freight Number:</strong> ${result[0].freight_number}</div>
-      <div style="padding: 3px 5px;"><strong>Product Description:</strong> ${Product_Description}</div>
-      <div style="padding: 3px 5px;"><strong>Freight:</strong> ${freight}</div>
-      <div style="padding: 3px 5px;"><strong>Type:</strong> ${type}</div>
-    </td>
-    <td style="width: 50%; vertical-align: top; padding-left: 15px;">
-      <div style="padding: 3px 5px;"><strong>Origin:</strong> ${result[0].collection_from_country}</div>
-      <div style="padding: 3px 5px;"><strong>Port of Loading:</strong> ${port_of_loading}</div>
-      <div style="padding: 3px 5px;"><strong>Port of Discharge:</strong> ${post_of_discharge}</div>
-      <div style="padding: 3px 5px;"><strong>Final Destination:</strong> ${result[0].delivery_to_country}</div>
-    </td>
-  </tr>
-</table>
-
-
-  <p>Our sales team will reach out to you shortly with further details. In the meantime, feel free to contact us if you have any further questions or alternatively log in at <a href="https://www.ship.asiadirect.africa" style="color: #1e3a8a; font-weight: bold; text-decoration: underline;">www.ship.asiadirect.africa</a>.</p>
-
-  <p>Best Regards,<br><strong>The Asia Direct Africa Team</strong></p>
-</div> `;
-                /*  <table style="width: 100%; border-collapse: collapse; margin: 20px 0;  font-family: Arial, sans-serif;">
-                    <tr>
-                      <td style="width: 50%; vertical-align: top; padding-right: 15px;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Freight Number:</td><td style="padding: 3px 0px;">${result[0].freight_number}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Product Description:</td><td style="padding: 3px 0px;">${Product_Description}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Freight:</td><td style="padding: 3px 0px;">${freight}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Type:</td><td style="padding: 3px 0px;">${type}</td></tr>
-                        </table>
-                      </td>
-                      <td style="width: 50%; vertical-align: top; padding-left: 15px;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Origin:</td><td style="padding: 3px 0px;">${result[0].collection_from_country}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Port of Loading:</td><td style="padding: 3px 0px;">${port_of_loading}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Port of Discharge:</td><td style="padding: 3px 0px;">${post_of_discharge}</td></tr>
-                          <tr><td style="font-weight: bold; padding: 3px 5px;">Final Destination:</td><td style="padding: 3px 0px;">${result[0].delivery_to_country}</td></tr>
-                        </table>
-                      </td>
-                    </tr>
-                  </table> */
-
-                sendMail(Email, mailSubject, content);
-
-                // Process files dynamically
-                // Example usage inside your Addfreight controller
-                // if (req.files && Object.keys(req.files).length > 0) {
-                //     for (const fieldName of Object.keys(req.files)) {
-                //         const filesArray = req.files[fieldName];
-
-                //         for (const file of filesArray) {
-                //             const documentName = req.body.documentName; // sent from Postman
-                //             console.log(documentName);
-
-                //             await uploadToMatchingFolder(file, documentName, result[0].freight_number);
-
-                //             // Save in DB
-                //             const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
-                //             await new Promise((resolve, reject) => {
-                //                 con.query(docQuery, [insertResult.insertId, 1, documentName, file.filename], (err) => {
-                //                     if (err) return reject(err);
-                //                     resolve();
-                //                 });
-                //             });
-                //         }
-                //     }
-                // }
-                if (req.files && Object.keys(req.files).length > 0) {
-                    for (const fieldName of Object.keys(req.files)) {
-                        const filesArray = req.files[fieldName];
-
-                        for (const file of filesArray) {
-                            // Use fieldName as the document name for folder mapping
-                            await uploadToMatchingFolder(file, fieldName, result[0].freight_number);
-
-                            // Save in DB
-                            const docQuery = `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`;
-                            await new Promise((resolve, reject) => {
-                                con.query(docQuery, [insertResult.insertId, 1, fieldName, file.filename], (err) => {
-                                    if (err) return reject(err);
-                                    resolve();
-                                });
-                            });
-                        }
-                    }
                 }
 
+                resolve(result);
+
             });
-            res.json({ success: true, message: "Freight added successfully", freightNumber });
+
         });
+
+        /* ================= CREATE FOLDER ================= */
+
+        await findOrCreateFolder(freightNumber);
+
+        /* ================= SELECT DATA ================= */
+
+        const selectQuery = `
+            SELECT
+
+                tbl_freight.freight_number,
+                tbl_users.full_name,
+
+                c.name AS collection_from_country,
+                co.name AS delivery_to_country
+
+            FROM tbl_freight
+
+            LEFT JOIN tbl_users
+                ON tbl_users.id = tbl_freight.client_id
+
+            LEFT JOIN countries AS c
+                ON c.id = tbl_freight.collection_from
+
+            LEFT JOIN countries AS co
+                ON co.id = tbl_freight.delivery_to
+
+            WHERE tbl_freight.id = ?
+        `;
+
+        const freightData = await new Promise((resolve, reject) => {
+
+            con.query(
+                selectQuery,
+                [insertResult.insertId],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        /* ================= SEND MAIL ================= */
+
+        if (freightData.length > 0) {
+
+            const Email = client_email;
+
+            const mailSubject = 'New Shipment Enquiry';
+
+            const content = `
+                <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 20px auto; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 25px; color: #333; font-size: 15px; line-height: 1.5;">
+
+                    <h2>New Shipment Enquiry</h2>
+
+                    <p>
+                        Dear <strong>${freightData[0].full_name || 'Customer'}</strong>,
+                    </p>
+
+                    <p>
+                        Freight Number:
+                        <strong>${freightData[0].freight_number}</strong>
+                    </p>
+
+                    <p>
+                        Product Description:
+                        ${Product_Description || ''}
+                    </p>
+
+                </div>
+            `;
+
+            sendMail(Email, mailSubject, content);
+
+        }
+
+        /* ================= FILE UPLOAD ================= */
+
+        if (req.files && Object.keys(req.files).length > 0) {
+
+            for (const fieldName of Object.keys(req.files)) {
+
+                const filesArray = req.files[fieldName];
+
+                for (const file of filesArray) {
+
+                    await uploadToMatchingFolder(
+                        file,
+                        fieldName,
+                        freightNumber
+                    );
+
+                    const docQuery = `
+                        INSERT INTO freight_doc (
+                            freight_id,
+                            uploaded_by,
+                            document_name,
+                            document
+                        )
+                        VALUES (?, ?, ?, ?)
+                    `;
+
+                    await new Promise((resolve, reject) => {
+
+                        con.query(
+                            docQuery,
+                            [
+                                insertResult.insertId,
+                                1,
+                                fieldName,
+                                file.filename
+                            ],
+                            (err) => {
+
+                                if (err) return reject(err);
+
+                                resolve();
+
+                            }
+                        );
+
+                    });
+
+                }
+
+            }
+
+        }
+
+        /* ================= RESPONSE ================= */
+
+        return res.status(200).json({
+
+            success: true,
+            message: "Freight added successfully",
+            freightNumber
+
+        });
+
     } catch (error) {
+
         console.error('AddFreight error:', error);
-        res.status(500).json({ success: false, message: error.message });
+
+        return res.status(500).json({
+
+            success: false,
+            message: error.message
+
+        });
+
     }
+
 };
 
 const getFolderNameFromDocumentName = (documentName) => {
@@ -2559,7 +3302,7 @@ const EditFreight = async (req, res) => {
             id, // Assuming you will pass the ID of the freight to be updated
             client_ref, client_email, date, type, freight, fcl_lcl, incoterm, dimension, weight, quote_received, client_quoted, shipment_ref, insurance,
             is_active, comment, no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country,
-            supplier_address, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection,
+            supplier_address, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, require_for_delivery,
             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
             assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name,
             product_desc, sales_representative, weight_unit, dimension_unit
@@ -2573,13 +3316,86 @@ const EditFreight = async (req, res) => {
             });
         }
 
+        const oldDataQuery = `
+    SELECT
+        ready_for_collection,
+        ready_for_collection_status,
+        require_for_delivery,
+        require_for_delivery_status
+    FROM tbl_freight
+    WHERE id = ?
+`;
+
+        const oldData = await new Promise((resolve, reject) => {
+
+            con.query(oldDataQuery, [id], (err, result) => {
+
+                if (err) return reject(err);
+
+                resolve(result[0]);
+
+            });
+
+        });
+
+        let ready_for_collection_status =
+            oldData.ready_for_collection_status;
+
+        let require_for_delivery_status =
+            oldData.require_for_delivery_status;
+
+
+        /* ================= COLLECTION ================= */
+
+        // changed to YES
+        if (
+            ready_for_collection === 'Yes' &&
+            oldData.ready_for_collection !== 'Yes'
+        ) {
+
+            ready_for_collection_status = 'Pending';
+
+        }
+
+        // changed to NO
+        else if (
+            ready_for_collection === 'No'
+        ) {
+
+            ready_for_collection_status = 'Not Required';
+
+        }
+
+
+        /* ================= DELIVERY ================= */
+
+        // changed to YES
+        if (
+            require_for_delivery === 'Yes' &&
+            oldData.require_for_delivery !== 'Yes'
+        ) {
+
+            require_for_delivery_status = 'Pending';
+
+        }
+
+        // changed to NO
+        else if (
+            require_for_delivery === 'No'
+        ) {
+
+            require_for_delivery_status = 'Not Required';
+
+        }
+
         // Update the database
         const updateQuery = `
             UPDATE tbl_freight SET
                 client_id = ?, client_email=?, date = ?, type = ?, freight = ?, fcl_lcl=?, shipment_ref=?, insurance=?, incoterm = ?, dimension = ?, weight = ?, 
                 quote_received = ?, product_desc=?, client_quoted = ?, is_active = ?, comment = ?, no_of_packages = ?, package_type = ?, 
                 commodity = ?, hazardous = ?, collection_from = ?, delivery_to = ?, supplier_address = ?, 
-                port_of_loading = ?, post_of_discharge = ?, place_of_delivery = ?, ready_for_collection = ?, 
+                port_of_loading = ?, post_of_discharge = ?, place_of_delivery = ?, ready_for_collection = ?, require_for_delivery=?,  ready_for_collection_status = ?,
+require_for_delivery_status = ?,
                 transit_time = ?, priority = ?, shipment_details = ?, nature_of_hazard = ?, volumetric_weight = ?, 
                 assign_for_estimate = ?, assign_to_transporter = ?, assign_warehouse = ?, assign_to_clearing = ?, 
                 send_to_warehouse = ?, shipment_origin = ?, shipment_des = ?, client_ref_name=?, sales_representative=?, weight_unit=?, dimension_unit=?
@@ -2589,7 +3405,8 @@ const EditFreight = async (req, res) => {
         const updateParams = [
             client_ref, client_email, date, type, freight, fcl_lcl || null, shipment_ref, insurance, incoterm, dimension, weight, quote_received, product_desc, client_quoted, is_active, comment,
             no_of_packages, package_type, commodity, hazardous, country_of_origin, destination_country, supplier_address,
-            port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, transit_time, priority, shipment_details,
+            port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, require_for_delivery, ready_for_collection_status,
+            require_for_delivery_status, transit_time, priority, shipment_details,
             nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse,
             assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, sales_representative, weight_unit || null, dimension_unit || null, id
         ];
@@ -3655,6 +4472,676 @@ const CountryListAddFreight = async (req, res) => {
     }
 }
 
+// const addEstimateShippingQuote = async (req, res) => {
+//     try {
+//         const data = req.body;
+//         console.log(req.body);
+//         let selectQuery = "";
+//         let selectParams = [];
+
+//         console.log(data);
+
+
+//         if (data.quote_estimate_id) {
+
+//             // Admin update specific quote
+//             selectQuery = `
+//          SELECT id as quote_estimate_id 
+//          FROM estimate_shipping_quote 
+//          WHERE id = ?
+//          `;
+//             selectParams = [data.quote_estimate_id];
+
+//         } else {
+
+//             // Supplier quote check
+//             selectQuery = `
+//          SELECT id as quote_estimate_id 
+//          FROM estimate_shipping_quote 
+//          WHERE freight_id = ? AND supplier_id = ?
+//            `;
+//             selectParams = [data.freight_id, data.supplier_id];
+
+//         }
+
+//         // if (data.quote_estimate_id) {
+//         //     selectQuery += `id = ?`;
+//         //     selectParams.push(data.quote_estimate_id);
+//         // } else {
+//         //     // selectQuery += `freight_id = ? AND client_id = ?`;
+//         //     // selectParams.push(data.freight_id, data.client_id);
+//         //     selectQuery += `1 = 0`;
+//         // }
+
+//         con.query(selectQuery, selectParams, (err, result) => {
+//             if (err) {
+//                 return res.status(500).send({
+//                     success: false,
+//                     message: err.message
+//                 });
+//             }
+
+//             if (result.length > 0) {
+
+//                 const updateQuery = `
+//                     UPDATE estimate_shipping_quote SET
+//                         supplier_id=?,
+//                         client_name=?, serial_number=?, date=?, client_ref=?, product_desc=?,
+//                         type=?, freight=?, incoterm=?, dimension=?, weight=?,
+
+//                         origin_pick_up_cost=?, origin_pick_up_fees=?, origin_pickup_fee_gpcalc=?,
+//                         oripick4=?, finalori1=?, roe_origin_currencyorigin=?, finalvlaueoriginPickup=?,
+
+//                         origin_pick_up_fuel_cost=?, origin_pick_up_fuel_fees=?, origin_pick_fuelGP=?,
+//                         orifuel4=?, finalfuel1=?, roe_origin_fuel_currency=?, finalvlaueoFuel=?,
+
+//                         origin_pick_up_cfs_cost=?, origin_pick_up_cfs_fees=?, origin_pickup_vfs_gp=?,
+//                         oricfs4=?, finalcfs1=?, roe_origin_cfs_currency=?, finalvlaueocfs=?,
+
+//                         origin_pick_up_documantion_cost=?, origin_pick_up_documantation_fees=?,
+//                         origin_pick_documantation_cost_gp=?, oridoc4=?, finaldoc1=?,
+//                         roe_origin_doc_currency=?, finalvlaueodoc=?,
+
+//                         origin_pick_up_forewarding_cost=?, origin_pick_up_forewarding_fees=?,
+//                         origin_pickup_forewarding_gp=?, oriforewarding4=?, roe_origin_forewarding=?,
+//                         finalforewarding1=?, finalvlaueoforewarding=?,
+
+//                         origin_pick_up_custome_cost=?, origin_pick_up_custome_clearance=?,
+//                         origin_pickup_custome_gp=?, oricustome4=?, roe_origin_customes=?,
+//                         finalcustomes1=?, finalvlaueoCustomes=?,
+
+//                         totalChageswithOutExchange=?, totalChangeRoeOrigin=?,
+
+//                         freight_charge_currency_cost=?, freight_charge_currency_fees=?,
+//                         freight_charge_currency_gp=?, orifreight4=?,
+//                         finalValuefreight=?, finalfreight1=?, finalvlaueofreight=?,
+
+//                         freight_currency_insurance_cost=?, freightorigin_insurance_gp=?,
+//                         freight_currency_insurance_unit=?, oriinsurance4=?,
+//                         roe_insurance_currency=?, finalinsurance1=?, finalvlaueoInsurance=?,
+
+//                         totalChageswithOutExchangeinsurance=?,
+//                         totalChangeRoeOriginaftercalcuinsurance=?,
+
+//                         Transit_currency_Cost=?, Transit_currency_gp=?, Transit_currency_unit=?,
+//                         finaltransit1=?, oritransit4=?, Transit_currency_roe=?,
+//                         finalvlaueotransit=?,
+
+//                         transit_currency_THC_cost=?, transit_currency_THC_init=?,
+//                         transit_currency_THC_gp=?, oriThc4=?, finalThc1=?,
+//                         finalvlaueotfineal=?, roe_Transit_Thc=?,
+
+//                         Transit_currency_unpack_cost=?, Transit_currency_unpack_unit=?,
+//                         Transit_currency_unpack_gp=?, finalunpack1=?, oriunpack4=?,
+//                         finalvlaueotfunpack=?, Transit_unpack_roe=?,
+
+//                         totalChaDestinationTransit=?, totalChaDestinationTransitRoe=?,
+//                         sumofall=?, sumofRoe=?,
+//                         transit_3rd_party_cost=?,
+//                         transit_3rd_party_unit=?,
+//                         transit_3rd_party_gp=?,
+//                         ori3rdparty4=?,
+//                         final3rdparty1=?,
+//                         finalvlaueot3dparty=?,
+//                         transit_currency_3rd=?,
+
+//                         transit_admin_change=?,
+//                         transit_admin_unit=?,
+//                         transit_admin_gp=?,
+//                         ori3rdAdmin4=?,
+//                         final3rdAdmin1=?,
+//                         finalvlaueotAdmin=?,
+//                         roe_transit_admin=?,
+
+//                         transit_currency_port=?,
+//                         transit_currency_port_unit=?,
+//                         transit_currency_port_gp=?,
+//                         ori3rdport4=?,
+//                         final3rdport1=?,
+//                         finalvlaueotPort=?,
+//                         roe_trans_port=?,
+
+//                         Transit_advanced_load=?,
+//                         Transit_advanced_unit=?,
+//                         Transit_advanced_gp=?,
+//                         oriadv4=?,
+//                         final3rdadv1=?,
+//                         finalvlaueotadv=?,
+//                         Transit_advanced_gp_roe=?,
+
+//                         transit_change_Documentation=?,
+//                         transit_change_Documentation_unit=?,
+//                         oridocumentation4=?,
+//                         transit_change_Documentation_gp=?,
+//                         final3rdocumantation1=?,
+//                         finalvlaueotDocumantation=?,
+//                         roe_transit_change_Documentation=?,
+
+//                         totalChageswithOuTransit=?,
+//                         transitRoe=?,
+
+//                         Destination_freight_currency_cost=?,
+//                         Destination_freight_currency_unit=?,
+//                         Destination_freight_currency_gp=?,
+//                         destinationdocumentation4=?,
+//                         final3rdestinationRoe=?,
+//                         final3rdestination1=?,
+//                         Destination_freight_currency_Roe=?,
+
+//                         Destination_THC_currency_cost=?,
+//                         Destination_THC_currency_unit=?,
+//                         Destination_THC_currency_gp=?,
+//                         destinationTHCdocumentation4=?,
+//                         final3rTHCdestination1=?,
+//                         final3rTHCdestinationRoe=?,
+//                         Destination_THC_currency_Roe=?,
+
+//                         Destination_Unpack_currency_cost=?,
+//                         Destination_Unpack_currency_unit=?,
+//                         Destination_Unpack_currency_gp=?,
+//                         destinationUnpackdocumentation4=?,
+//                         Destination_Unpack_currency_roe=?,
+//                         final3rUnpackdestinationRoe=?,
+//                         final3runpackdestination1=?,
+
+//                         totaAdminransit=?,
+//                         totalAdminnsitRoe=?,
+
+//                         Destination_fuelsurcharge_currency_cost = ?,
+//                         Destination_fuelsurcharge_currency_unit = ?,
+//                         Destination_fuelsurcharge_currency_gp = ?,
+//                         destinationfuelsurchargedocumentation4 = ?,
+//                         final3rfuelsurchargedestination1 = ?,
+//                         final3rfuelsurCahrgeestinationRoe = ?,
+//                         Destination_fuelsurcharge_currency_roe = ?,
+
+//                         Destination_adminsurcharge_currency_cost = ?,
+//                         Destination_adminsurcharge_currency_unit = ?,
+//                         Destination_adminsurcharge_currency_gp = ?,
+//                         destinatiadminsurcharge4 = ?,
+//                         Valueadminsurchargedestanion = ?,
+//                         adminsurcharge2 = ?,
+//                         Destination_adminsurcharge_currency_roe = ?,
+
+//                         Destination_portcargo_currency_cost = ?,
+//                         Destination_portcargo_currency_unit = ?,
+//                         Destination_portcargo_currency_gp = ?,
+//                         destinatiportcargo4 = ?,
+//                         Vaportcargoion = ?,
+//                         admiportcargo2 = ?,
+//                         Destination_portcargo_currency_roe = ?,
+
+//                         Destination_AdvancedLoad_currency_cost = ?,
+//                         Destination_AdvancedLoad_currency_unit = ?,
+//                         Destination_AdvancedLoad_currency_gp = ?,
+//                         destinatiAdvancedLoad4 = ?,
+//                         VAdvancedLoadion = ?,
+//                         desdvancedLoadion = ?,
+//                         Destination_AdvancedLoad_currency_roe = ?,
+
+//                         Destination_3rdpartyDesc_currency_cost = ?,
+//                         Destination_3rdpartyDesc_currency_unit = ?,
+//                         Destination_3rdpartyDesc_currency_gp = ?,
+//                         destinati3rdpartyload4 = ?,
+//                         VAdvanced3rdpartyLoadion = ?,
+//                         desdva3rdpartyion = ?,
+//                         Destination_3rdpartyDesc_currency_roe = ?,
+
+//                         Destination_delivery_currency_cost = ?,
+//                         Destination_delivery_currency_unit = ?,
+//                         Destination_delivery_currency_gp = ?,
+//                         destindeliveryyDesc4 = ?,
+//                         VAdvandeliverytyLoadion = ?,
+//                         desddeliverytyion = ?,
+//                         Destination_delivery_currency_roe = ?,
+
+//                         Destination_fuelcharge_currency_cost = ?,
+//                         Destination_fuelcharge_currency_unit = ?,
+//                         Destination_fuelcharge_currency_gp = ?,
+//                         destindfuelchangerDesc4 = ?,
+//                         VAdvfuelchangeon = ?,
+//                         defuelchangyion = ?,
+//                         Destination_fuelcharge_currency_roe = ?,
+
+//                         Destination_AdminAgrncy_currency_cost = ?,
+//                         Destination_AdminAgrncy_currency_unit = ?,
+//                         Destination_AdminAgrncy_currency_gp = ?,
+//                         deadminAgencyesc4 = ?,
+//                         VAadminAgencyngeon = ?,
+//                         defuelchdminAgencyngangyion = ?,
+//                         Destination_AdminAgrncy_currency_roe = ?,
+
+//                         Destination_disbursemant_currency_cost = ?,
+//                         Destination_disbursemant_currency_unit = ?,
+//                         Destination_disbursemant_currency_gp = ?,
+//                         deaddisbursemantc4 = ?,
+//                         VAdisbursemon = ?,
+//                         dedisbursementon = ?,
+//                         Destination_disbursemant_currency_roe = ?,
+
+//                         Destination_doc_currency_cost = ?,
+//                         Destination_doc_currency_unit = ?,
+//                         Destination_doc_currency_gp = ?,
+//                         deadoctc4 = ?,
+//                         VAdocon = ?,
+//                         dedisbudoon = ?,
+//                         Destination_doc_currency_roe = ?,
+//                         roe_freight_currency = ?,
+
+//                         freight_charge_currency = ?,
+//                         freight_charge_currency_unitType = ?,
+//                         freight_currency_insurance_unittype = ?,
+
+//                         origin_pick_up_unitType = ?,
+//                         origin_pick_up_fuel_unitType = ?,
+//                         origin_pick_up_cfs_unitType = ?,
+//                         origin_pick_up_documantation_unitType = ?,
+//                         origin_pick_up_forewarding_unitType = ?,
+//                         origin_pick_up_custome_unitType = ?,
+
+//                         Transit_currency_unitTpe = ?,
+//                         transit_currency_THC_initType = ?,
+//                         Transit_currency_unpack_unitType = ?,
+//                         transit_3rd_party_unittype = ?,
+//                         transit_admin_unittype = ?,
+//                         transit_currency_port_unitType = ?,
+//                         Transit_advanced_unitType = ?,
+//                         transit_change_Documentation_unitType = ?,
+
+//                         Destination_freight_currency_unitType = ?,
+//                         Destination_THC_currency_unitType = ?,
+//                         Destination_Unpack_currency_unitType = ?,
+//                         Destination_fuelsurcharge_currency_typeUnit = ?,
+//                         Destination_adminsurcharge_currency_unitType = ?,
+//                         Destination_portcargo_currency_unitType = ?,
+//                         Destination_AdvancedLoad_currency_unitType = ?,
+//                         Destination_3rdpartyDesc_currency_unitType = ?,
+//                         Destination_delivery_currency_unitType = ?,
+//                         Destination_fuelcharge_currency_unitType = ?,
+
+//                         Destination_AdminAgrncy_currency_unitType = ?,
+//                         Destination_disbursemant_currency_unitType = ?,
+//                         Destination_doc_currency_unittype = ?,
+
+//                         freight_charge_currencyQTY = ?,
+//                         origin_pick_up_fuel_unitTypeQTY = ?,
+//                         origin_pick_up_cfs_unitTypeQTY = ?,
+//                         origin_pick_up_forewarding_unitTypeQTY = ?,
+//                         origin_pick_up_documantation_unitTypeQTY = ?,
+//                         origin_pick_up_custome_unitTypeQTY = ?,
+//                         chargable_rate = ?,
+//                         freight_charge_currency_unitTypeQTY = ?,
+//                         freight_currency_insurance_unittypeQTY = ?,
+
+//                         Transit_currency_unitTpeQTY = ?,
+//                         transit_currency_THC_initTypeQTY = ?,
+//                         transit_currency_THC_initTypeeQTY = ?,
+//                         transit_3rd_party_unittypeQTY = ?,
+//                         transit_admin_unittypeQTY = ?,
+//                         transit_currency_port_unitTypeQTY = ?,
+//                         Transit_advanced_unitTypeQTY = ?,
+//                         transit_change_Documentation_unitTypeQTY = ?,
+
+//                         Destination_freight_currency_unitTypeQTY = ?,
+//                         Destination_THC_currency_unitTypeQTY = ?,
+//                         Destination_Unpack_currency_unitTypeQTY = ?,
+//                         Destination_fuelsurcharge_currency_typeUnitQTY = ?,
+//                         Destination_adminsurcharge_currency_unitTypeQTY = ?,
+//                         Destination_portcargo_currency_unitTypeQTY = ?,
+//                         Destination_AdvancedLoad_currency_unitTypeQTY = ?,
+//                         Destination_3rdpartyDesc_currency_unitTypeQTY = ?,
+//                         Destination_delivery_currency_unitTypeQTY = ?,
+//                         Destination_fuelcharge_currency_unitTypeQTY = ?,
+//                         Destination_AdminAgrncy_currency_unitQTY = ?,
+//                         Destination_disbursemant_currency_unitTypeQTY = ?,
+//                         Destination_doc_currency_unittypeQTY = ?,
+//                         pickup_freight_currency =?,
+//                         Transit_currency=?,
+//                         Destination_freight_currency=?,
+//                         admin_currency_charge=?,
+//                         Destination_disbursemant_currenc_unitType1=?
+//                     WHERE id=?
+//                 `;
+
+//                 const updateParams = [
+//                     data.supplier_id,
+
+//                     data.client_name, data.serial_number, data.date, data.client_ref, data.product_desc,
+//                     data.type, data.freight, data.incoterm, data.dimension, data.weight,
+
+//                     data.origin_pick_up_cost, data.origin_pick_up_fees, data.origin_pickup_fee_gpcalc,
+//                     data.oripick4, data.finalori1, data.roe_origin_currencyorigin, data.finalvlaueoriginPickup,
+
+//                     data.origin_pick_up_fuel_cost, data.origin_pick_up_fuel_fees, data.origin_pick_fuelGP,
+//                     data.orifuel4, data.finalfuel1, data.roe_origin_fuel_currency, data.finalvlaueoFuel,
+
+//                     data.origin_pick_up_cfs_cost, data.origin_pick_up_cfs_fees, data.origin_pickup_vfs_gp,
+//                     data.oricfs4, data.finalcfs1, data.roe_origin_cfs_currency, data.finalvlaueocfs,
+
+//                     data.origin_pick_up_documantion_cost, data.origin_pick_up_documantation_fees,
+//                     data.origin_pick_documantation_cost_gp, data.oridoc4, data.finaldoc1,
+//                     data.roe_origin_doc_currency, data.finalvlaueodoc,
+
+//                     data.origin_pick_up_forewarding_cost, data.origin_pick_up_forewarding_fees,
+//                     data.origin_pickup_forewarding_gp, data.oriforewarding4, data.roe_origin_forewarding,
+//                     data.finalforewarding1, data.finalvlaueoforewarding,
+
+//                     data.origin_pick_up_custome_cost, data.origin_pick_up_custome_clearance,
+//                     data.origin_pickup_custome_gp, data.oricustome4, data.roe_origin_customes,
+//                     data.finalcustomes1, data.finalvlaueoCustomes,
+
+//                     data.totalChageswithOutExchange, data.totalChangeRoeOrigin,
+
+//                     data.freight_charge_currency_cost, data.freight_charge_currency_fees,
+//                     data.freight_charge_currency_gp, data.orifreight4,
+//                     data.finalValuefreight, data.finalfreight1, data.finalvlaueofreight,
+
+//                     data.freight_currency_insurance_cost, data.freightorigin_insurance_gp,
+//                     data.freight_currency_insurance_unit, data.oriinsurance4,
+//                     data.roe_insurance_currency, data.finalinsurance1, data.finalvlaueoInsurance,
+
+//                     data.totalChageswithOutExchangeinsurance,
+//                     data.totalChangeRoeOriginaftercalcuinsurance,
+
+//                     data.Transit_currency_Cost, data.Transit_currency_gp, data.Transit_currency_unit,
+//                     data.finaltransit1, data.oritransit4, data.Transit_currency_roe,
+//                     data.finalvlaueotransit,
+
+//                     data.transit_currency_THC_cost, data.transit_currency_THC_init,
+//                     data.transit_currency_THC_gp, data.oriThc4, data.finalThc1,
+//                     data.finalvlaueotfineal, data.roe_Transit_Thc,
+
+//                     data.Transit_currency_unpack_cost, data.Transit_currency_unpack_unit,
+//                     data.Transit_currency_unpack_gp, data.finalunpack1, data.oriunpack4,
+//                     data.finalvlaueotfunpack, data.Transit_unpack_roe,
+
+//                     data.totalChaDestinationTransit, data.totalChaDestinationTransitRoe,
+//                     data.sumofall, data.sumofRoe,
+
+//                     data.transit_3rd_party_cost,
+//                     data.transit_3rd_party_unit,
+//                     data.transit_3rd_party_gp,
+//                     data.ori3rdparty4,
+//                     data.final3rdparty1,
+//                     data.finalvlaueot3dparty,
+//                     data.transit_currency_3rd,
+
+//                     data.transit_admin_change,
+//                     data.transit_admin_unit,
+//                     data.transit_admin_gp,
+//                     data.ori3rdAdmin4,
+//                     data.final3rdAdmin1,
+//                     data.finalvlaueotAdmin,
+//                     data.roe_transit_admin,
+
+//                     data.transit_currency_port,
+//                     data.transit_currency_port_unit,
+//                     data.transit_currency_port_gp,
+//                     data.ori3rdport4,
+//                     data.final3rdport1,
+//                     data.finalvlaueotPort,
+//                     data.roe_trans_port,
+
+//                     data.Transit_advanced_load,
+//                     data.Transit_advanced_unit,
+//                     data.Transit_advanced_gp,
+//                     data.oriadv4,
+//                     data.final3rdadv1,
+//                     data.finalvlaueotadv,
+//                     data.Transit_advanced_gp_roe,
+
+//                     data.transit_change_Documentation,
+//                     data.transit_change_Documentation_unit,
+//                     data.oridocumentation4,
+//                     data.transit_change_Documentation_gp,
+//                     data.final3rdocumantation1,
+//                     data.finalvlaueotDocumantation,
+//                     data.roe_transit_change_Documentation,
+
+//                     data.totalChageswithOuTransit,
+//                     data.transitRoe,
+
+//                     data.Destination_freight_currency_cost,
+//                     data.Destination_freight_currency_unit,
+//                     data.Destination_freight_currency_gp,
+//                     data.destinationdocumentation4,
+//                     data.final3rdestinationRoe,
+//                     data.final3rdestination1,
+//                     data.Destination_freight_currency_Roe,
+
+//                     data.Destination_THC_currency_cost,
+//                     data.Destination_THC_currency_unit,
+//                     data.Destination_THC_currency_gp,
+//                     data.destinationTHCdocumentation4,
+//                     data.final3rTHCdestination1,
+//                     data.final3rTHCdestinationRoe,
+//                     data.Destination_THC_currency_Roe,
+
+//                     data.Destination_Unpack_currency_cost,
+//                     data.Destination_Unpack_currency_unit,
+//                     data.Destination_Unpack_currency_gp,
+//                     data.destinationUnpackdocumentation4,
+//                     data.Destination_Unpack_currency_roe,
+//                     data.final3rUnpackdestinationRoe,
+//                     data.final3runpackdestination1,
+
+//                     data.totaAdminransit,
+//                     data.totalAdminnsitRoe,
+
+//                     data.Destination_fuelsurcharge_currency_cost,
+//                     data.Destination_fuelsurcharge_currency_unit,
+//                     data.Destination_fuelsurcharge_currency_gp,
+//                     data.destinationfuelsurchargedocumentation4,
+//                     data.final3rfuelsurchargedestination1,
+//                     data.final3rfuelsurCahrgeestinationRoe,
+//                     data.Destination_fuelsurcharge_currency_roe,
+
+//                     data.Destination_adminsurcharge_currency_cost,
+//                     data.Destination_adminsurcharge_currency_unit,
+//                     data.Destination_adminsurcharge_currency_gp,
+//                     data.destinatiadminsurcharge4,
+//                     data.Valueadminsurchargedestanion,
+//                     data.adminsurcharge2,
+//                     data.Destination_adminsurcharge_currency_roe,
+
+//                     data.Destination_portcargo_currency_cost,
+//                     data.Destination_portcargo_currency_unit,
+//                     data.Destination_portcargo_currency_gp,
+//                     data.destinatiportcargo4,
+//                     data.Vaportcargoion,
+//                     data.admiportcargo2,
+//                     data.Destination_portcargo_currency_roe,
+
+//                     data.Destination_AdvancedLoad_currency_cost,
+//                     data.Destination_AdvancedLoad_currency_unit,
+//                     data.Destination_AdvancedLoad_currency_gp,
+//                     data.destinatiAdvancedLoad4,
+//                     data.VAdvancedLoadion,
+//                     data.desdvancedLoadion,
+//                     data.Destination_AdvancedLoad_currency_roe,
+
+//                     data.Destination_3rdpartyDesc_currency_cost,
+//                     data.Destination_3rdpartyDesc_currency_unit,
+//                     data.Destination_3rdpartyDesc_currency_gp,
+//                     data.destinati3rdpartyload4,
+//                     data.VAdvanced3rdpartyLoadion,
+//                     data.desdva3rdpartyion,
+//                     data.Destination_3rdpartyDesc_currency_roe,
+
+//                     data.Destination_delivery_currency_cost,
+//                     data.Destination_delivery_currency_unit,
+//                     data.Destination_delivery_currency_gp,
+//                     data.destindeliveryyDesc4,
+//                     data.VAdvandeliverytyLoadion,
+//                     data.desddeliverytyion,
+//                     data.Destination_delivery_currency_roe,
+
+//                     data.Destination_fuelcharge_currency_cost,
+//                     data.Destination_fuelcharge_currency_unit,
+//                     data.Destination_fuelcharge_currency_gp,
+//                     data.destindfuelchangerDesc4,
+//                     data.VAdvfuelchangeon,
+//                     data.defuelchangyion,
+//                     data.Destination_fuelcharge_currency_roe,
+
+//                     data.Destination_AdminAgrncy_currency_cost,
+//                     data.Destination_AdminAgrncy_currency_unit,
+//                     data.Destination_AdminAgrncy_currency_gp,
+//                     data.deadminAgencyesc4,
+//                     data.VAadminAgencyngeon,
+//                     data.defuelchdminAgencyngangyion,
+//                     data.Destination_AdminAgrncy_currency_roe,
+
+//                     data.Destination_disbursemant_currency_cost,
+//                     data.Destination_disbursemant_currency_unit,
+//                     data.Destination_disbursemant_currency_gp,
+//                     data.deaddisbursemantc4,
+//                     data.VAdisbursemon,
+//                     data.dedisbursementon,
+//                     data.Destination_disbursemant_currency_roe,
+
+//                     data.Destination_doc_currency_cost,
+//                     data.Destination_doc_currency_unit,
+//                     data.Destination_doc_currency_gp,
+//                     data.deadoctc4,
+//                     data.VAdocon,
+//                     data.dedisbudoon,
+//                     data.Destination_doc_currency_roe,
+//                     data.roe_freight_currency,
+
+//                     data.freight_charge_currency,
+//                     data.freight_charge_currency_unitType,
+//                     data.freight_currency_insurance_unittype,
+
+//                     data.origin_pick_up_unitType,
+//                     data.origin_pick_up_fuel_unitType,
+//                     data.origin_pick_up_cfs_unitType,
+//                     data.origin_pick_up_documantation_unitType,
+//                     data.origin_pick_up_forewarding_unitType,
+//                     data.origin_pick_up_custome_unitType,
+
+//                     data.Transit_currency_unitTpe,
+//                     data.transit_currency_THC_initType,
+//                     data.Transit_currency_unpack_unitType,
+//                     data.transit_3rd_party_unittype,
+//                     data.transit_admin_unittype,
+//                     data.transit_currency_port_unitType,
+//                     data.Transit_advanced_unitType,
+//                     data.transit_change_Documentation_unitType,
+
+//                     data.Destination_freight_currency_unitType,
+//                     data.Destination_THC_currency_unitType,
+//                     data.Destination_Unpack_currency_unitType,
+//                     data.Destination_fuelsurcharge_currency_typeUnit,
+//                     data.Destination_adminsurcharge_currency_unitType,
+//                     data.Destination_portcargo_currency_unitType,
+//                     data.Destination_AdvancedLoad_currency_unitType,
+//                     data.Destination_3rdpartyDesc_currency_unitType,
+//                     data.Destination_delivery_currency_unitType,
+//                     data.Destination_fuelcharge_currency_unitType,
+
+//                     data.Destination_AdminAgrncy_currency_unitType,
+//                     data.Destination_disbursemant_currency_unitType,
+//                     data.Destination_doc_currency_unittype,
+
+//                     data.freight_charge_currencyQTY,
+//                     data.origin_pick_up_fuel_unitTypeQTY,
+//                     data.origin_pick_up_cfs_unitTypeQTY,
+//                     data.origin_pick_up_forewarding_unitTypeQTY,
+//                     data.origin_pick_up_documantation_unitTypeQTY,
+//                     data.origin_pick_up_custome_unitTypeQTY,
+//                     data.chargable_rate,
+//                     data.freight_charge_currency_unitTypeQTY,
+//                     data.freight_currency_insurance_unittypeQTY,
+
+//                     data.Transit_currency_unitTpeQTY,
+//                     data.transit_currency_THC_initTypeQTY,
+//                     data.transit_currency_THC_initTypeeQTY,
+//                     data.transit_3rd_party_unittypeQTY,
+//                     data.transit_admin_unittypeQTY,
+//                     data.transit_currency_port_unitTypeQTY,
+//                     data.Transit_advanced_unitTypeQTY,
+//                     data.transit_change_Documentation_unitTypeQTY,
+
+//                     data.Destination_freight_currency_unitTypeQTY,
+//                     data.Destination_THC_currency_unitTypeQTY,
+//                     data.Destination_Unpack_currency_unitTypeQTY,
+//                     data.Destination_fuelsurcharge_currency_typeUnitQTY,
+//                     data.Destination_adminsurcharge_currency_unitTypeQTY,
+//                     data.Destination_portcargo_currency_unitTypeQTY,
+//                     data.Destination_AdvancedLoad_currency_unitTypeQTY,
+//                     data.Destination_3rdpartyDesc_currency_unitTypeQTY,
+//                     data.Destination_delivery_currency_unitTypeQTY,
+//                     data.Destination_fuelcharge_currency_unitTypeQTY,
+//                     data.Destination_AdminAgrncy_currency_unitQTY,
+//                     data.Destination_disbursemant_currency_unitTypeQTY,
+//                     data.Destination_doc_currency_unittypeQTY,
+//                     data.pickup_freight_currency,
+//                     data.Transit_currency,
+//                     data.Destination_freight_currency,
+//                     data.admin_currency_charge,
+//                     data.Destination_disbursemant_currenc_unitType1,
+//                     result[0].quote_estimate_id
+//                 ];
+
+//                 con.query(updateQuery, updateParams, (err, updateData) => {
+//                     if (err) {
+//                         return res.status(500).send({
+//                             success: false,
+//                             message: err.message
+//                         });
+//                     }
+//                     if (data.user_type == "1" || data.user_type == "2") {
+//                         con.query(
+//                             `UPDATE tbl_freight SET status=?, shipping_estimate_id=?, estimate_date=NOW() WHERE id=?`,
+//                             [4, result[0].quote_estimate_id, data.freight_id]
+//                         );
+//                     }
+
+//                     return res.status(200).send({
+//                         success: true,
+//                         message: "Estimate shipping quote updated successfully"
+//                     });
+//                 });
+
+//             }
+//             /* ================= INSERT ================= */
+//             else {
+
+//                 const insertQuery = `INSERT INTO estimate_shipping_quote SET ?`;
+
+//                 con.query(insertQuery, data, (err, insertData) => {
+//                     if (err) {
+//                         return res.status(500).send({
+//                             success: false,
+//                             message: err.message
+//                         });
+//                     }
+
+//                     if (data.user_type == "1" || data.user_type == "2") {
+//                         con.query(
+//                             `UPDATE tbl_freight SET status=?, shipping_estimate_id=?, estimate_date=NOW() WHERE id=?`,
+//                             [4, insertData.insertId, data.freight_id]
+//                         );
+//                     }
+
+//                     return res.status(200).send({
+//                         success: true,
+//                         message: "Estimate shipping quote added successfully",
+//                         ID: insertData.insertId
+//                     });
+//                 });
+//             }
+//         });
+
+//     } catch (error) {
+//         return res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
 const addEstimateShippingQuote = async (req, res) => {
     try {
         const data = req.body;
@@ -3664,37 +5151,100 @@ const addEstimateShippingQuote = async (req, res) => {
 
         console.log(data);
 
+        // All new fields to add (spread into queries below)
+        const NEW_FIELDS = [
+            // cust_vat
+            "cust_vat_qty", "cust_vat_curr", "cust_vat_cost", "cust_vat_unitTyp", "cust_vat_unit", "cust_vat_TCost",
+            "cust_vat_roe", "cust_vat_finalAmt", "cust_vat_vatTyp", "cust_vat_disc%", "cust_vat_disc", "cust_vat_vatIncl",
+            // cust_duty
+            "cust_duty_qty", "cust_duty_curr", "cust_duty_cost", "cust_duty_unitTyp", "cust_duty_unit", "cust_duty_TCost",
+            "cust_duty_roe", "cust_duty_finalAmt", "cust_duty_vatTyp", "cust_duty_disc%", "cust_duty_disc", "cust_duty_vatIncl",
+            // surcharge
+            "surcharge_qty", "surcharge_curr", "surcharge_cost", "surcharge_unitTyp", "surcharge_unit", "surcharge_TCost",
+            "surcharge_roe", "surcharge_finalAmt", "surcharge_vatTyp", "surcharge_disc%", "surcharge_disc", "surcharge_vatIncl",
+            // disbursement
+            "disbursement_qty", "disbursement_curr", "disbursement_cost", "disbursement_unitTyp", "disbursement_unit",
+            "disbursement_TCost", "disbursement_roe", "disbursement_finalAmt", "disbursement_vatTyp", "disbursement_disc%",
+            "disbursement_disc", "disbursement_vatIncl",
+            // clearing_fee
+            "clearing_fee_qty", "clearing_fee_curr", "clearing_fee_cost", "clearing_fee_unitTyp", "clearing_fee_unit",
+            "clearing_fee_TCost", "clearing_fee_roe", "clearing_fee_finalAmt", "clearing_fee_vatTyp", "clearing_fee_disc%",
+            "clearing_fee_disc", "clearing_fee_vatIncl",
+            // custProv_pay
+            "custProv_pay_qty", "custProv_pay_curr", "custProv_pay_cost", "custProv_pay_unitTyp", "custProv_pay_unit",
+            "custProv_pay_TCost", "custProv_pay_roe", "custProv_pay_finalAmt", "custProv_pay_vatTyp", "custProv_pay_disc%",
+            "custProv_pay_disc", "custProv_pay_vatIncl",
+            // cust_penalty
+            "cust_penalty_qty", "cust_penalty_curr", "cust_penalty_cost", "cust_penalty_unitTyp", "cust_penalty_unit",
+            "cust_penalty_TCost", "cust_penalty_roe", "cust_penalty_finalAmt", "cust_penalty_vatTyp", "cust_penalty_disc%",
+            "cust_penalty_disc", "cust_penalty_vatIncl",
+            // adv_duty
+            "adv_duty_qty", "adv_duty_curr", "adv_duty_cost", "adv_duty_unitTyp", "adv_duty_unit", "adv_duty_TCost", "adv_duty_roe", "adv_duty_finalAmt",
+            // VAT Type, disc%, disc, vatIncl fields for all relevant categories
+            "trans_unpack_charg_vatTyp", "trans_THC_levy_vatTyp", "trans_clear_fees_vatTyp", "insurance_vatTyp",
+            "ocenfreight_charge_vatTyp", "org_clearance_vatTyp", "org_forwFee_vatTyp", "org_docFee_vatTyp",
+            "origin_cfs_vatTyp", "origin_fuelSur_vatTyp", "org_pickUp_vatTyp", "adv_duty_vatTyp",
+            "trans_unpack_charg_disc%", "trans_THC_levy_disc%", "trans_clear_fees_disc%", "insurance_disc%",
+            "ocenfreight_charge_disc%", "org_clearance_disc%", "org_forwFee_disc%", "org_docFee_disc%",
+            "origin_cfs_disc%", "origin_fuelSur_disc%", "org_pickUp_disc%", "adv_duty_disc%",
+            "trans_unpack_charg_disc", "trans_THC_levy_disc", "trans_clear_fees_disc", "insurance_disc",
+            "ocenfreight_charge_disc", "org_clearance_disc", "org_forwFee_disc", "org_docFee_disc",
+            "origin_cfs_disc", "origin_fuelSur_disc", "org_pickUp_disc", "adv_duty_disc",
+            "trans_unpack_charg_vatIncl", "trans_THC_levy_vatIncl", "trans_clear_fees_vatIncl", "insurance_vatIncl",
+            "ocenfreight_charge_vatIncl", "org_clearance_vatIncl", "org_forwFee_vatIncl", "org_docFee_vatIncl",
+            "origin_cfs_vatIncl", "origin_fuelSur_vatIncl", "org_pickUp_vatIncl", "adv_duty_vatIncl",
+            "trans_CFS_charg_vatTyp", "trans_CFS_charg_disc%", "trans_CFS_charg_disc", "trans_CFS_charg_vatIncl",
+            "trans_admin_charg_vatTyp", "trans_admin_charg_disc%", "trans_admin_charg_disc", "trans_admin_charg_vatIncl",
+            "trans_portCargo_vatTyp", "trans_portCargo_disc%", "trans_portCargo_disc", "trans_portCargo_vatIncl",
+            "trans_adv_loadHouse_vatTyp", "trans_adv_loadHouse_disc%", "trans_adv_loadHouse_disc", "trans_adv_loadHouse_vatIncl",
+            "trans_doc_fee_vatTyp", "trans_doc_fee_disc%", "trans_doc_fee_disc", "trans_doc_fee_vatIncl",
+            "dest_clearing_fees_vatTyp", "dest_clearing_fees_disc%", "dest_clearing_fees_disc", "dest_clearing_fees_vatIncl",
+            "dest_THC_levy_vatTyp", "dest_THC_levy_disc%", "dest_THC_levy_disc", "dest_THC_levy_vatIncl",
+            "dest_unpack_chrg_vatTyp", "dest_unpack_chrg_disc%", "dest_unpack_chrg_disc", "dest_unpack_chrg_vatIncl",
+            "dest_fuel_Surchar_vatTyp", "dest_fuel_Surchar_disc%", "dest_fuel_Surchar_disc", "dest_fuel_Surchar_vatIncl",
+            "dest_admin_chrg_vatTyp", "dest_admin_chrg_disc%", "dest_admin_chrg_disc", "dest_admin_chrg_vatIncl",
+            "dest_adv_loadHouse_vatTyp", "dest_adv_loadHouse_disc%", "dest_adv_loadHouse_disc", "dest_adv_loadHouse_vatIncl",
+            "dest_CFS_charg_vatTyp", "dest_CFS_charg_disc%", "dest_CFS_charg_disc", "dest_CFS_charg_vatIncl",
+            "dest_delivry_charge_vatTyp", "dest_delivry_charge_disc%", "dest_delivry_charge_disc", "dest_delivry_charge_vatIncl",
+            "dest_fuel_surchrg_vatTyp", "dest_fuel_surchrg_disc%", "dest_fuel_surchrg_disc", "dest_fuel_surchrg_vatIncl",
+            "admin_agencyFee_vatTyp", "admin_agencyFee_disc%", "admin_agencyFee_disc", "admin_agencyFee_vatIncl",
+            "admin_disbur_fee_vatTyp", "admin_disbur_fee_disc%", "admin_disbur_fee_disc", "admin_disbur_fee_vatIncl",
+            "admin_doc_adminFees_vatTyp", "admin_doc_adminFees_disc%", "admin_doc_adminFees_disc", "admin_doc_adminFees_vatIncl",
+            // exclusives
+            "cust_vat_exclusive", "cust_duty_exclusive", "surcharge_exclusive", "disbursement_exclusive", "clearing_fee_exclusive",
+            "cust_penalty_exclusive", "trans_unpack_charg_exclusive", "trans_THC_levy_exclusive", "trans_clear_fees_exclusive",
+            "insurance_exclusive", "ocenfreight_charge_exclusive", "org_clearance_exclusive", "org_forwFee_exclusive",
+            "org_docFee_exclusive", "origin_cfs_exclusive", "origin_fuelSur_exclusive", "org_pickUp_exclusive", "adv_duty_exclusive",
+            "trans_CFS_charg_exclusive", "trans_admin_charg_exclusive", "trans_portCargo_exclusive", "trans_adv_loadHouse_exclusive",
+            "trans_doc_fee_exclusive", "dest_clearing_fees_exclusive", "dest_THC_levy_exclusive", "dest_unpack_chrg_exclusive",
+            "dest_fuel_Surchar_exclusive", "dest_admin_chrg_exclusive", "dest_adv_loadHouse_exclusive", "dest_CFS_charg_exclusive",
+            "dest_delivry_charge_exclusive", "dest_fuel_surchrg_exclusive", "admin_agencyFee_exclusive", "admin_disbur_fee_exclusive",
+            "admin_doc_adminFees_exclusive",
+            // ... and final _vat fields
+            "cust_vat_vat", "cust_duty_vat", "surcharge_vat", "disbursement_vat", "clearing_fee_vat", "cust_penalty_vat",
+            "trans_unpack_charg_vat", "trans_THC_levy_vat", "trans_clear_fees_vat", "insurance_vat", "ocenfreight_charge_vat",
+            "org_clearance_vat", "org_forwFee_vat", "org_docFee_vat", "origin_cfs_vat", "origin_fuelSur_vat", "org_pickUp_vat",
+            "adv_duty_vat", "trans_CFS_charg_vat", "trans_admin_charg_vat", "trans_portCargo_vat", "trans_adv_loadHouse_vat",
+            "trans_doc_fee_vat", "dest_clearing_fees_vat", "dest_THC_levy_vat", "dest_unpack_chrg_vat", "dest_fuel_Surchar_vat",
+            "dest_admin_chrg_vat", "dest_adv_loadHouse_vat", "dest_CFS_charg_vat", "dest_delivry_charge_vat",
+            "dest_fuel_surchrg_vat", "admin_agencyFee_vat", "admin_disbur_fee_vat", "admin_doc_adminFees_vat"
+        ];
 
         if (data.quote_estimate_id) {
-
-            // Admin update specific quote
             selectQuery = `
-         SELECT id as quote_estimate_id 
-         FROM estimate_shipping_quote 
-         WHERE id = ?
-         `;
+                SELECT id as quote_estimate_id 
+                FROM estimate_shipping_quote 
+                WHERE id = ?
+            `;
             selectParams = [data.quote_estimate_id];
-
         } else {
-
-            // Supplier quote check
             selectQuery = `
-         SELECT id as quote_estimate_id 
-         FROM estimate_shipping_quote 
-         WHERE freight_id = ? AND supplier_id = ?
-           `;
+                SELECT id as quote_estimate_id 
+                FROM estimate_shipping_quote 
+                WHERE freight_id = ? AND supplier_id = ?
+            `;
             selectParams = [data.freight_id, data.supplier_id];
-
         }
-
-        // if (data.quote_estimate_id) {
-        //     selectQuery += `id = ?`;
-        //     selectParams.push(data.quote_estimate_id);
-        // } else {
-        //     // selectQuery += `freight_id = ? AND client_id = ?`;
-        //     // selectParams.push(data.freight_id, data.client_id);
-        //     selectQuery += `1 = 0`;
-        // }
 
         con.query(selectQuery, selectParams, (err, result) => {
             if (err) {
@@ -3704,566 +5254,125 @@ const addEstimateShippingQuote = async (req, res) => {
                 });
             }
 
-            if (result.length > 0) {
+            // Helper arrays for query-building
+            const updateFields = [
+                "supplier_id", "client_name", "serial_number", "date", "client_ref", "product_desc",
+                "type", "freight", "incoterm", "dimension", "weight",
+                "origin_pick_up_cost", "origin_pick_up_fees", "origin_pickup_fee_gpcalc",
+                "oripick4", "finalori1", "roe_origin_currencyorigin", "finalvlaueoriginPickup",
+                "origin_pick_up_fuel_cost", "origin_pick_up_fuel_fees", "origin_pick_fuelGP",
+                "orifuel4", "finalfuel1", "roe_origin_fuel_currency", "finalvlaueoFuel",
+                "origin_pick_up_cfs_cost", "origin_pick_up_cfs_fees", "origin_pickup_vfs_gp",
+                "oricfs4", "finalcfs1", "roe_origin_cfs_currency", "finalvlaueocfs",
+                "origin_pick_up_documantion_cost", "origin_pick_up_documantation_fees",
+                "origin_pick_documantation_cost_gp", "oridoc4", "finaldoc1",
+                "roe_origin_doc_currency", "finalvlaueodoc",
+                "origin_pick_up_forewarding_cost", "origin_pick_up_forewarding_fees",
+                "origin_pickup_forewarding_gp", "oriforewarding4", "roe_origin_forewarding",
+                "finalforewarding1", "finalvlaueoforewarding",
+                "origin_pick_up_custome_cost", "origin_pick_up_custome_clearance",
+                "origin_pickup_custome_gp", "oricustome4", "roe_origin_customes",
+                "finalcustomes1", "finalvlaueoCustomes",
+                "totalChageswithOutExchange", "totalChangeRoeOrigin",
+                "freight_charge_currency_cost", "freight_charge_currency_fees",
+                "freight_charge_currency_gp", "orifreight4",
+                "finalValuefreight", "finalfreight1", "finalvlaueofreight",
+                "freight_currency_insurance_cost", "freightorigin_insurance_gp",
+                "freight_currency_insurance_unit", "oriinsurance4",
+                "roe_insurance_currency", "finalinsurance1", "finalvlaueoInsurance",
+                "totalChageswithOutExchangeinsurance",
+                "totalChangeRoeOriginaftercalcuinsurance",
+                "Transit_currency_Cost", "Transit_currency_gp", "Transit_currency_unit",
+                "finaltransit1", "oritransit4", "Transit_currency_roe",
+                "finalvlaueotransit",
+                "transit_currency_THC_cost", "transit_currency_THC_init",
+                "transit_currency_THC_gp", "oriThc4", "finalThc1",
+                "finalvlaueotfineal", "roe_Transit_Thc",
+                "Transit_currency_unpack_cost", "Transit_currency_unpack_unit",
+                "Transit_currency_unpack_gp", "finalunpack1", "oriunpack4",
+                "finalvlaueotfunpack", "Transit_unpack_roe",
+                "totalChaDestinationTransit", "totalChaDestinationTransitRoe",
+                "sumofall", "sumofRoe",
+                "transit_3rd_party_cost", "transit_3rd_party_unit", "transit_3rd_party_gp",
+                "ori3rdparty4", "final3rdparty1", "finalvlaueot3dparty", "transit_currency_3rd",
+                "transit_admin_change", "transit_admin_unit", "transit_admin_gp", "ori3rdAdmin4",
+                "final3rdAdmin1", "finalvlaueotAdmin", "roe_transit_admin",
+                "transit_currency_port", "transit_currency_port_unit", "transit_currency_port_gp",
+                "ori3rdport4", "final3rdport1", "finalvlaueotPort", "roe_trans_port",
+                "Transit_advanced_load", "Transit_advanced_unit", "Transit_advanced_gp",
+                "oriadv4", "final3rdadv1", "finalvlaueotadv", "Transit_advanced_gp_roe",
+                "transit_change_Documentation", "transit_change_Documentation_unit", "oridocumentation4",
+                "transit_change_Documentation_gp", "final3rdocumantation1", "finalvlaueotDocumantation",
+                "roe_transit_change_Documentation", "totalChageswithOuTransit", "transitRoe",
+                "Destination_freight_currency_cost", "Destination_freight_currency_unit", "Destination_freight_currency_gp",
+                "destinationdocumentation4", "final3rdestinationRoe", "final3rdestination1", "Destination_freight_currency_Roe",
+                "Destination_THC_currency_cost", "Destination_THC_currency_unit", "Destination_THC_currency_gp",
+                "destinationTHCdocumentation4", "final3rTHCdestination1", "final3rTHCdestinationRoe", "Destination_THC_currency_Roe",
+                "Destination_Unpack_currency_cost", "Destination_Unpack_currency_unit", "Destination_Unpack_currency_gp",
+                "destinationUnpackdocumentation4", "Destination_Unpack_currency_roe", "final3rUnpackdestinationRoe", "final3runpackdestination1",
+                "totaAdminransit", "totalAdminnsitRoe",
+                "Destination_fuelsurcharge_currency_cost", "Destination_fuelsurcharge_currency_unit", "Destination_fuelsurcharge_currency_gp",
+                "destinationfuelsurchargedocumentation4", "final3rfuelsurchargedestination1", "final3rfuelsurCahrgeestinationRoe", "Destination_fuelsurcharge_currency_roe",
+                "Destination_adminsurcharge_currency_cost", "Destination_adminsurcharge_currency_unit", "Destination_adminsurcharge_currency_gp",
+                "destinatiadminsurcharge4", "Valueadminsurchargedestanion", "adminsurcharge2", "Destination_adminsurcharge_currency_roe",
+                "Destination_portcargo_currency_cost", "Destination_portcargo_currency_unit", "Destination_portcargo_currency_gp",
+                "destinatiportcargo4", "Vaportcargoion", "admiportcargo2", "Destination_portcargo_currency_roe",
+                "Destination_AdvancedLoad_currency_cost", "Destination_AdvancedLoad_currency_unit", "Destination_AdvancedLoad_currency_gp",
+                "destinatiAdvancedLoad4", "VAdvancedLoadion", "desdvancedLoadion", "Destination_AdvancedLoad_currency_roe",
+                "Destination_3rdpartyDesc_currency_cost", "Destination_3rdpartyDesc_currency_unit", "Destination_3rdpartyDesc_currency_gp",
+                "destinati3rdpartyload4", "VAdvanced3rdpartyLoadion", "desdva3rdpartyion", "Destination_3rdpartyDesc_currency_roe",
+                "Destination_delivery_currency_cost", "Destination_delivery_currency_unit", "Destination_delivery_currency_gp",
+                "destindeliveryyDesc4", "VAdvandeliverytyLoadion", "desddeliverytyion", "Destination_delivery_currency_roe",
+                "Destination_fuelcharge_currency_cost", "Destination_fuelcharge_currency_unit", "Destination_fuelcharge_currency_gp",
+                "destindfuelchangerDesc4", "VAdvfuelchangeon", "defuelchangyion", "Destination_fuelcharge_currency_roe",
+                "Destination_AdminAgrncy_currency_cost", "Destination_AdminAgrncy_currency_unit", "Destination_AdminAgrncy_currency_gp",
+                "deadminAgencyesc4", "VAadminAgencyngeon", "defuelchdminAgencyngangyion", "Destination_AdminAgrncy_currency_roe",
+                "Destination_disbursemant_currency_cost", "Destination_disbursemant_currency_unit", "Destination_disbursemant_currency_gp",
+                "deaddisbursemantc4", "VAdisbursemon", "dedisbursementon", "Destination_disbursemant_currency_roe",
+                "Destination_doc_currency_cost", "Destination_doc_currency_unit", "Destination_doc_currency_gp",
+                "deadoctc4", "VAdocon", "dedisbudoon", "Destination_doc_currency_roe", "roe_freight_currency",
+                "freight_charge_currency", "freight_charge_currency_unitType", "freight_currency_insurance_unittype",
+                "origin_pick_up_unitType", "origin_pick_up_fuel_unitType", "origin_pick_up_cfs_unitType",
+                "origin_pick_up_documantation_unitType", "origin_pick_up_forewarding_unitType", "origin_pick_up_custome_unitType",
+                "Transit_currency_unitTpe", "transit_currency_THC_initType", "Transit_currency_unpack_unitType",
+                "transit_3rd_party_unittype", "transit_admin_unittype", "transit_currency_port_unitType",
+                "Transit_advanced_unitType", "transit_change_Documentation_unitType",
+                "Destination_freight_currency_unitType", "Destination_THC_currency_unitType",
+                "Destination_Unpack_currency_unitType", "Destination_fuelsurcharge_currency_typeUnit",
+                "Destination_adminsurcharge_currency_unitType", "Destination_portcargo_currency_unitType",
+                "Destination_AdvancedLoad_currency_unitType", "Destination_3rdpartyDesc_currency_unitType",
+                "Destination_delivery_currency_unitType", "Destination_fuelcharge_currency_unitType",
+                "Destination_AdminAgrncy_currency_unitType", "Destination_disbursemant_currency_unitType",
+                "Destination_doc_currency_unittype", "freight_charge_currencyQTY", "origin_pick_up_fuel_unitTypeQTY",
+                "origin_pick_up_cfs_unitTypeQTY", "origin_pick_up_forewarding_unitTypeQTY",
+                "origin_pick_up_documantation_unitTypeQTY", "origin_pick_up_custome_unitTypeQTY", "chargable_rate",
+                "freight_charge_currency_unitTypeQTY", "freight_currency_insurance_unittypeQTY",
+                "Transit_currency_unitTpeQTY", "transit_currency_THC_initTypeQTY", "transit_currency_THC_initTypeeQTY",
+                "transit_3rd_party_unittypeQTY", "transit_admin_unittypeQTY", "transit_currency_port_unitTypeQTY",
+                "Transit_advanced_unitTypeQTY", "transit_change_Documentation_unitTypeQTY",
+                "Destination_freight_currency_unitTypeQTY", "Destination_THC_currency_unitTypeQTY",
+                "Destination_Unpack_currency_unitTypeQTY", "Destination_fuelsurcharge_currency_typeUnitQTY",
+                "Destination_adminsurcharge_currency_unitTypeQTY", "Destination_portcargo_currency_unitTypeQTY",
+                "Destination_AdvancedLoad_currency_unitTypeQTY", "Destination_3rdpartyDesc_currency_unitTypeQTY",
+                "Destination_delivery_currency_unitTypeQTY", "Destination_fuelcharge_currency_unitTypeQTY",
+                "Destination_AdminAgrncy_currency_unitQTY", "Destination_disbursemant_currency_unitTypeQTY",
+                "Destination_doc_currency_unittypeQTY", "pickup_freight_currency", "Transit_currency",
+                "Destination_freight_currency", "admin_currency_charge", "Destination_disbursemant_currenc_unitType1",
+                // new fields!
+                ...NEW_FIELDS
+            ];
 
+            if (result.length > 0) {
+                // Build SQL dynamically to add new fields
+                const updateSet = updateFields.map(f => `\`${f}\`=?`).join(',\n');
                 const updateQuery = `
                     UPDATE estimate_shipping_quote SET
-                        supplier_id=?,
-                        client_name=?, serial_number=?, date=?, client_ref=?, product_desc=?,
-                        type=?, freight=?, incoterm=?, dimension=?, weight=?,
-
-                        origin_pick_up_cost=?, origin_pick_up_fees=?, origin_pickup_fee_gpcalc=?,
-                        oripick4=?, finalori1=?, roe_origin_currencyorigin=?, finalvlaueoriginPickup=?,
-
-                        origin_pick_up_fuel_cost=?, origin_pick_up_fuel_fees=?, origin_pick_fuelGP=?,
-                        orifuel4=?, finalfuel1=?, roe_origin_fuel_currency=?, finalvlaueoFuel=?,
-
-                        origin_pick_up_cfs_cost=?, origin_pick_up_cfs_fees=?, origin_pickup_vfs_gp=?,
-                        oricfs4=?, finalcfs1=?, roe_origin_cfs_currency=?, finalvlaueocfs=?,
-
-                        origin_pick_up_documantion_cost=?, origin_pick_up_documantation_fees=?,
-                        origin_pick_documantation_cost_gp=?, oridoc4=?, finaldoc1=?,
-                        roe_origin_doc_currency=?, finalvlaueodoc=?,
-
-                        origin_pick_up_forewarding_cost=?, origin_pick_up_forewarding_fees=?,
-                        origin_pickup_forewarding_gp=?, oriforewarding4=?, roe_origin_forewarding=?,
-                        finalforewarding1=?, finalvlaueoforewarding=?,
-
-                        origin_pick_up_custome_cost=?, origin_pick_up_custome_clearance=?,
-                        origin_pickup_custome_gp=?, oricustome4=?, roe_origin_customes=?,
-                        finalcustomes1=?, finalvlaueoCustomes=?,
-
-                        totalChageswithOutExchange=?, totalChangeRoeOrigin=?,
-
-                        freight_charge_currency_cost=?, freight_charge_currency_fees=?,
-                        freight_charge_currency_gp=?, orifreight4=?,
-                        finalValuefreight=?, finalfreight1=?, finalvlaueofreight=?,
-
-                        freight_currency_insurance_cost=?, freightorigin_insurance_gp=?,
-                        freight_currency_insurance_unit=?, oriinsurance4=?,
-                        roe_insurance_currency=?, finalinsurance1=?, finalvlaueoInsurance=?,
-
-                        totalChageswithOutExchangeinsurance=?,
-                        totalChangeRoeOriginaftercalcuinsurance=?,
-
-                        Transit_currency_Cost=?, Transit_currency_gp=?, Transit_currency_unit=?,
-                        finaltransit1=?, oritransit4=?, Transit_currency_roe=?,
-                        finalvlaueotransit=?,
-
-                        transit_currency_THC_cost=?, transit_currency_THC_init=?,
-                        transit_currency_THC_gp=?, oriThc4=?, finalThc1=?,
-                        finalvlaueotfineal=?, roe_Transit_Thc=?,
-
-                        Transit_currency_unpack_cost=?, Transit_currency_unpack_unit=?,
-                        Transit_currency_unpack_gp=?, finalunpack1=?, oriunpack4=?,
-                        finalvlaueotfunpack=?, Transit_unpack_roe=?,
-
-                        totalChaDestinationTransit=?, totalChaDestinationTransitRoe=?,
-                        sumofall=?, sumofRoe=?,
-                        transit_3rd_party_cost=?,
-                        transit_3rd_party_unit=?,
-                        transit_3rd_party_gp=?,
-                        ori3rdparty4=?,
-                        final3rdparty1=?,
-                        finalvlaueot3dparty=?,
-                        transit_currency_3rd=?,
-
-                        transit_admin_change=?,
-                        transit_admin_unit=?,
-                        transit_admin_gp=?,
-                        ori3rdAdmin4=?,
-                        final3rdAdmin1=?,
-                        finalvlaueotAdmin=?,
-                        roe_transit_admin=?,
-
-                        transit_currency_port=?,
-                        transit_currency_port_unit=?,
-                        transit_currency_port_gp=?,
-                        ori3rdport4=?,
-                        final3rdport1=?,
-                        finalvlaueotPort=?,
-                        roe_trans_port=?,
-
-                        Transit_advanced_load=?,
-                        Transit_advanced_unit=?,
-                        Transit_advanced_gp=?,
-                        oriadv4=?,
-                        final3rdadv1=?,
-                        finalvlaueotadv=?,
-                        Transit_advanced_gp_roe=?,
-
-                        transit_change_Documentation=?,
-                        transit_change_Documentation_unit=?,
-                        oridocumentation4=?,
-                        transit_change_Documentation_gp=?,
-                        final3rdocumantation1=?,
-                        finalvlaueotDocumantation=?,
-                        roe_transit_change_Documentation=?,
-
-                        totalChageswithOuTransit=?,
-                        transitRoe=?,
-
-                        Destination_freight_currency_cost=?,
-                        Destination_freight_currency_unit=?,
-                        Destination_freight_currency_gp=?,
-                        destinationdocumentation4=?,
-                        final3rdestinationRoe=?,
-                        final3rdestination1=?,
-                        Destination_freight_currency_Roe=?,
-
-                        Destination_THC_currency_cost=?,
-                        Destination_THC_currency_unit=?,
-                        Destination_THC_currency_gp=?,
-                        destinationTHCdocumentation4=?,
-                        final3rTHCdestination1=?,
-                        final3rTHCdestinationRoe=?,
-                        Destination_THC_currency_Roe=?,
-
-                        Destination_Unpack_currency_cost=?,
-                        Destination_Unpack_currency_unit=?,
-                        Destination_Unpack_currency_gp=?,
-                        destinationUnpackdocumentation4=?,
-                        Destination_Unpack_currency_roe=?,
-                        final3rUnpackdestinationRoe=?,
-                        final3runpackdestination1=?,
-
-                        totaAdminransit=?,
-                        totalAdminnsitRoe=?,
-
-                        Destination_fuelsurcharge_currency_cost = ?,
-                        Destination_fuelsurcharge_currency_unit = ?,
-                        Destination_fuelsurcharge_currency_gp = ?,
-                        destinationfuelsurchargedocumentation4 = ?,
-                        final3rfuelsurchargedestination1 = ?,
-                        final3rfuelsurCahrgeestinationRoe = ?,
-                        Destination_fuelsurcharge_currency_roe = ?,
-
-                        Destination_adminsurcharge_currency_cost = ?,
-                        Destination_adminsurcharge_currency_unit = ?,
-                        Destination_adminsurcharge_currency_gp = ?,
-                        destinatiadminsurcharge4 = ?,
-                        Valueadminsurchargedestanion = ?,
-                        adminsurcharge2 = ?,
-                        Destination_adminsurcharge_currency_roe = ?,
-
-                        Destination_portcargo_currency_cost = ?,
-                        Destination_portcargo_currency_unit = ?,
-                        Destination_portcargo_currency_gp = ?,
-                        destinatiportcargo4 = ?,
-                        Vaportcargoion = ?,
-                        admiportcargo2 = ?,
-                        Destination_portcargo_currency_roe = ?,
-
-                        Destination_AdvancedLoad_currency_cost = ?,
-                        Destination_AdvancedLoad_currency_unit = ?,
-                        Destination_AdvancedLoad_currency_gp = ?,
-                        destinatiAdvancedLoad4 = ?,
-                        VAdvancedLoadion = ?,
-                        desdvancedLoadion = ?,
-                        Destination_AdvancedLoad_currency_roe = ?,
-
-                        Destination_3rdpartyDesc_currency_cost = ?,
-                        Destination_3rdpartyDesc_currency_unit = ?,
-                        Destination_3rdpartyDesc_currency_gp = ?,
-                        destinati3rdpartyload4 = ?,
-                        VAdvanced3rdpartyLoadion = ?,
-                        desdva3rdpartyion = ?,
-                        Destination_3rdpartyDesc_currency_roe = ?,
-
-                        Destination_delivery_currency_cost = ?,
-                        Destination_delivery_currency_unit = ?,
-                        Destination_delivery_currency_gp = ?,
-                        destindeliveryyDesc4 = ?,
-                        VAdvandeliverytyLoadion = ?,
-                        desddeliverytyion = ?,
-                        Destination_delivery_currency_roe = ?,
-
-                        Destination_fuelcharge_currency_cost = ?,
-                        Destination_fuelcharge_currency_unit = ?,
-                        Destination_fuelcharge_currency_gp = ?,
-                        destindfuelchangerDesc4 = ?,
-                        VAdvfuelchangeon = ?,
-                        defuelchangyion = ?,
-                        Destination_fuelcharge_currency_roe = ?,
-
-                        Destination_AdminAgrncy_currency_cost = ?,
-                        Destination_AdminAgrncy_currency_unit = ?,
-                        Destination_AdminAgrncy_currency_gp = ?,
-                        deadminAgencyesc4 = ?,
-                        VAadminAgencyngeon = ?,
-                        defuelchdminAgencyngangyion = ?,
-                        Destination_AdminAgrncy_currency_roe = ?,
-
-                        Destination_disbursemant_currency_cost = ?,
-                        Destination_disbursemant_currency_unit = ?,
-                        Destination_disbursemant_currency_gp = ?,
-                        deaddisbursemantc4 = ?,
-                        VAdisbursemon = ?,
-                        dedisbursementon = ?,
-                        Destination_disbursemant_currency_roe = ?,
-
-                        Destination_doc_currency_cost = ?,
-                        Destination_doc_currency_unit = ?,
-                        Destination_doc_currency_gp = ?,
-                        deadoctc4 = ?,
-                        VAdocon = ?,
-                        dedisbudoon = ?,
-                        Destination_doc_currency_roe = ?,
-                        roe_freight_currency = ?,
-
-                        freight_charge_currency = ?,
-                        freight_charge_currency_unitType = ?,
-                        freight_currency_insurance_unittype = ?,
-
-                        origin_pick_up_unitType = ?,
-                        origin_pick_up_fuel_unitType = ?,
-                        origin_pick_up_cfs_unitType = ?,
-                        origin_pick_up_documantation_unitType = ?,
-                        origin_pick_up_forewarding_unitType = ?,
-                        origin_pick_up_custome_unitType = ?,
-
-                        Transit_currency_unitTpe = ?,
-                        transit_currency_THC_initType = ?,
-                        Transit_currency_unpack_unitType = ?,
-                        transit_3rd_party_unittype = ?,
-                        transit_admin_unittype = ?,
-                        transit_currency_port_unitType = ?,
-                        Transit_advanced_unitType = ?,
-                        transit_change_Documentation_unitType = ?,
-
-                        Destination_freight_currency_unitType = ?,
-                        Destination_THC_currency_unitType = ?,
-                        Destination_Unpack_currency_unitType = ?,
-                        Destination_fuelsurcharge_currency_typeUnit = ?,
-                        Destination_adminsurcharge_currency_unitType = ?,
-                        Destination_portcargo_currency_unitType = ?,
-                        Destination_AdvancedLoad_currency_unitType = ?,
-                        Destination_3rdpartyDesc_currency_unitType = ?,
-                        Destination_delivery_currency_unitType = ?,
-                        Destination_fuelcharge_currency_unitType = ?,
-
-                        Destination_AdminAgrncy_currency_unitType = ?,
-                        Destination_disbursemant_currency_unitType = ?,
-                        Destination_doc_currency_unittype = ?,
-
-                        freight_charge_currencyQTY = ?,
-                        origin_pick_up_fuel_unitTypeQTY = ?,
-                        origin_pick_up_cfs_unitTypeQTY = ?,
-                        origin_pick_up_forewarding_unitTypeQTY = ?,
-                        origin_pick_up_documantation_unitTypeQTY = ?,
-                        origin_pick_up_custome_unitTypeQTY = ?,
-                        chargable_rate = ?,
-                        freight_charge_currency_unitTypeQTY = ?,
-                        freight_currency_insurance_unittypeQTY = ?,
-
-                        Transit_currency_unitTpeQTY = ?,
-                        transit_currency_THC_initTypeQTY = ?,
-                        transit_currency_THC_initTypeeQTY = ?,
-                        transit_3rd_party_unittypeQTY = ?,
-                        transit_admin_unittypeQTY = ?,
-                        transit_currency_port_unitTypeQTY = ?,
-                        Transit_advanced_unitTypeQTY = ?,
-                        transit_change_Documentation_unitTypeQTY = ?,
-
-                        Destination_freight_currency_unitTypeQTY = ?,
-                        Destination_THC_currency_unitTypeQTY = ?,
-                        Destination_Unpack_currency_unitTypeQTY = ?,
-                        Destination_fuelsurcharge_currency_typeUnitQTY = ?,
-                        Destination_adminsurcharge_currency_unitTypeQTY = ?,
-                        Destination_portcargo_currency_unitTypeQTY = ?,
-                        Destination_AdvancedLoad_currency_unitTypeQTY = ?,
-                        Destination_3rdpartyDesc_currency_unitTypeQTY = ?,
-                        Destination_delivery_currency_unitTypeQTY = ?,
-                        Destination_fuelcharge_currency_unitTypeQTY = ?,
-                        Destination_AdminAgrncy_currency_unitQTY = ?,
-                        Destination_disbursemant_currency_unitTypeQTY = ?,
-                        Destination_doc_currency_unittypeQTY = ?,
-                        pickup_freight_currency =?,
-                        Transit_currency=?,
-                        Destination_freight_currency=?,
-                        admin_currency_charge=?,
-                        Destination_disbursemant_currenc_unitType1=?
+                        ${updateSet}
                     WHERE id=?
                 `;
 
                 const updateParams = [
-                    data.supplier_id,
-
-                    data.client_name, data.serial_number, data.date, data.client_ref, data.product_desc,
-                    data.type, data.freight, data.incoterm, data.dimension, data.weight,
-
-                    data.origin_pick_up_cost, data.origin_pick_up_fees, data.origin_pickup_fee_gpcalc,
-                    data.oripick4, data.finalori1, data.roe_origin_currencyorigin, data.finalvlaueoriginPickup,
-
-                    data.origin_pick_up_fuel_cost, data.origin_pick_up_fuel_fees, data.origin_pick_fuelGP,
-                    data.orifuel4, data.finalfuel1, data.roe_origin_fuel_currency, data.finalvlaueoFuel,
-
-                    data.origin_pick_up_cfs_cost, data.origin_pick_up_cfs_fees, data.origin_pickup_vfs_gp,
-                    data.oricfs4, data.finalcfs1, data.roe_origin_cfs_currency, data.finalvlaueocfs,
-
-                    data.origin_pick_up_documantion_cost, data.origin_pick_up_documantation_fees,
-                    data.origin_pick_documantation_cost_gp, data.oridoc4, data.finaldoc1,
-                    data.roe_origin_doc_currency, data.finalvlaueodoc,
-
-                    data.origin_pick_up_forewarding_cost, data.origin_pick_up_forewarding_fees,
-                    data.origin_pickup_forewarding_gp, data.oriforewarding4, data.roe_origin_forewarding,
-                    data.finalforewarding1, data.finalvlaueoforewarding,
-
-                    data.origin_pick_up_custome_cost, data.origin_pick_up_custome_clearance,
-                    data.origin_pickup_custome_gp, data.oricustome4, data.roe_origin_customes,
-                    data.finalcustomes1, data.finalvlaueoCustomes,
-
-                    data.totalChageswithOutExchange, data.totalChangeRoeOrigin,
-
-                    data.freight_charge_currency_cost, data.freight_charge_currency_fees,
-                    data.freight_charge_currency_gp, data.orifreight4,
-                    data.finalValuefreight, data.finalfreight1, data.finalvlaueofreight,
-
-                    data.freight_currency_insurance_cost, data.freightorigin_insurance_gp,
-                    data.freight_currency_insurance_unit, data.oriinsurance4,
-                    data.roe_insurance_currency, data.finalinsurance1, data.finalvlaueoInsurance,
-
-                    data.totalChageswithOutExchangeinsurance,
-                    data.totalChangeRoeOriginaftercalcuinsurance,
-
-                    data.Transit_currency_Cost, data.Transit_currency_gp, data.Transit_currency_unit,
-                    data.finaltransit1, data.oritransit4, data.Transit_currency_roe,
-                    data.finalvlaueotransit,
-
-                    data.transit_currency_THC_cost, data.transit_currency_THC_init,
-                    data.transit_currency_THC_gp, data.oriThc4, data.finalThc1,
-                    data.finalvlaueotfineal, data.roe_Transit_Thc,
-
-                    data.Transit_currency_unpack_cost, data.Transit_currency_unpack_unit,
-                    data.Transit_currency_unpack_gp, data.finalunpack1, data.oriunpack4,
-                    data.finalvlaueotfunpack, data.Transit_unpack_roe,
-
-                    data.totalChaDestinationTransit, data.totalChaDestinationTransitRoe,
-                    data.sumofall, data.sumofRoe,
-
-                    data.transit_3rd_party_cost,
-                    data.transit_3rd_party_unit,
-                    data.transit_3rd_party_gp,
-                    data.ori3rdparty4,
-                    data.final3rdparty1,
-                    data.finalvlaueot3dparty,
-                    data.transit_currency_3rd,
-
-                    data.transit_admin_change,
-                    data.transit_admin_unit,
-                    data.transit_admin_gp,
-                    data.ori3rdAdmin4,
-                    data.final3rdAdmin1,
-                    data.finalvlaueotAdmin,
-                    data.roe_transit_admin,
-
-                    data.transit_currency_port,
-                    data.transit_currency_port_unit,
-                    data.transit_currency_port_gp,
-                    data.ori3rdport4,
-                    data.final3rdport1,
-                    data.finalvlaueotPort,
-                    data.roe_trans_port,
-
-                    data.Transit_advanced_load,
-                    data.Transit_advanced_unit,
-                    data.Transit_advanced_gp,
-                    data.oriadv4,
-                    data.final3rdadv1,
-                    data.finalvlaueotadv,
-                    data.Transit_advanced_gp_roe,
-
-                    data.transit_change_Documentation,
-                    data.transit_change_Documentation_unit,
-                    data.oridocumentation4,
-                    data.transit_change_Documentation_gp,
-                    data.final3rdocumantation1,
-                    data.finalvlaueotDocumantation,
-                    data.roe_transit_change_Documentation,
-
-                    data.totalChageswithOuTransit,
-                    data.transitRoe,
-
-                    data.Destination_freight_currency_cost,
-                    data.Destination_freight_currency_unit,
-                    data.Destination_freight_currency_gp,
-                    data.destinationdocumentation4,
-                    data.final3rdestinationRoe,
-                    data.final3rdestination1,
-                    data.Destination_freight_currency_Roe,
-
-                    data.Destination_THC_currency_cost,
-                    data.Destination_THC_currency_unit,
-                    data.Destination_THC_currency_gp,
-                    data.destinationTHCdocumentation4,
-                    data.final3rTHCdestination1,
-                    data.final3rTHCdestinationRoe,
-                    data.Destination_THC_currency_Roe,
-
-                    data.Destination_Unpack_currency_cost,
-                    data.Destination_Unpack_currency_unit,
-                    data.Destination_Unpack_currency_gp,
-                    data.destinationUnpackdocumentation4,
-                    data.Destination_Unpack_currency_roe,
-                    data.final3rUnpackdestinationRoe,
-                    data.final3runpackdestination1,
-
-                    data.totaAdminransit,
-                    data.totalAdminnsitRoe,
-
-                    data.Destination_fuelsurcharge_currency_cost,
-                    data.Destination_fuelsurcharge_currency_unit,
-                    data.Destination_fuelsurcharge_currency_gp,
-                    data.destinationfuelsurchargedocumentation4,
-                    data.final3rfuelsurchargedestination1,
-                    data.final3rfuelsurCahrgeestinationRoe,
-                    data.Destination_fuelsurcharge_currency_roe,
-
-                    data.Destination_adminsurcharge_currency_cost,
-                    data.Destination_adminsurcharge_currency_unit,
-                    data.Destination_adminsurcharge_currency_gp,
-                    data.destinatiadminsurcharge4,
-                    data.Valueadminsurchargedestanion,
-                    data.adminsurcharge2,
-                    data.Destination_adminsurcharge_currency_roe,
-
-                    data.Destination_portcargo_currency_cost,
-                    data.Destination_portcargo_currency_unit,
-                    data.Destination_portcargo_currency_gp,
-                    data.destinatiportcargo4,
-                    data.Vaportcargoion,
-                    data.admiportcargo2,
-                    data.Destination_portcargo_currency_roe,
-
-                    data.Destination_AdvancedLoad_currency_cost,
-                    data.Destination_AdvancedLoad_currency_unit,
-                    data.Destination_AdvancedLoad_currency_gp,
-                    data.destinatiAdvancedLoad4,
-                    data.VAdvancedLoadion,
-                    data.desdvancedLoadion,
-                    data.Destination_AdvancedLoad_currency_roe,
-
-                    data.Destination_3rdpartyDesc_currency_cost,
-                    data.Destination_3rdpartyDesc_currency_unit,
-                    data.Destination_3rdpartyDesc_currency_gp,
-                    data.destinati3rdpartyload4,
-                    data.VAdvanced3rdpartyLoadion,
-                    data.desdva3rdpartyion,
-                    data.Destination_3rdpartyDesc_currency_roe,
-
-                    data.Destination_delivery_currency_cost,
-                    data.Destination_delivery_currency_unit,
-                    data.Destination_delivery_currency_gp,
-                    data.destindeliveryyDesc4,
-                    data.VAdvandeliverytyLoadion,
-                    data.desddeliverytyion,
-                    data.Destination_delivery_currency_roe,
-
-                    data.Destination_fuelcharge_currency_cost,
-                    data.Destination_fuelcharge_currency_unit,
-                    data.Destination_fuelcharge_currency_gp,
-                    data.destindfuelchangerDesc4,
-                    data.VAdvfuelchangeon,
-                    data.defuelchangyion,
-                    data.Destination_fuelcharge_currency_roe,
-
-                    data.Destination_AdminAgrncy_currency_cost,
-                    data.Destination_AdminAgrncy_currency_unit,
-                    data.Destination_AdminAgrncy_currency_gp,
-                    data.deadminAgencyesc4,
-                    data.VAadminAgencyngeon,
-                    data.defuelchdminAgencyngangyion,
-                    data.Destination_AdminAgrncy_currency_roe,
-
-                    data.Destination_disbursemant_currency_cost,
-                    data.Destination_disbursemant_currency_unit,
-                    data.Destination_disbursemant_currency_gp,
-                    data.deaddisbursemantc4,
-                    data.VAdisbursemon,
-                    data.dedisbursementon,
-                    data.Destination_disbursemant_currency_roe,
-
-                    data.Destination_doc_currency_cost,
-                    data.Destination_doc_currency_unit,
-                    data.Destination_doc_currency_gp,
-                    data.deadoctc4,
-                    data.VAdocon,
-                    data.dedisbudoon,
-                    data.Destination_doc_currency_roe,
-                    data.roe_freight_currency,
-
-                    data.freight_charge_currency,
-                    data.freight_charge_currency_unitType,
-                    data.freight_currency_insurance_unittype,
-
-                    data.origin_pick_up_unitType,
-                    data.origin_pick_up_fuel_unitType,
-                    data.origin_pick_up_cfs_unitType,
-                    data.origin_pick_up_documantation_unitType,
-                    data.origin_pick_up_forewarding_unitType,
-                    data.origin_pick_up_custome_unitType,
-
-                    data.Transit_currency_unitTpe,
-                    data.transit_currency_THC_initType,
-                    data.Transit_currency_unpack_unitType,
-                    data.transit_3rd_party_unittype,
-                    data.transit_admin_unittype,
-                    data.transit_currency_port_unitType,
-                    data.Transit_advanced_unitType,
-                    data.transit_change_Documentation_unitType,
-
-                    data.Destination_freight_currency_unitType,
-                    data.Destination_THC_currency_unitType,
-                    data.Destination_Unpack_currency_unitType,
-                    data.Destination_fuelsurcharge_currency_typeUnit,
-                    data.Destination_adminsurcharge_currency_unitType,
-                    data.Destination_portcargo_currency_unitType,
-                    data.Destination_AdvancedLoad_currency_unitType,
-                    data.Destination_3rdpartyDesc_currency_unitType,
-                    data.Destination_delivery_currency_unitType,
-                    data.Destination_fuelcharge_currency_unitType,
-
-                    data.Destination_AdminAgrncy_currency_unitType,
-                    data.Destination_disbursemant_currency_unitType,
-                    data.Destination_doc_currency_unittype,
-
-                    data.freight_charge_currencyQTY,
-                    data.origin_pick_up_fuel_unitTypeQTY,
-                    data.origin_pick_up_cfs_unitTypeQTY,
-                    data.origin_pick_up_forewarding_unitTypeQTY,
-                    data.origin_pick_up_documantation_unitTypeQTY,
-                    data.origin_pick_up_custome_unitTypeQTY,
-                    data.chargable_rate,
-                    data.freight_charge_currency_unitTypeQTY,
-                    data.freight_currency_insurance_unittypeQTY,
-
-                    data.Transit_currency_unitTpeQTY,
-                    data.transit_currency_THC_initTypeQTY,
-                    data.transit_currency_THC_initTypeeQTY,
-                    data.transit_3rd_party_unittypeQTY,
-                    data.transit_admin_unittypeQTY,
-                    data.transit_currency_port_unitTypeQTY,
-                    data.Transit_advanced_unitTypeQTY,
-                    data.transit_change_Documentation_unitTypeQTY,
-
-                    data.Destination_freight_currency_unitTypeQTY,
-                    data.Destination_THC_currency_unitTypeQTY,
-                    data.Destination_Unpack_currency_unitTypeQTY,
-                    data.Destination_fuelsurcharge_currency_typeUnitQTY,
-                    data.Destination_adminsurcharge_currency_unitTypeQTY,
-                    data.Destination_portcargo_currency_unitTypeQTY,
-                    data.Destination_AdvancedLoad_currency_unitTypeQTY,
-                    data.Destination_3rdpartyDesc_currency_unitTypeQTY,
-                    data.Destination_delivery_currency_unitTypeQTY,
-                    data.Destination_fuelcharge_currency_unitTypeQTY,
-                    data.Destination_AdminAgrncy_currency_unitQTY,
-                    data.Destination_disbursemant_currency_unitTypeQTY,
-                    data.Destination_doc_currency_unittypeQTY,
-                    data.pickup_freight_currency,
-                    data.Transit_currency,
-                    data.Destination_freight_currency,
-                    data.admin_currency_charge,
-                    data.Destination_disbursemant_currenc_unitType1,
+                    ...updateFields.map(f => data[f]),
                     result[0].quote_estimate_id
                 ];
 
@@ -4290,9 +5399,8 @@ const addEstimateShippingQuote = async (req, res) => {
             }
             /* ================= INSERT ================= */
             else {
-
                 const insertQuery = `INSERT INTO estimate_shipping_quote SET ?`;
-
+                // All values including new fields in data (assume coming from FE)
                 con.query(insertQuery, data, (err, insertData) => {
                     if (err) {
                         return res.status(500).send({
@@ -4566,7 +5674,6 @@ const Shipping_Estimate = async (req, res) => {
 };
 
 const Shipping_Estimate_supplier = async (req, res) => {
-
     try {
         const {
             freight_id, client_id, supplier_id, serial_number, date, client_ref, freight, incoterm, dimension, weight, freight_agent,
@@ -14248,21 +15355,61 @@ const GetFreightImages = async (req, res) => {
         };
 
         //  Clearance Docs
+        // Clearance Docs + Related Freight Docs
         const fetchClearanceDocs = () => {
             return new Promise((resolve, reject) => {
                 if (!clearance_id) return resolve();
-                let selectQuery = `SELECT * FROM clearance_docs WHERE clearance_id = ?`;
-                let params = [clearance_id];
 
-                if (uploaded_by == 2) {   //  filter only if 2
-                    selectQuery += ` AND uploaded_by = ?`;
-                    params.push(uploaded_by);
+                // STEP 1: Get clearance docs
+                let clearanceQuery = `SELECT * FROM clearance_docs WHERE clearance_id = ?`;
+                let clearanceParams = [clearance_id];
+
+                if (uploaded_by == 2) {
+                    clearanceQuery += ` AND uploaded_by = ?`;
+                    clearanceParams.push(uploaded_by);
                 }
 
-                con.query(selectQuery, params, (err, docs) => {
+                con.query(clearanceQuery, clearanceParams, (err, clearanceDocs) => {
                     if (err) return reject(err);
-                    if (docs.length > 0) groupDocuments(docs, true);
-                    resolve();
+
+                    if (clearanceDocs.length > 0) {
+                        groupDocuments(clearanceDocs, true);
+                    }
+
+                    // STEP 2: Fetch freight_id from clearance table
+                    const freightQuery = `SELECT freight_id FROM tbl_clearance WHERE id = ?`;
+
+                    con.query(freightQuery, [clearance_id], (err2, clearanceResult) => {
+                        if (err2) return reject(err2);
+
+                        if (
+                            clearanceResult.length === 0 ||
+                            !clearanceResult[0].freight_id
+                        ) {
+                            return resolve();
+                        }
+
+                        const relatedFreightId = clearanceResult[0].freight_id;
+
+                        // STEP 3: Fetch freight docs using fetched freight_id
+                        let freightDocsQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
+                        let freightParams = [relatedFreightId];
+
+                        if (uploaded_by == 2) {
+                            freightDocsQuery += ` AND uploaded_by = ?`;
+                            freightParams.push(uploaded_by);
+                        }
+
+                        con.query(freightDocsQuery, freightParams, (err3, freightDocs) => {
+                            if (err3) return reject(err3);
+
+                            if (freightDocs.length > 0) {
+                                groupDocuments(freightDocs, false);
+                            }
+
+                            resolve();
+                        });
+                    });
                 });
             });
         };
@@ -15557,9 +16704,42 @@ const addEstimatSupplierInvoice = async (req, res) => {
 
         console.log(data);
 
+        // List of extra fields to add
+        const extraFields = [
+            // cust_vat, cust_duty, surcharge, disbursement, clearing_fee
+            'cust_vat_qty', 'cust_vat_curr', 'cust_vat_cost', 'cust_vat_unitTyp', 'cust_vat_unit', 'cust_vat_TCost', 'cust_vat_roe', 'cust_vat_finalAmt', 'cust_vat_vatTyp', 'cust_vat_disc', 'cust_vat_discExc', 'cust_vat_total',
+            'cust_duty_qty', 'cust_duty_curr', 'cust_duty_cost', 'cust_duty_unitTyp', 'cust_duty_unit', 'cust_duty_TCost', 'cust_duty_roe', 'cust_duty_finalAmt', 'cust_duty_vatTyp', 'cust_duty_disc', 'cust_duty_discExc', 'cust_duty_total',
+            'surcharge_qty', 'surcharge_curr', 'surcharge_cost', 'surcharge_unitTyp', 'surcharge_unit', 'surcharge_TCost', 'surcharge_roe', 'surcharge_finalAmt', 'surcharge_vatTyp', 'surcharge_disc', 'surcharge_discExc', 'surcharge_total',
+            'disbursement_qty', 'disbursement_curr', 'disbursement_cost', 'disbursement_unitTyp', 'disbursement_unit', 'disbursement_TCost', 'disbursement_roe', 'disbursement_finalAmt', 'disbursement_vatTyp', 'disbursement_disc', 'disbursement_discExc', 'disbursement_total',
+            'clearing_fee_qty', 'clearing_fee_curr', 'clearing_fee_cost', 'clearing_fee_unitTyp', 'clearing_fee_unit', 'clearing_fee_TCost', 'clearing_fee_roe', 'clearing_fee_finalAmt', 'clearing_fee_vatTyp', 'clearing_fee_disc', 'clearing_fee_discExc', 'clearing_fee_total',
+            // custProv_pay, cust_penalty, adv_duty
+            'custProv_pay_qty', 'custProv_pay_curr', 'custProv_pay_cost', 'custProv_pay_unitTyp', 'custProv_pay_unit', 'custProv_pay_TCost', 'custProv_pay_roe', 'custProv_pay_finalAmt', 'custProv_pay_vatTyp', 'custProv_pay_disc', 'custProv_pay_discExc', 'custProv_pay_total',
+            'cust_penalty_qty', 'cust_penalty_curr', 'cust_penalty_cost', 'cust_penalty_unitTyp', 'cust_penalty_unit', 'cust_penalty_TCost', 'cust_penalty_roe', 'cust_penalty_finalAmt', 'cust_penalty_vatTyp', 'cust_penalty_disc', 'cust_penalty_discExc', 'cust_penalty_total',
+            'adv_duty_qty', 'adv_duty_curr', 'adv_duty_cost', 'adv_duty_unitTyp', 'adv_duty_unit', 'adv_duty_TCost', 'adv_duty_roe', 'adv_duty_finalAmt',
+            // vat, disc, total columns for other charge groups
+            'trans_unpack_charg_vatTyp', 'trans_THC_levy_vatTyp', 'trans_clear_fees_vatTyp', 'insurance_vatTyp', 'ocenfreight_charge_vatTyp', 'org_clearance_vatTyp', 'org_forwFee_vatTyp', 'org_docFee_vatTyp', 'origin_cfs_vatTyp', 'origin_fuelSur_vatTyp', 'org_pickUp_vatTyp', 'adv_duty_vatTyp',
+            'trans_unpack_charg_disc', 'trans_THC_levy_disc', 'trans_clear_fees_disc', 'insurance_disc', 'ocenfreight_charge_disc', 'org_clearance_disc', 'org_forwFee_disc', 'org_docFee_disc', 'origin_cfs_disc', 'origin_fuelSur_disc', 'org_pickUp_disc', 'adv_duty_disc',
+            'trans_unpack_charg_discExc', 'trans_THC_levy_discExc', 'trans_clear_fees_discExc', 'insurance_discExc', 'ocenfreight_charge_discExc', 'org_clearance_discExc', 'org_forwFee_discExc', 'org_docFee_discExc', 'origin_cfs_discExc', 'origin_fuelSur_discExc', 'org_pickUp_discExc', 'adv_duty_discExc',
+            'trans_unpack_charg_total', 'trans_THC_levy_total', 'trans_clear_fees_total', 'insurance_total', 'ocenfreight_charge_total', 'org_clearance_total', 'org_forwFee_total', 'org_docFee_total', 'origin_cfs_total', 'origin_fuelSur_total', 'org_pickUp_total', 'adv_duty_total',
+            // other breakdowns
+            'trans_CFS_charg_vatTyp', 'trans_CFS_charg_disc', 'trans_CFS_charg_discExc', 'trans_CFS_charg_total', 'trans_admin_charg_vatTyp', 'trans_admin_charg_disc', 'trans_admin_charg_discExc', 'trans_admin_charg_total',
+            'trans_portCargo_vatTyp', 'trans_portCargo_disc', 'trans_portCargo_discExc', 'trans_portCargo_total', 'trans_adv_loadHouse_vatTyp', 'trans_adv_loadHouse_disc', 'trans_adv_loadHouse_discExc', 'trans_adv_loadHouse_total',
+            'trans_doc_fee_vatTyp', 'trans_doc_fee_disc', 'trans_doc_fee_discExc', 'trans_doc_fee_total',
+            'dest_clearing_fees_vatTyp', 'dest_clearing_fees_disc', 'dest_clearing_fees_discExc', 'dest_clearing_fees_total',
+            'dest_THC_levy_vatTyp', 'dest_THC_levy_disc', 'dest_THC_levy_discExc', 'dest_THC_levy_total',
+            'dest_unpack_chrg_vatTyp', 'dest_unpack_chrg_disc', 'dest_unpack_chrg_discExc', 'dest_unpack_chrg_total',
+            'dest_fuel_Surchar_vatTyp', 'dest_fuel_Surchar_disc', 'dest_fuel_Surchar_discExc', 'dest_fuel_Surchar_total',
+            'dest_admin_chrg_vatTyp', 'dest_admin_chrg_disc', 'dest_admin_chrg_discExc', 'dest_admin_chrg_total',
+            'dest_adv_loadHouse_vatTyp', 'dest_adv_loadHouse_disc', 'dest_adv_loadHouse_discExc', 'dest_adv_loadHouse_total',
+            'dest_CFS_charg_vatTyp', 'dest_CFS_charg_disc', 'dest_CFS_charg_discExc', 'dest_CFS_charg_total',
+            'dest_delivry_charge_vatTyp', 'dest_delivry_charge_disc', 'dest_delivry_charge_discExc', 'dest_delivry_charge_total',
+            'dest_fuel_surchrg_vatTyp', 'dest_fuel_surchrg_disc', 'dest_fuel_surchrg_discExc', 'dest_fuel_surchrg_total',
+            'admin_agencyFee_vatTyp', 'admin_agencyFee_disc', 'admin_agencyFee_discExc', 'admin_agencyFee_total',
+            'admin_disbur_fee_vatTyp', 'admin_disbur_fee_disc', 'admin_disbur_fee_discExc', 'admin_disbur_fee_total',
+            'admin_doc_adminFees_vatTyp', 'admin_doc_adminFees_disc', 'admin_doc_adminFees_discExc', 'admin_doc_adminFees_total'
+        ];
 
         if (data.supplier_invoice_id) {
-
             // Admin update specific quote
             selectQuery = `
          SELECT id as supplier_invoice_id 
@@ -15569,7 +16749,6 @@ const addEstimatSupplierInvoice = async (req, res) => {
             selectParams = [data.supplier_invoice_id];
 
         } else {
-
             // Supplier quote check
             selectQuery = `
          SELECT id as supplier_invoice_id 
@@ -15577,17 +16756,7 @@ const addEstimatSupplierInvoice = async (req, res) => {
          WHERE shipment_id = ? AND supplier_id = ?
            `;
             selectParams = [data.shipment_id, data.supplier_id];
-
         }
-
-        // if (data.quote_estimate_id) {
-        //     selectQuery += `id = ?`;
-        //     selectParams.push(data.quote_estimate_id);
-        // } else {
-        //     // selectQuery += `freight_id = ? AND client_id = ?`;
-        //     // selectParams.push(data.freight_id, data.client_id);
-        //     selectQuery += `1 = 0`;
-        // }
 
         con.query(selectQuery, selectParams, (err, result) => {
             if (err) {
@@ -15598,562 +16767,88 @@ const addEstimatSupplierInvoice = async (req, res) => {
             }
 
             if (result.length > 0) {
+                // Prepare update query with extra fields
+                const updateFieldsArr = [
+                    // pre-existing fields...
+                    'supplier_id', 'shipment_id',
+                    'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
+                    'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
+                    'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
+                    'orifuel4', 'finalfuel1', 'roe_origin_fuel_currency', 'finalvlaueoFuel',
+                    'origin_pick_up_cfs_cost', 'origin_pick_up_cfs_fees', 'origin_pickup_vfs_gp',
+                    'oricfs4', 'finalcfs1', 'roe_origin_cfs_currency', 'finalvlaueocfs',
+                    'origin_pick_up_documantion_cost', 'origin_pick_up_documantation_fees',
+                    'origin_pick_documantation_cost_gp', 'oridoc4', 'finaldoc1',
+                    'roe_origin_doc_currency', 'finalvlaueodoc',
+                    'origin_pick_up_forewarding_cost', 'origin_pick_up_forewarding_fees',
+                    'origin_pickup_forewarding_gp', 'oriforewarding4', 'roe_origin_forewarding',
+                    'finalforewarding1', 'finalvlaueoforewarding',
+                    'origin_pick_up_custome_cost', 'origin_pick_up_custome_clearance',
+                    'origin_pickup_custome_gp', 'oricustome4', 'roe_origin_customes',
+                    'finalcustomes1', 'finalvlaueoCustomes',
+                    'totalChageswithOutExchange', 'totalChangeRoeOrigin',
+                    'freight_charge_currency_cost', 'freight_charge_currency_fees',
+                    'freight_charge_currency_gp', 'orifreight4',
+                    'finalValuefreight', 'finalfreight1', 'finalvlaueofreight',
+                    'freight_currency_insurance_cost', 'freightorigin_insurance_gp',
+                    'freight_currency_insurance_unit', 'oriinsurance4',
+                    'roe_insurance_currency', 'finalinsurance1', 'finalvlaueoInsurance',
+                    'totalChageswithOutExchangeinsurance',
+                    'totalChangeRoeOriginaftercalcuinsurance',
+                    'Transit_currency_Cost', 'Transit_currency_gp', 'Transit_currency_unit',
+                    'finaltransit1', 'oritransit4', 'Transit_currency_roe',
+                    'finalvlaueotransit',
+                    'transit_currency_THC_cost', 'transit_currency_THC_init',
+                    'transit_currency_THC_gp', 'oriThc4', 'finalThc1',
+                    'finalvlaueotfineal', 'roe_Transit_Thc',
+                    'Transit_currency_unpack_cost', 'Transit_currency_unpack_unit',
+                    'Transit_currency_unpack_gp', 'finalunpack1', 'oriunpack4',
+                    'finalvlaueotfunpack', 'Transit_unpack_roe',
+                    'totalChaDestinationTransit', 'totalChaDestinationTransitRoe',
+                    'sumofall', 'sumofRoe',
+                    'transit_3rd_party_cost', 'transit_3rd_party_unit', 'transit_3rd_party_gp', 'ori3rdparty4', 'final3rdparty1', 'finalvlaueot3dparty', 'transit_currency_3rd',
+                    'transit_admin_change', 'transit_admin_unit', 'transit_admin_gp',
+                    'ori3rdAdmin4', 'final3rdAdmin1', 'finalvlaueotAdmin', 'roe_transit_admin',
+                    'transit_currency_port', 'transit_currency_port_unit', 'transit_currency_port_gp', 'ori3rdport4', 'final3rdport1', 'finalvlaueotPort', 'roe_trans_port',
+                    'Transit_advanced_load', 'Transit_advanced_unit', 'Transit_advanced_gp', 'oriadv4', 'final3rdadv1', 'finalvlaueotadv', 'Transit_advanced_gp_roe',
+                    'transit_change_Documentation', 'transit_change_Documentation_unit', 'oridocumentation4', 'transit_change_Documentation_gp', 'final3rdocumantation1', 'finalvlaueotDocumantation', 'roe_transit_change_Documentation',
+                    'totalChageswithOuTransit', 'transitRoe',
+                    'Destination_freight_currency_cost', 'Destination_freight_currency_unit', 'Destination_freight_currency_gp', 'destinationdocumentation4', 'final3rdestinationRoe', 'final3rdestination1', 'Destination_freight_currency_Roe',
+                    'Destination_THC_currency_cost', 'Destination_THC_currency_unit', 'Destination_THC_currency_gp', 'destinationTHCdocumentation4', 'final3rTHCdestination1', 'final3rTHCdestinationRoe', 'Destination_THC_currency_Roe',
+                    'Destination_Unpack_currency_cost', 'Destination_Unpack_currency_unit', 'Destination_Unpack_currency_gp', 'destinationUnpackdocumentation4', 'Destination_Unpack_currency_roe', 'final3rUnpackdestinationRoe', 'final3runpackdestination1',
+                    'totaAdminransit', 'totalAdminnsitRoe',
+                    'Destination_fuelsurcharge_currency_cost', 'Destination_fuelsurcharge_currency_unit', 'Destination_fuelsurcharge_currency_gp', 'destinationfuelsurchargedocumentation4', 'final3rfuelsurchargedestination1', 'final3rfuelsurCahrgeestinationRoe', 'Destination_fuelsurcharge_currency_roe',
+                    'Destination_adminsurcharge_currency_cost', 'Destination_adminsurcharge_currency_unit', 'Destination_adminsurcharge_currency_gp', 'destinatiadminsurcharge4', 'Valueadminsurchargedestanion', 'adminsurcharge2', 'Destination_adminsurcharge_currency_roe',
+                    'Destination_portcargo_currency_cost', 'Destination_portcargo_currency_unit', 'Destination_portcargo_currency_gp', 'destinatiportcargo4', 'Vaportcargoion', 'admiportcargo2', 'Destination_portcargo_currency_roe',
+                    'Destination_AdvancedLoad_currency_cost', 'Destination_AdvancedLoad_currency_unit', 'Destination_AdvancedLoad_currency_gp', 'destinatiAdvancedLoad4', 'VAdvancedLoadion', 'desdvancedLoadion', 'Destination_AdvancedLoad_currency_roe',
+                    'Destination_3rdpartyDesc_currency_cost', 'Destination_3rdpartyDesc_currency_unit', 'Destination_3rdpartyDesc_currency_gp', 'destinati3rdpartyload4', 'VAdvanced3rdpartyLoadion', 'desdva3rdpartyion', 'Destination_3rdpartyDesc_currency_roe',
+                    'Destination_delivery_currency_cost', 'Destination_delivery_currency_unit', 'Destination_delivery_currency_gp', 'destindeliveryyDesc4', 'VAdvandeliverytyLoadion', 'desddeliverytyion', 'Destination_delivery_currency_roe',
+                    'Destination_fuelcharge_currency_cost', 'Destination_fuelcharge_currency_unit', 'Destination_fuelcharge_currency_gp', 'destindfuelchangerDesc4', 'VAdvfuelchangeon', 'defuelchangyion', 'Destination_fuelcharge_currency_roe',
+                    'Destination_AdminAgrncy_currency_cost', 'Destination_AdminAgrncy_currency_unit', 'Destination_AdminAgrncy_currency_gp', 'deadminAgencyesc4', 'VAadminAgencyngeon', 'defuelchdminAgencyngangyion', 'Destination_AdminAgrncy_currency_roe',
+                    'Destination_disbursemant_currency_cost', 'Destination_disbursemant_currency_unit', 'Destination_disbursemant_currency_gp', 'deaddisbursemantc4', 'VAdisbursemon', 'dedisbursementon', 'Destination_disbursemant_currency_roe',
+                    'Destination_doc_currency_cost', 'Destination_doc_currency_unit', 'Destination_doc_currency_gp', 'deadoctc4', 'VAdocon', 'dedisbudoon', 'Destination_doc_currency_roe', 'roe_freight_currency',
+                    'freight_charge_currency', 'freight_charge_currency_unitType', 'freight_currency_insurance_unittype',
+                    'origin_pick_up_unitType', 'origin_pick_up_fuel_unitType', 'origin_pick_up_cfs_unitType', 'origin_pick_up_documantation_unitType', 'origin_pick_up_forewarding_unitType', 'origin_pick_up_custome_unitType',
+                    'Transit_currency_unitTpe', 'transit_currency_THC_initType', 'Transit_currency_unpack_unitType', 'transit_3rd_party_unittype', 'transit_admin_unittype', 'transit_currency_port_unitType', 'Transit_advanced_unitType', 'transit_change_Documentation_unitType',
+                    'Destination_freight_currency_unitType', 'Destination_THC_currency_unitType', 'Destination_Unpack_currency_unitType', 'Destination_fuelsurcharge_currency_typeUnit', 'Destination_adminsurcharge_currency_unitType', 'Destination_portcargo_currency_unitType', 'Destination_AdvancedLoad_currency_unitType', 'Destination_3rdpartyDesc_currency_unitType', 'Destination_delivery_currency_unitType', 'Destination_fuelcharge_currency_unitType',
+                    'Destination_AdminAgrncy_currency_unitType', 'Destination_disbursemant_currency_unitType', 'Destination_doc_currency_unittype',
+                    'freight_charge_currencyQTY', 'origin_pick_up_fuel_unitTypeQTY', 'origin_pick_up_cfs_unitTypeQTY', 'origin_pick_up_forewarding_unitTypeQTY', 'origin_pick_up_documantation_unitTypeQTY', 'origin_pick_up_custome_unitTypeQTY', 'chargable_rate', 'freight_charge_currency_unitTypeQTY', 'freight_currency_insurance_unittypeQTY',
+                    'Transit_currency_unitTpeQTY', 'transit_currency_THC_initTypeQTY', 'transit_currency_THC_initTypeeQTY', 'transit_3rd_party_unittypeQTY', 'transit_admin_unittypeQTY', 'transit_currency_port_unitTypeQTY', 'Transit_advanced_unitTypeQTY', 'transit_change_Documentation_unitTypeQTY',
+                    'Destination_freight_currency_unitTypeQTY', 'Destination_THC_currency_unitTypeQTY', 'Destination_Unpack_currency_unitTypeQTY', 'Destination_fuelsurcharge_currency_typeUnitQTY', 'Destination_adminsurcharge_currency_unitTypeQTY', 'Destination_portcargo_currency_unitTypeQTY', 'Destination_AdvancedLoad_currency_unitTypeQTY', 'Destination_3rdpartyDesc_currency_unitTypeQTY', 'Destination_delivery_currency_unitTypeQTY', 'Destination_fuelcharge_currency_unitTypeQTY', 'Destination_AdminAgrncy_currency_unitQTY', 'Destination_disbursemant_currency_unitTypeQTY', 'Destination_doc_currency_unittypeQTY', 'pickup_freight_currency', 'Transit_currency', 'Destination_freight_currency', 'admin_currency_charge', 'Destination_disbursemant_currenc_unitType1'
+                ];
+                // Incorporate extra fields
+                updateFieldsArr.push(...extraFields);
 
                 const updateQuery = `
                     UPDATE supplier_sage_invoice SET
-                        supplier_id=?, shipment_id=?,
-
-                        origin_pick_up_cost=?, origin_pick_up_fees=?, origin_pickup_fee_gpcalc=?,
-                        oripick4=?, finalori1=?, roe_origin_currencyorigin=?, finalvlaueoriginPickup=?,
-
-                        origin_pick_up_fuel_cost=?, origin_pick_up_fuel_fees=?, origin_pick_fuelGP=?,
-                        orifuel4=?, finalfuel1=?, roe_origin_fuel_currency=?, finalvlaueoFuel=?,
-
-                        origin_pick_up_cfs_cost=?, origin_pick_up_cfs_fees=?, origin_pickup_vfs_gp=?,
-                        oricfs4=?, finalcfs1=?, roe_origin_cfs_currency=?, finalvlaueocfs=?,
-
-                        origin_pick_up_documantion_cost=?, origin_pick_up_documantation_fees=?,
-                        origin_pick_documantation_cost_gp=?, oridoc4=?, finaldoc1=?,
-                        roe_origin_doc_currency=?, finalvlaueodoc=?,
-
-                        origin_pick_up_forewarding_cost=?, origin_pick_up_forewarding_fees=?,
-                        origin_pickup_forewarding_gp=?, oriforewarding4=?, roe_origin_forewarding=?,
-                        finalforewarding1=?, finalvlaueoforewarding=?,
-
-                        origin_pick_up_custome_cost=?, origin_pick_up_custome_clearance=?,
-                        origin_pickup_custome_gp=?, oricustome4=?, roe_origin_customes=?,
-                        finalcustomes1=?, finalvlaueoCustomes=?,
-
-                        totalChageswithOutExchange=?, totalChangeRoeOrigin=?,
-
-                        freight_charge_currency_cost=?, freight_charge_currency_fees=?,
-                        freight_charge_currency_gp=?, orifreight4=?,
-                        finalValuefreight=?, finalfreight1=?, finalvlaueofreight=?,
-
-                        freight_currency_insurance_cost=?, freightorigin_insurance_gp=?,
-                        freight_currency_insurance_unit=?, oriinsurance4=?,
-                        roe_insurance_currency=?, finalinsurance1=?, finalvlaueoInsurance=?,
-
-                        totalChageswithOutExchangeinsurance=?,
-                        totalChangeRoeOriginaftercalcuinsurance=?,
-
-                        Transit_currency_Cost=?, Transit_currency_gp=?, Transit_currency_unit=?,
-                        finaltransit1=?, oritransit4=?, Transit_currency_roe=?,
-                        finalvlaueotransit=?,
-
-                        transit_currency_THC_cost=?, transit_currency_THC_init=?,
-                        transit_currency_THC_gp=?, oriThc4=?, finalThc1=?,
-                        finalvlaueotfineal=?, roe_Transit_Thc=?,
-
-                        Transit_currency_unpack_cost=?, Transit_currency_unpack_unit=?,
-                        Transit_currency_unpack_gp=?, finalunpack1=?, oriunpack4=?,
-                        finalvlaueotfunpack=?, Transit_unpack_roe=?,
-
-                        totalChaDestinationTransit=?, totalChaDestinationTransitRoe=?,
-                        sumofall=?, sumofRoe=?,
-                        transit_3rd_party_cost=?,
-                        transit_3rd_party_unit=?,
-                        transit_3rd_party_gp=?,
-                        ori3rdparty4=?,
-                        final3rdparty1=?,
-                        finalvlaueot3dparty=?,
-                        transit_currency_3rd=?,
-
-                        transit_admin_change=?,
-                        transit_admin_unit=?,
-                        transit_admin_gp=?,
-                        ori3rdAdmin4=?,
-                        final3rdAdmin1=?,
-                        finalvlaueotAdmin=?,
-                        roe_transit_admin=?,
-
-                        transit_currency_port=?,
-                        transit_currency_port_unit=?,
-                        transit_currency_port_gp=?,
-                        ori3rdport4=?,
-                        final3rdport1=?,
-                        finalvlaueotPort=?,
-                        roe_trans_port=?,
-
-                        Transit_advanced_load=?,
-                        Transit_advanced_unit=?,
-                        Transit_advanced_gp=?,
-                        oriadv4=?,
-                        final3rdadv1=?,
-                        finalvlaueotadv=?,
-                        Transit_advanced_gp_roe=?,
-
-                        transit_change_Documentation=?,
-                        transit_change_Documentation_unit=?,
-                        oridocumentation4=?,
-                        transit_change_Documentation_gp=?,
-                        final3rdocumantation1=?,
-                        finalvlaueotDocumantation=?,
-                        roe_transit_change_Documentation=?,
-
-                        totalChageswithOuTransit=?,
-                        transitRoe=?,
-
-                        Destination_freight_currency_cost=?,
-                        Destination_freight_currency_unit=?,
-                        Destination_freight_currency_gp=?,
-                        destinationdocumentation4=?,
-                        final3rdestinationRoe=?,
-                        final3rdestination1=?,
-                        Destination_freight_currency_Roe=?,
-
-                        Destination_THC_currency_cost=?,
-                        Destination_THC_currency_unit=?,
-                        Destination_THC_currency_gp=?,
-                        destinationTHCdocumentation4=?,
-                        final3rTHCdestination1=?,
-                        final3rTHCdestinationRoe=?,
-                        Destination_THC_currency_Roe=?,
-
-                        Destination_Unpack_currency_cost=?,
-                        Destination_Unpack_currency_unit=?,
-                        Destination_Unpack_currency_gp=?,
-                        destinationUnpackdocumentation4=?,
-                        Destination_Unpack_currency_roe=?,
-                        final3rUnpackdestinationRoe=?,
-                        final3runpackdestination1=?,
-
-                        totaAdminransit=?,
-                        totalAdminnsitRoe=?,
-
-                        Destination_fuelsurcharge_currency_cost = ?,
-                        Destination_fuelsurcharge_currency_unit = ?,
-                        Destination_fuelsurcharge_currency_gp = ?,
-                        destinationfuelsurchargedocumentation4 = ?,
-                        final3rfuelsurchargedestination1 = ?,
-                        final3rfuelsurCahrgeestinationRoe = ?,
-                        Destination_fuelsurcharge_currency_roe = ?,
-
-                        Destination_adminsurcharge_currency_cost = ?,
-                        Destination_adminsurcharge_currency_unit = ?,
-                        Destination_adminsurcharge_currency_gp = ?,
-                        destinatiadminsurcharge4 = ?,
-                        Valueadminsurchargedestanion = ?,
-                        adminsurcharge2 = ?,
-                        Destination_adminsurcharge_currency_roe = ?,
-
-                        Destination_portcargo_currency_cost = ?,
-                        Destination_portcargo_currency_unit = ?,
-                        Destination_portcargo_currency_gp = ?,
-                        destinatiportcargo4 = ?,
-                        Vaportcargoion = ?,
-                        admiportcargo2 = ?,
-                        Destination_portcargo_currency_roe = ?,
-
-                        Destination_AdvancedLoad_currency_cost = ?,
-                        Destination_AdvancedLoad_currency_unit = ?,
-                        Destination_AdvancedLoad_currency_gp = ?,
-                        destinatiAdvancedLoad4 = ?,
-                        VAdvancedLoadion = ?,
-                        desdvancedLoadion = ?,
-                        Destination_AdvancedLoad_currency_roe = ?,
-
-                        Destination_3rdpartyDesc_currency_cost = ?,
-                        Destination_3rdpartyDesc_currency_unit = ?,
-                        Destination_3rdpartyDesc_currency_gp = ?,
-                        destinati3rdpartyload4 = ?,
-                        VAdvanced3rdpartyLoadion = ?,
-                        desdva3rdpartyion = ?,
-                        Destination_3rdpartyDesc_currency_roe = ?,
-
-                        Destination_delivery_currency_cost = ?,
-                        Destination_delivery_currency_unit = ?,
-                        Destination_delivery_currency_gp = ?,
-                        destindeliveryyDesc4 = ?,
-                        VAdvandeliverytyLoadion = ?,
-                        desddeliverytyion = ?,
-                        Destination_delivery_currency_roe = ?,
-
-                        Destination_fuelcharge_currency_cost = ?,
-                        Destination_fuelcharge_currency_unit = ?,
-                        Destination_fuelcharge_currency_gp = ?,
-                        destindfuelchangerDesc4 = ?,
-                        VAdvfuelchangeon = ?,
-                        defuelchangyion = ?,
-                        Destination_fuelcharge_currency_roe = ?,
-
-                        Destination_AdminAgrncy_currency_cost = ?,
-                        Destination_AdminAgrncy_currency_unit = ?,
-                        Destination_AdminAgrncy_currency_gp = ?,
-                        deadminAgencyesc4 = ?,
-                        VAadminAgencyngeon = ?,
-                        defuelchdminAgencyngangyion = ?,
-                        Destination_AdminAgrncy_currency_roe = ?,
-
-                        Destination_disbursemant_currency_cost = ?,
-                        Destination_disbursemant_currency_unit = ?,
-                        Destination_disbursemant_currency_gp = ?,
-                        deaddisbursemantc4 = ?,
-                        VAdisbursemon = ?,
-                        dedisbursementon = ?,
-                        Destination_disbursemant_currency_roe = ?,
-
-                        Destination_doc_currency_cost = ?,
-                        Destination_doc_currency_unit = ?,
-                        Destination_doc_currency_gp = ?,
-                        deadoctc4 = ?,
-                        VAdocon = ?,
-                        dedisbudoon = ?,
-                        Destination_doc_currency_roe = ?,
-                        roe_freight_currency = ?,
-
-                        freight_charge_currency = ?,
-                        freight_charge_currency_unitType = ?,
-                        freight_currency_insurance_unittype = ?,
-
-                        origin_pick_up_unitType = ?,
-                        origin_pick_up_fuel_unitType = ?,
-                        origin_pick_up_cfs_unitType = ?,
-                        origin_pick_up_documantation_unitType = ?,
-                        origin_pick_up_forewarding_unitType = ?,
-                        origin_pick_up_custome_unitType = ?,
-
-                        Transit_currency_unitTpe = ?,
-                        transit_currency_THC_initType = ?,
-                        Transit_currency_unpack_unitType = ?,
-                        transit_3rd_party_unittype = ?,
-                        transit_admin_unittype = ?,
-                        transit_currency_port_unitType = ?,
-                        Transit_advanced_unitType = ?,
-                        transit_change_Documentation_unitType = ?,
-
-                        Destination_freight_currency_unitType = ?,
-                        Destination_THC_currency_unitType = ?,
-                        Destination_Unpack_currency_unitType = ?,
-                        Destination_fuelsurcharge_currency_typeUnit = ?,
-                        Destination_adminsurcharge_currency_unitType = ?,
-                        Destination_portcargo_currency_unitType = ?,
-                        Destination_AdvancedLoad_currency_unitType = ?,
-                        Destination_3rdpartyDesc_currency_unitType = ?,
-                        Destination_delivery_currency_unitType = ?,
-                        Destination_fuelcharge_currency_unitType = ?,
-
-                        Destination_AdminAgrncy_currency_unitType = ?,
-                        Destination_disbursemant_currency_unitType = ?,
-                        Destination_doc_currency_unittype = ?,
-
-                        freight_charge_currencyQTY = ?,
-                        origin_pick_up_fuel_unitTypeQTY = ?,
-                        origin_pick_up_cfs_unitTypeQTY = ?,
-                        origin_pick_up_forewarding_unitTypeQTY = ?,
-                        origin_pick_up_documantation_unitTypeQTY = ?,
-                        origin_pick_up_custome_unitTypeQTY = ?,
-                        chargable_rate = ?,
-                        freight_charge_currency_unitTypeQTY = ?,
-                        freight_currency_insurance_unittypeQTY = ?,
-
-                        Transit_currency_unitTpeQTY = ?,
-                        transit_currency_THC_initTypeQTY = ?,
-                        transit_currency_THC_initTypeeQTY = ?,
-                        transit_3rd_party_unittypeQTY = ?,
-                        transit_admin_unittypeQTY = ?,
-                        transit_currency_port_unitTypeQTY = ?,
-                        Transit_advanced_unitTypeQTY = ?,
-                        transit_change_Documentation_unitTypeQTY = ?,
-
-                        Destination_freight_currency_unitTypeQTY = ?,
-                        Destination_THC_currency_unitTypeQTY = ?,
-                        Destination_Unpack_currency_unitTypeQTY = ?,
-                        Destination_fuelsurcharge_currency_typeUnitQTY = ?,
-                        Destination_adminsurcharge_currency_unitTypeQTY = ?,
-                        Destination_portcargo_currency_unitTypeQTY = ?,
-                        Destination_AdvancedLoad_currency_unitTypeQTY = ?,
-                        Destination_3rdpartyDesc_currency_unitTypeQTY = ?,
-                        Destination_delivery_currency_unitTypeQTY = ?,
-                        Destination_fuelcharge_currency_unitTypeQTY = ?,
-                        Destination_AdminAgrncy_currency_unitQTY = ?,
-                        Destination_disbursemant_currency_unitTypeQTY = ?,
-                        Destination_doc_currency_unittypeQTY = ?,
-                        pickup_freight_currency =?,
-                        Transit_currency=?,
-                        Destination_freight_currency=?,
-                        admin_currency_charge=?,
-                        Destination_disbursemant_currenc_unitType1=?
+                        ${updateFieldsArr.map(field => `${field}=?`).join(', ')}
                     WHERE id=?
                 `;
 
-                const updateParams = [
-                    data.supplier_id, data.shipment_id,
-                    data.origin_pick_up_cost, data.origin_pick_up_fees, data.origin_pickup_fee_gpcalc,
-                    data.oripick4, data.finalori1, data.roe_origin_currencyorigin, data.finalvlaueoriginPickup,
-
-                    data.origin_pick_up_fuel_cost, data.origin_pick_up_fuel_fees, data.origin_pick_fuelGP,
-                    data.orifuel4, data.finalfuel1, data.roe_origin_fuel_currency, data.finalvlaueoFuel,
-
-                    data.origin_pick_up_cfs_cost, data.origin_pick_up_cfs_fees, data.origin_pickup_vfs_gp,
-                    data.oricfs4, data.finalcfs1, data.roe_origin_cfs_currency, data.finalvlaueocfs,
-
-                    data.origin_pick_up_documantion_cost, data.origin_pick_up_documantation_fees,
-                    data.origin_pick_documantation_cost_gp, data.oridoc4, data.finaldoc1,
-                    data.roe_origin_doc_currency, data.finalvlaueodoc,
-
-                    data.origin_pick_up_forewarding_cost, data.origin_pick_up_forewarding_fees,
-
-                    data.origin_pickup_forewarding_gp, data.oriforewarding4, data.roe_origin_forewarding,
-                    data.finalforewarding1, data.finalvlaueoforewarding,
-
-                    data.origin_pick_up_custome_cost, data.origin_pick_up_custome_clearance,
-                    data.origin_pickup_custome_gp, data.oricustome4, data.roe_origin_customes,
-                    data.finalcustomes1, data.finalvlaueoCustomes,
-
-                    data.totalChageswithOutExchange, data.totalChangeRoeOrigin,
-
-                    data.freight_charge_currency_cost, data.freight_charge_currency_fees,
-                    data.freight_charge_currency_gp, data.orifreight4,
-                    data.finalValuefreight, data.finalfreight1, data.finalvlaueofreight,
-
-                    data.freight_currency_insurance_cost, data.freightorigin_insurance_gp,
-                    data.freight_currency_insurance_unit, data.oriinsurance4,
-                    data.roe_insurance_currency, data.finalinsurance1, data.finalvlaueoInsurance,
-
-                    data.totalChageswithOutExchangeinsurance,
-                    data.totalChangeRoeOriginaftercalcuinsurance,
-
-                    data.Transit_currency_Cost, data.Transit_currency_gp, data.Transit_currency_unit,
-                    data.finaltransit1, data.oritransit4, data.Transit_currency_roe,
-                    data.finalvlaueotransit,
-
-                    data.transit_currency_THC_cost, data.transit_currency_THC_init,
-                    data.transit_currency_THC_gp, data.oriThc4, data.finalThc1,
-                    data.finalvlaueotfineal, data.roe_Transit_Thc,
-
-                    data.Transit_currency_unpack_cost, data.Transit_currency_unpack_unit,
-                    data.Transit_currency_unpack_gp, data.finalunpack1, data.oriunpack4,
-                    data.finalvlaueotfunpack, data.Transit_unpack_roe,
-
-                    data.totalChaDestinationTransit, data.totalChaDestinationTransitRoe,
-                    data.sumofall, data.sumofRoe,
-
-                    data.transit_3rd_party_cost,
-                    data.transit_3rd_party_unit,
-                    data.transit_3rd_party_gp,
-                    data.ori3rdparty4,
-                    data.final3rdparty1,
-                    data.finalvlaueot3dparty,
-                    data.transit_currency_3rd,
-
-                    data.transit_admin_change,
-                    data.transit_admin_unit,
-                    data.transit_admin_gp,
-                    data.ori3rdAdmin4,
-                    data.final3rdAdmin1,
-                    data.finalvlaueotAdmin,
-                    data.roe_transit_admin,
-
-                    data.transit_currency_port,
-                    data.transit_currency_port_unit,
-                    data.transit_currency_port_gp,
-                    data.ori3rdport4,
-                    data.final3rdport1,
-                    data.finalvlaueotPort,
-                    data.roe_trans_port,
-
-                    data.Transit_advanced_load,
-                    data.Transit_advanced_unit,
-                    data.Transit_advanced_gp,
-                    data.oriadv4,
-                    data.final3rdadv1,
-                    data.finalvlaueotadv,
-                    data.Transit_advanced_gp_roe,
-
-                    data.transit_change_Documentation,
-                    data.transit_change_Documentation_unit,
-                    data.oridocumentation4,
-                    data.transit_change_Documentation_gp,
-                    data.final3rdocumantation1,
-                    data.finalvlaueotDocumantation,
-                    data.roe_transit_change_Documentation,
-
-                    data.totalChageswithOuTransit,
-                    data.transitRoe,
-
-                    data.Destination_freight_currency_cost,
-                    data.Destination_freight_currency_unit,
-                    data.Destination_freight_currency_gp,
-                    data.destinationdocumentation4,
-                    data.final3rdestinationRoe,
-                    data.final3rdestination1,
-                    data.Destination_freight_currency_Roe,
-
-                    data.Destination_THC_currency_cost,
-                    data.Destination_THC_currency_unit,
-                    data.Destination_THC_currency_gp,
-                    data.destinationTHCdocumentation4,
-                    data.final3rTHCdestination1,
-                    data.final3rTHCdestinationRoe,
-                    data.Destination_THC_currency_Roe,
-
-                    data.Destination_Unpack_currency_cost,
-                    data.Destination_Unpack_currency_unit,
-                    data.Destination_Unpack_currency_gp,
-                    data.destinationUnpackdocumentation4,
-                    data.Destination_Unpack_currency_roe,
-                    data.final3rUnpackdestinationRoe,
-                    data.final3runpackdestination1,
-
-                    data.totaAdminransit,
-                    data.totalAdminnsitRoe,
-
-                    data.Destination_fuelsurcharge_currency_cost,
-                    data.Destination_fuelsurcharge_currency_unit,
-                    data.Destination_fuelsurcharge_currency_gp,
-                    data.destinationfuelsurchargedocumentation4,
-                    data.final3rfuelsurchargedestination1,
-                    data.final3rfuelsurCahrgeestinationRoe,
-                    data.Destination_fuelsurcharge_currency_roe,
-
-                    data.Destination_adminsurcharge_currency_cost,
-                    data.Destination_adminsurcharge_currency_unit,
-                    data.Destination_adminsurcharge_currency_gp,
-                    data.destinatiadminsurcharge4,
-                    data.Valueadminsurchargedestanion,
-                    data.adminsurcharge2,
-                    data.Destination_adminsurcharge_currency_roe,
-
-                    data.Destination_portcargo_currency_cost,
-                    data.Destination_portcargo_currency_unit,
-                    data.Destination_portcargo_currency_gp,
-                    data.destinatiportcargo4,
-                    data.Vaportcargoion,
-                    data.admiportcargo2,
-                    data.Destination_portcargo_currency_roe,
-
-                    data.Destination_AdvancedLoad_currency_cost,
-                    data.Destination_AdvancedLoad_currency_unit,
-                    data.Destination_AdvancedLoad_currency_gp,
-                    data.destinatiAdvancedLoad4,
-                    data.VAdvancedLoadion,
-                    data.desdvancedLoadion,
-                    data.Destination_AdvancedLoad_currency_roe,
-
-                    data.Destination_3rdpartyDesc_currency_cost,
-                    data.Destination_3rdpartyDesc_currency_unit,
-                    data.Destination_3rdpartyDesc_currency_gp,
-                    data.destinati3rdpartyload4,
-                    data.VAdvanced3rdpartyLoadion,
-                    data.desdva3rdpartyion,
-                    data.Destination_3rdpartyDesc_currency_roe,
-
-                    data.Destination_delivery_currency_cost,
-                    data.Destination_delivery_currency_unit,
-                    data.Destination_delivery_currency_gp,
-                    data.destindeliveryyDesc4,
-                    data.VAdvandeliverytyLoadion,
-                    data.desddeliverytyion,
-                    data.Destination_delivery_currency_roe,
-
-                    data.Destination_fuelcharge_currency_cost,
-                    data.Destination_fuelcharge_currency_unit,
-                    data.Destination_fuelcharge_currency_gp,
-                    data.destindfuelchangerDesc4,
-                    data.VAdvfuelchangeon,
-                    data.defuelchangyion,
-                    data.Destination_fuelcharge_currency_roe,
-
-                    data.Destination_AdminAgrncy_currency_cost,
-                    data.Destination_AdminAgrncy_currency_unit,
-                    data.Destination_AdminAgrncy_currency_gp,
-                    data.deadminAgencyesc4,
-                    data.VAadminAgencyngeon,
-                    data.defuelchdminAgencyngangyion,
-                    data.Destination_AdminAgrncy_currency_roe,
-
-                    data.Destination_disbursemant_currency_cost,
-                    data.Destination_disbursemant_currency_unit,
-                    data.Destination_disbursemant_currency_gp,
-                    data.deaddisbursemantc4,
-                    data.VAdisbursemon,
-                    data.dedisbursementon,
-                    data.Destination_disbursemant_currency_roe,
-
-                    data.Destination_doc_currency_cost,
-                    data.Destination_doc_currency_unit,
-                    data.Destination_doc_currency_gp,
-                    data.deadoctc4,
-                    data.VAdocon,
-                    data.dedisbudoon,
-                    data.Destination_doc_currency_roe,
-                    data.roe_freight_currency,
-
-                    data.freight_charge_currency,
-                    data.freight_charge_currency_unitType,
-                    data.freight_currency_insurance_unittype,
-
-                    data.origin_pick_up_unitType,
-                    data.origin_pick_up_fuel_unitType,
-                    data.origin_pick_up_cfs_unitType,
-                    data.origin_pick_up_documantation_unitType,
-                    data.origin_pick_up_forewarding_unitType,
-                    data.origin_pick_up_custome_unitType,
-
-                    data.Transit_currency_unitTpe,
-                    data.transit_currency_THC_initType,
-                    data.Transit_currency_unpack_unitType,
-                    data.transit_3rd_party_unittype,
-                    data.transit_admin_unittype,
-                    data.transit_currency_port_unitType,
-                    data.Transit_advanced_unitType,
-                    data.transit_change_Documentation_unitType,
-
-                    data.Destination_freight_currency_unitType,
-                    data.Destination_THC_currency_unitType,
-                    data.Destination_Unpack_currency_unitType,
-                    data.Destination_fuelsurcharge_currency_typeUnit,
-                    data.Destination_adminsurcharge_currency_unitType,
-                    data.Destination_portcargo_currency_unitType,
-                    data.Destination_AdvancedLoad_currency_unitType,
-                    data.Destination_3rdpartyDesc_currency_unitType,
-                    data.Destination_delivery_currency_unitType,
-                    data.Destination_fuelcharge_currency_unitType,
-
-                    data.Destination_AdminAgrncy_currency_unitType,
-                    data.Destination_disbursemant_currency_unitType,
-                    data.Destination_doc_currency_unittype,
-
-                    data.freight_charge_currencyQTY,
-                    data.origin_pick_up_fuel_unitTypeQTY,
-                    data.origin_pick_up_cfs_unitTypeQTY,
-                    data.origin_pick_up_forewarding_unitTypeQTY,
-                    data.origin_pick_up_documantation_unitTypeQTY,
-                    data.origin_pick_up_custome_unitTypeQTY,
-                    data.chargable_rate,
-                    data.freight_charge_currency_unitTypeQTY,
-                    data.freight_currency_insurance_unittypeQTY,
-
-                    data.Transit_currency_unitTpeQTY,
-                    data.transit_currency_THC_initTypeQTY,
-                    data.transit_currency_THC_initTypeeQTY,
-                    data.transit_3rd_party_unittypeQTY,
-                    data.transit_admin_unittypeQTY,
-                    data.transit_currency_port_unitTypeQTY,
-                    data.Transit_advanced_unitTypeQTY,
-                    data.transit_change_Documentation_unitTypeQTY,
-
-                    data.Destination_freight_currency_unitTypeQTY,
-                    data.Destination_THC_currency_unitTypeQTY,
-                    data.Destination_Unpack_currency_unitTypeQTY,
-                    data.Destination_fuelsurcharge_currency_typeUnitQTY,
-                    data.Destination_adminsurcharge_currency_unitTypeQTY,
-                    data.Destination_portcargo_currency_unitTypeQTY,
-                    data.Destination_AdvancedLoad_currency_unitTypeQTY,
-                    data.Destination_3rdpartyDesc_currency_unitTypeQTY,
-                    data.Destination_delivery_currency_unitTypeQTY,
-                    data.Destination_fuelcharge_currency_unitTypeQTY,
-                    data.Destination_AdminAgrncy_currency_unitQTY,
-                    data.Destination_disbursemant_currency_unitTypeQTY,
-                    data.Destination_doc_currency_unittypeQTY,
-                    data.pickup_freight_currency,
-                    data.Transit_currency,
-                    data.Destination_freight_currency,
-                    data.admin_currency_charge,
-                    data.Destination_disbursemant_currenc_unitType1,
-                    result[0].supplier_invoice_id
-                ];
+                // Form updateParams with values from data for all fields, including extras
+                const updateParams = updateFieldsArr.map(field => data[field]);
+                // Add the id to update in the end
+                updateParams.push(result[0].supplier_invoice_id);
 
                 con.query(updateQuery, updateParams, (err, updateData) => {
                     if (err) {
@@ -16167,20 +16862,21 @@ const addEstimatSupplierInvoice = async (req, res) => {
                         [result[0].supplier_invoice_id, data.shipment_id]
                     );
 
-
                     return res.status(200).send({
                         success: true,
                         message: "Estimate shipping quote updated successfully"
                     });
                 });
-
             }
             /* ================= INSERT ================= */
             else {
-
+                // Compose all fields for insert: combine old and extra fields
+                const insertData = { ...data };
+                extraFields.forEach(field => {
+                    if (!(field in insertData)) insertData[field] = null;
+                });
                 const insertQuery = `INSERT INTO supplier_sage_invoice SET ?`;
-
-                con.query(insertQuery, data, (err, insertData) => {
+                con.query(insertQuery, insertData, (err, insertDataRes) => {
                     if (err) {
                         return res.status(500).send({
                             success: false,
@@ -16189,13 +16885,12 @@ const addEstimatSupplierInvoice = async (req, res) => {
                     }
                     con.query(
                         `UPDATE tbl_shipments SET supplier_invoice_id=?, supplier_invoice_date=NOW() WHERE id=?`,
-                        [insertData.insertId, data.shipment_id]
+                        [insertDataRes.insertId, data.shipment_id]
                     );
-
                     return res.status(200).send({
                         success: true,
                         message: "Estimate shipping quote added successfully",
-                        ID: insertData.insertId
+                        ID: insertDataRes.insertId
                     });
                 });
             }
@@ -16584,9 +17279,121 @@ const getSupplierInvoiceById = async (req, res) => {
     }
 };
 
+const copySupplierInvoice = async (req, res) => {
+    try {
+        const {
+            supplier_invoice_id,
+            shipment_id,
+            supplier_id
+        } = req.body;
+
+        // ================= VALIDATION =================
+
+        if (!supplier_invoice_id) {
+
+            return res.status(400).send({
+                success: false,
+                message: "supplier_invoice_id is required"
+            });
+        }
+
+        // ================= GET OLD INVOICE =================
+
+        con.query(
+            `SELECT * 
+             FROM supplier_sage_invoice
+             WHERE id = ?`,
+            [supplier_invoice_id],
+            (err, result) => {
+
+                if (err) {
+
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                if (result.length === 0) {
+
+                    return res.status(404).send({
+                        success: false,
+                        message: "Invoice not found"
+                    });
+                }
+
+                // ================= COPY DATA =================
+
+                let copyData = { ...result[0] };
+
+                // Remove primary key
+                delete copyData.id;
+
+                // Optional override
+                if (shipment_id) {
+                    copyData.shipment_id = shipment_id;
+                }
+
+                if (supplier_id) {
+                    copyData.supplier_id = supplier_id;
+                }
+
+                // Optional timestamps
+                copyData.created_at = new Date();
+                copyData.updated_at = new Date();
+
+                // ================= INSERT NEW COPY =================
+
+                con.query(
+                    `INSERT INTO supplier_sage_invoice SET ?`,
+                    copyData,
+                    (insertErr, insertResult) => {
+
+                        if (insertErr) {
+
+                            return res.status(500).send({
+                                success: false,
+                                message: insertErr.message
+                            });
+                        }
+
+                        // Update shipment
+                        if (shipment_id) {
+
+                            con.query(
+                                `UPDATE tbl_shipments
+                                 SET supplier_invoice_id = ?,
+                                     supplier_invoice_date = NOW()
+                                 WHERE id = ?`,
+                                [
+                                    insertResult.insertId,
+                                    shipment_id
+                                ]
+                            );
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Supplier invoice copied successfully",
+                            new_supplier_invoice_id: insertResult.insertId
+                        });
+                    }
+                );
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 module.exports = {
     AdminLogin, ChangePassword, PrivacyPolicy, GetPrivacy, TermCondition, GetTerms, Addfreight,
-    GetFreightAdmin, EditFreight, GetFreightById, DeleteFreight, AddCountryOrigin, getCountryOriginList,
+    GetFreightAdmin, GetReadyFreightAdmin, ManageFreightStatus, EditFreight, GetFreightById, DeleteFreight, AddCountryOrigin, getCountryOriginList,
     updateCountryOrigin, GetCountryById, DeleteCountry, clientListAddFreight, CountryListAddFreight,
     Shipping_Estimate, Shipping_Estimate_supplier, updateShippingEstimate, ShipEstimateList, GetShipEstimateById, DeleteShipEstimate,
     updateProfile, forgotPassword, ResetPassword, SendNotification, GetNotification, deleteNotification,
@@ -16601,5 +17408,5 @@ module.exports = {
     DeleteDocument, clearanceDocument, ShipmentDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight, createFreightFolders, GetShipEstimateSupplierId, ApproveShippingEstimate,
     addEstimateShippingQuote, GetQuoteShipEstimateById, GetQuoteShipEstimateBySupplier, NewGetAllBatch, assignWarehouseSupplierToOrder, getAllAssignedOrdersToWarehouse, GetFreightAdminById,
     getAllAssignedOrdersToWarehouseBySupplier, assignWarehouseOrderToSupplier, getAssignedOrdersBySupplier, updateWareHouseProductBySupplier,
-    addEstimatSupplierInvoice, getWaybillDropdown, getAllSupplierInvoices, deleteSupplierInvoice, getSupplierInvoiceById
+    addEstimatSupplierInvoice, getWaybillDropdown, getAllSupplierInvoices, deleteSupplierInvoice, getSupplierInvoiceById, copySupplierInvoice
 }

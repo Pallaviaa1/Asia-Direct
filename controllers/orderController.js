@@ -1835,6 +1835,73 @@ const GetSageInvoiceList = async (req, res) => {
     }
 };
 
+const GetSageInvoiceDropdown = async (req, res) => {
+
+    try {
+
+        const { order_ID, search = "" } = req.query;
+
+        let query = `
+            SELECT id, document_number
+            FROM sage_invoice_list
+            WHERE (
+                id NOT IN (
+                    SELECT DISTINCT sage_invoice_id
+                    FROM tbl_orders
+                    WHERE sage_invoice_id IS NOT NULL
+                    AND id != ?
+                )
+                OR id = (
+                    SELECT sage_invoice_id
+                    FROM tbl_orders
+                    WHERE id = ?
+                )
+            )
+            AND document_number LIKE ?
+            ORDER BY document_number DESC
+        `;
+
+        con.query(
+            query,
+            [
+                order_ID,
+                order_ID,
+                `%${search}%`
+            ],
+            (err, data) => {
+
+                if (err) {
+
+                    console.error("Database error:", err.message);
+
+                    return res.status(500).json({
+                        success: false,
+                        message: "Database query failed."
+                    });
+
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    data
+                });
+
+            }
+        );
+
+    } catch (error) {
+
+        console.error("Unexpected error:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Unexpected error"
+        });
+
+    }
+
+};
+
 
 const DeleteSageInvoice = async (req, res) => {
     try {
@@ -2697,5 +2764,5 @@ module.exports = {
     GetDeliveryDetails, UploadExcelShipment, UploadExcelShipmentOrder, UploadExcelFullOrderDetails,
     UploadExcelBatch, UploadExcelWarehouse, editBatch, deleteBatche, UploadSageInvoiceLlist, GetSageInvoiceList, UploadCashbookList,
     GetCashbookList, GetSageInvoiceDetails, checkNumber, TransactionAllocation, AddOrUpdateBookingInstruction, GetBookingInstructionById,
-    DeleteSageInvoice, GetSageInvoiceListByRegion
+    DeleteSageInvoice, GetSageInvoiceListByRegion, GetSageInvoiceDropdown
 }

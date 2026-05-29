@@ -1857,6 +1857,9 @@ const GetClearingList = async (req, res) => {
             LEFT JOIN tbl_suppliers AS ts
                 ON ts.id = tbl_clearance.assign_supplier_id
 
+            LEFT JOIN tbl_freight AS f
+                ON f.id = tbl_clearance.freight_id
+
             INNER JOIN tbl_users AS client_user
                 ON client_user.id = tbl_clearance.user_id
 
@@ -1894,6 +1897,7 @@ const GetClearingList = async (req, res) => {
                 tbl_clearance.*,
                 ts.name AS assigned_supplier_name,
                 ss.full_name AS sales_name,
+                f.comment AS freight_comment,
                 exit_c.name AS port_of_exit_name,
                 entry_c.name AS port_of_entry_name,
                 client_user.full_name AS client_name,
@@ -7074,7 +7078,7 @@ const executeQuery = (query, values) => {
 
 const UpdateShipmentStatus = async (req, res) => {
     try {
-        const { shipment_id, status } = req.body;
+        const { shipment_id, status, comment, date } = req.body;
 
         // Validation
         if (!shipment_id || !status) {
@@ -7131,13 +7135,22 @@ const UpdateShipmentStatus = async (req, res) => {
             // Insert order tracking
             await executeQuery(
                 `INSERT INTO order_track 
-                (order_id, batch_id, status, description)
-                VALUES (?, ?, ?, ?)`,
+    (
+        shipment_id,
+        order_id,
+        batch_id,
+        status,
+        created_at,
+        description
+    )
+    VALUES (?, ?, ?, ?, ?, ?)`,
                 [
+                    shipment_id,
                     item.order_id,
                     item.batch_id || null,
                     status,
-                    null
+                    date || new Date(),
+                    comment || null
                 ]
             );
 
@@ -8106,13 +8119,13 @@ const AssignFreightToClearing = async (req, res) => {
                     if (data.affectedRows > 0) {
                         // Update the assign_to_clearance field in tbl_freight
 
-                        con.query('INSERT INTO clearance_order (clearance_id, user_id, freight_id) VALUES (?,?,?)', [data.insertId, client_id || null, freight_id || null], (err, result) => {
-                            if (err) throw err;
-                            // console.log(result.affectedRows);
-                        })
-                        con.query(`update tbl_clearance set quotation_status='${3}' where id='${data.insertId}'`, (err, result) => {
-                            if (err) throw err;
-                        })
+                        // con.query('INSERT INTO clearance_order (clearance_id, user_id, freight_id) VALUES (?,?,?)', [data.insertId, client_id || null, freight_id || null], (err, result) => {
+                        //     if (err) throw err;
+                        //     // console.log(result.affectedRows);
+                        // })
+                        // con.query(`update tbl_clearance set quotation_status='${3}' where id='${data.insertId}'`, (err, result) => {
+                        //     if (err) throw err;
+                        // })
                         const updateQuery = `
                             UPDATE tbl_freight 
                             SET assign_to_clearance = 1, clearance_id = ?
