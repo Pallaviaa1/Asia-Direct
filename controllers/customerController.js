@@ -8707,13 +8707,9 @@ function notifyDisputesUnresolved7Days() {
     });
 }
 
-
 cron.schedule('0 0 * * *', () => {
     notifyDisputesUnresolved7Days();
 });
-
-
-
 
 module.exports = {
     AddCustomer, GetClientList, Get_ClientList, updateClient, GetClientById, DeleteClient, GetClientFreights, AddClearing,

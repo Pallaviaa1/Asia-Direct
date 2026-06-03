@@ -1566,16 +1566,12 @@ const GetReadyFreightAdmin = (req, res) => {
 
     /* ==================== BUILD CONDITION ==================== */
 
-    const buildCondition = () => {
+    const buildBaseCondition = () => {
 
         let condition = `
             WHERE tbl_freight.is_deleted = 0
             AND tbl_freight.added_by IN (1, 2)
             AND tbl_freight.order_status = 0
-            AND (
-                tbl_freight.ready_for_collection = 'Yes'
-                OR tbl_freight.require_for_delivery = 'Yes'
-            )
         `;
 
         let params = [];
@@ -1608,9 +1604,8 @@ const GetReadyFreightAdmin = (req, res) => {
             params.push(user_id, user_id);
         }
 
-        // search
+        // search filter applies to both tabs, as in previous logic
         if (search) {
-
             condition += `
                 AND (
                     tbl_freight.freight_number LIKE ?
@@ -1619,9 +1614,7 @@ const GetReadyFreightAdmin = (req, res) => {
                     OR co.name LIKE ?
                 )
             `;
-
             const searchParam = `%${search}%`;
-
             params.push(
                 searchParam,
                 searchParam,
@@ -1635,38 +1628,47 @@ const GetReadyFreightAdmin = (req, res) => {
 
     /* ==================== COUNT ==================== */
 
-    const getCount = (condition, params, cb) => {
-
-        const countQuery = `
+    const getCounts = (baseCondition, params, cb) => {
+        const collectionQuery = `
             SELECT COUNT(DISTINCT tbl_freight.id) AS total
             FROM tbl_freight
-
             LEFT JOIN tbl_users u ON u.id = tbl_freight.client_id
-            LEFT JOIN tbl_suppliers cs 
-    ON cs.id = tbl_freight.collection_supplier_id
-    LEFT JOIN tbl_suppliers ds 
-    ON ds.id = tbl_freight.delivery_supplier_id
+            LEFT JOIN tbl_suppliers cs ON cs.id = tbl_freight.collection_supplier_id
+            LEFT JOIN tbl_suppliers ds ON ds.id = tbl_freight.delivery_supplier_id
             LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
             LEFT JOIN countries co ON co.id = tbl_freight.collection_from
-
-            ${condition}
+            ${baseCondition}
+            AND tbl_freight.ready_for_collection = 'Yes'
         `;
-
-        con.query(countQuery, params, (err, rows) => {
-
-            if (err) return cb(err);
-
-            cb(null, rows[0].total);
+        const deliveryQuery = `
+            SELECT COUNT(DISTINCT tbl_freight.id) AS total
+            FROM tbl_freight
+            LEFT JOIN tbl_users u ON u.id = tbl_freight.client_id
+            LEFT JOIN tbl_suppliers cs ON cs.id = tbl_freight.collection_supplier_id
+            LEFT JOIN tbl_suppliers ds ON ds.id = tbl_freight.delivery_supplier_id
+            LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
+            LEFT JOIN countries co ON co.id = tbl_freight.collection_from
+            ${baseCondition}
+            AND tbl_freight.require_for_delivery = 'Yes'
+        `;
+        con.query(collectionQuery, params, (err1, rows1) => {
+            if (err1) return cb(err1);
+            con.query(deliveryQuery, params, (err2, rows2) => {
+                if (err2) return cb(err2);
+                cb(null, {
+                    collectionTotal: rows1[0]?.total || 0,
+                    deliveryTotal: rows2[0]?.total || 0,
+                    total: (rows1[0]?.total || 0) + (rows2[0]?.total || 0)
+                });
+            });
         });
     };
 
     /* ==================== DATA ==================== */
 
-    const getData = (condition, params, total) => {
-
-        const dataQuery = `
+    const getData = (baseCondition, params, counts) => {
+        const baseSelect = `
             SELECT DISTINCT
-
                 tbl_freight.id AS freight_id,
                 tbl_freight.freight_number,
                 tbl_freight.date,
@@ -1696,39 +1698,61 @@ const GetReadyFreightAdmin = (req, res) => {
             LEFT JOIN tbl_suppliers s ON s.id = tbl_freight.supplier_task_assign_id
             LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
             LEFT JOIN countries co ON co.id = tbl_freight.collection_from
-            LEFT JOIN tbl_suppliers cs 
-    ON cs.id = tbl_freight.collection_supplier_id
-    LEFT JOIN tbl_suppliers ds 
-    ON ds.id = tbl_freight.delivery_supplier_id
+            LEFT JOIN tbl_suppliers cs ON cs.id = tbl_freight.collection_supplier_id
+            LEFT JOIN tbl_suppliers ds ON ds.id = tbl_freight.delivery_supplier_id
+        `;
 
-            ${condition}
-
+        // Query for collection
+        const collectionQuery = `
+            ${baseSelect}
+            ${baseCondition}
+            AND tbl_freight.ready_for_collection = 'Yes'
             GROUP BY tbl_freight.id
             ORDER BY tbl_freight.created_at DESC
             LIMIT ? OFFSET ?
         `;
 
-        con.query(
-            dataQuery,
-            [...params, Number(limit), Number(offset)],
-            (err, data) => {
+        // Query for delivery
+        const deliveryQuery = `
+            ${baseSelect}
+            ${baseCondition}
+            AND tbl_freight.require_for_delivery = 'Yes'
+            GROUP BY tbl_freight.id
+            ORDER BY tbl_freight.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
 
-                if (err) {
-                    return res.status(500).send({
-                        success: false,
-                        message: err.message
-                    });
-                }
+        // Use promises to gather both datasets
+        const doQuery = (q, _params) =>
+            new Promise((resolve, reject) => {
+                con.query(q, _params, (err, rows) => {
+                    if (err) reject(err);
+                    else resolve(rows);
+                });
+            });
 
+        Promise.all([
+            doQuery(collectionQuery, [...params, Number(limit), Number(offset)]),
+            doQuery(deliveryQuery, [...params, Number(limit), Number(offset)])
+        ])
+            .then(([collectionData, deliveryData]) => {
                 res.status(200).send({
                     success: true,
-                    total,
                     page: Number(page),
                     limit: Number(limit),
-                    data
+                    total: counts.total,
+                    collectionTotal: counts.collectionTotal,
+                    deliveryTotal: counts.deliveryTotal,
+                    collection: collectionData,
+                    delivery: deliveryData
                 });
-            }
-        );
+            })
+            .catch((err) => {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            });
     };
 
     /* ==================== FLOW ==================== */
@@ -1742,10 +1766,9 @@ const GetReadyFreightAdmin = (req, res) => {
             });
         }
 
-        const { condition, params } = buildCondition();
+        const { condition, params } = buildBaseCondition();
 
-        getCount(condition, params, (err, total) => {
-
+        getCounts(condition, params, (err, counts) => {
             if (err) {
                 return res.status(500).send({
                     success: false,
@@ -1753,7 +1776,7 @@ const GetReadyFreightAdmin = (req, res) => {
                 });
             }
 
-            getData(condition, params, total);
+            getData(condition, params, counts);
         });
     });
 };
@@ -5151,83 +5174,151 @@ const addEstimateShippingQuote = async (req, res) => {
 
         console.log(data);
 
-        // All new fields to add (spread into queries below)
-        const NEW_FIELDS = [
-            // cust_vat
-            "cust_vat_qty", "cust_vat_curr", "cust_vat_cost", "cust_vat_unitTyp", "cust_vat_unit", "cust_vat_TCost",
-            "cust_vat_roe", "cust_vat_finalAmt", "cust_vat_vatTyp", "cust_vat_disc%", "cust_vat_disc", "cust_vat_vatIncl",
-            // cust_duty
-            "cust_duty_qty", "cust_duty_curr", "cust_duty_cost", "cust_duty_unitTyp", "cust_duty_unit", "cust_duty_TCost",
-            "cust_duty_roe", "cust_duty_finalAmt", "cust_duty_vatTyp", "cust_duty_disc%", "cust_duty_disc", "cust_duty_vatIncl",
-            // surcharge
-            "surcharge_qty", "surcharge_curr", "surcharge_cost", "surcharge_unitTyp", "surcharge_unit", "surcharge_TCost",
-            "surcharge_roe", "surcharge_finalAmt", "surcharge_vatTyp", "surcharge_disc%", "surcharge_disc", "surcharge_vatIncl",
-            // disbursement
-            "disbursement_qty", "disbursement_curr", "disbursement_cost", "disbursement_unitTyp", "disbursement_unit",
-            "disbursement_TCost", "disbursement_roe", "disbursement_finalAmt", "disbursement_vatTyp", "disbursement_disc%",
-            "disbursement_disc", "disbursement_vatIncl",
-            // clearing_fee
-            "clearing_fee_qty", "clearing_fee_curr", "clearing_fee_cost", "clearing_fee_unitTyp", "clearing_fee_unit",
-            "clearing_fee_TCost", "clearing_fee_roe", "clearing_fee_finalAmt", "clearing_fee_vatTyp", "clearing_fee_disc%",
-            "clearing_fee_disc", "clearing_fee_vatIncl",
-            // custProv_pay
-            "custProv_pay_qty", "custProv_pay_curr", "custProv_pay_cost", "custProv_pay_unitTyp", "custProv_pay_unit",
-            "custProv_pay_TCost", "custProv_pay_roe", "custProv_pay_finalAmt", "custProv_pay_vatTyp", "custProv_pay_disc%",
-            "custProv_pay_disc", "custProv_pay_vatIncl",
-            // cust_penalty
-            "cust_penalty_qty", "cust_penalty_curr", "cust_penalty_cost", "cust_penalty_unitTyp", "cust_penalty_unit",
-            "cust_penalty_TCost", "cust_penalty_roe", "cust_penalty_finalAmt", "cust_penalty_vatTyp", "cust_penalty_disc%",
-            "cust_penalty_disc", "cust_penalty_vatIncl",
-            // adv_duty
-            "adv_duty_qty", "adv_duty_curr", "adv_duty_cost", "adv_duty_unitTyp", "adv_duty_unit", "adv_duty_TCost", "adv_duty_roe", "adv_duty_finalAmt",
-            // VAT Type, disc%, disc, vatIncl fields for all relevant categories
-            "trans_unpack_charg_vatTyp", "trans_THC_levy_vatTyp", "trans_clear_fees_vatTyp", "insurance_vatTyp",
-            "ocenfreight_charge_vatTyp", "org_clearance_vatTyp", "org_forwFee_vatTyp", "org_docFee_vatTyp",
-            "origin_cfs_vatTyp", "origin_fuelSur_vatTyp", "org_pickUp_vatTyp", "adv_duty_vatTyp",
-            "trans_unpack_charg_disc%", "trans_THC_levy_disc%", "trans_clear_fees_disc%", "insurance_disc%",
-            "ocenfreight_charge_disc%", "org_clearance_disc%", "org_forwFee_disc%", "org_docFee_disc%",
-            "origin_cfs_disc%", "origin_fuelSur_disc%", "org_pickUp_disc%", "adv_duty_disc%",
-            "trans_unpack_charg_disc", "trans_THC_levy_disc", "trans_clear_fees_disc", "insurance_disc",
-            "ocenfreight_charge_disc", "org_clearance_disc", "org_forwFee_disc", "org_docFee_disc",
-            "origin_cfs_disc", "origin_fuelSur_disc", "org_pickUp_disc", "adv_duty_disc",
-            "trans_unpack_charg_vatIncl", "trans_THC_levy_vatIncl", "trans_clear_fees_vatIncl", "insurance_vatIncl",
-            "ocenfreight_charge_vatIncl", "org_clearance_vatIncl", "org_forwFee_vatIncl", "org_docFee_vatIncl",
-            "origin_cfs_vatIncl", "origin_fuelSur_vatIncl", "org_pickUp_vatIncl", "adv_duty_vatIncl",
-            "trans_CFS_charg_vatTyp", "trans_CFS_charg_disc%", "trans_CFS_charg_disc", "trans_CFS_charg_vatIncl",
-            "trans_admin_charg_vatTyp", "trans_admin_charg_disc%", "trans_admin_charg_disc", "trans_admin_charg_vatIncl",
-            "trans_portCargo_vatTyp", "trans_portCargo_disc%", "trans_portCargo_disc", "trans_portCargo_vatIncl",
-            "trans_adv_loadHouse_vatTyp", "trans_adv_loadHouse_disc%", "trans_adv_loadHouse_disc", "trans_adv_loadHouse_vatIncl",
-            "trans_doc_fee_vatTyp", "trans_doc_fee_disc%", "trans_doc_fee_disc", "trans_doc_fee_vatIncl",
-            "dest_clearing_fees_vatTyp", "dest_clearing_fees_disc%", "dest_clearing_fees_disc", "dest_clearing_fees_vatIncl",
-            "dest_THC_levy_vatTyp", "dest_THC_levy_disc%", "dest_THC_levy_disc", "dest_THC_levy_vatIncl",
-            "dest_unpack_chrg_vatTyp", "dest_unpack_chrg_disc%", "dest_unpack_chrg_disc", "dest_unpack_chrg_vatIncl",
-            "dest_fuel_Surchar_vatTyp", "dest_fuel_Surchar_disc%", "dest_fuel_Surchar_disc", "dest_fuel_Surchar_vatIncl",
-            "dest_admin_chrg_vatTyp", "dest_admin_chrg_disc%", "dest_admin_chrg_disc", "dest_admin_chrg_vatIncl",
-            "dest_adv_loadHouse_vatTyp", "dest_adv_loadHouse_disc%", "dest_adv_loadHouse_disc", "dest_adv_loadHouse_vatIncl",
-            "dest_CFS_charg_vatTyp", "dest_CFS_charg_disc%", "dest_CFS_charg_disc", "dest_CFS_charg_vatIncl",
-            "dest_delivry_charge_vatTyp", "dest_delivry_charge_disc%", "dest_delivry_charge_disc", "dest_delivry_charge_vatIncl",
-            "dest_fuel_surchrg_vatTyp", "dest_fuel_surchrg_disc%", "dest_fuel_surchrg_disc", "dest_fuel_surchrg_vatIncl",
-            "admin_agencyFee_vatTyp", "admin_agencyFee_disc%", "admin_agencyFee_disc", "admin_agencyFee_vatIncl",
-            "admin_disbur_fee_vatTyp", "admin_disbur_fee_disc%", "admin_disbur_fee_disc", "admin_disbur_fee_vatIncl",
-            "admin_doc_adminFees_vatTyp", "admin_doc_adminFees_disc%", "admin_doc_adminFees_disc", "admin_doc_adminFees_vatIncl",
-            // exclusives
-            "cust_vat_exclusive", "cust_duty_exclusive", "surcharge_exclusive", "disbursement_exclusive", "clearing_fee_exclusive",
-            "cust_penalty_exclusive", "trans_unpack_charg_exclusive", "trans_THC_levy_exclusive", "trans_clear_fees_exclusive",
-            "insurance_exclusive", "ocenfreight_charge_exclusive", "org_clearance_exclusive", "org_forwFee_exclusive",
-            "org_docFee_exclusive", "origin_cfs_exclusive", "origin_fuelSur_exclusive", "org_pickUp_exclusive", "adv_duty_exclusive",
-            "trans_CFS_charg_exclusive", "trans_admin_charg_exclusive", "trans_portCargo_exclusive", "trans_adv_loadHouse_exclusive",
-            "trans_doc_fee_exclusive", "dest_clearing_fees_exclusive", "dest_THC_levy_exclusive", "dest_unpack_chrg_exclusive",
-            "dest_fuel_Surchar_exclusive", "dest_admin_chrg_exclusive", "dest_adv_loadHouse_exclusive", "dest_CFS_charg_exclusive",
-            "dest_delivry_charge_exclusive", "dest_fuel_surchrg_exclusive", "admin_agencyFee_exclusive", "admin_disbur_fee_exclusive",
-            "admin_doc_adminFees_exclusive",
-            // ... and final _vat fields
-            "cust_vat_vat", "cust_duty_vat", "surcharge_vat", "disbursement_vat", "clearing_fee_vat", "cust_penalty_vat",
-            "trans_unpack_charg_vat", "trans_THC_levy_vat", "trans_clear_fees_vat", "insurance_vat", "ocenfreight_charge_vat",
-            "org_clearance_vat", "org_forwFee_vat", "org_docFee_vat", "origin_cfs_vat", "origin_fuelSur_vat", "org_pickUp_vat",
-            "adv_duty_vat", "trans_CFS_charg_vat", "trans_admin_charg_vat", "trans_portCargo_vat", "trans_adv_loadHouse_vat",
-            "trans_doc_fee_vat", "dest_clearing_fees_vat", "dest_THC_levy_vat", "dest_unpack_chrg_vat", "dest_fuel_Surchar_vat",
-            "dest_admin_chrg_vat", "dest_adv_loadHouse_vat", "dest_CFS_charg_vat", "dest_delivry_charge_vat",
-            "dest_fuel_surchrg_vat", "admin_agencyFee_vat", "admin_disbur_fee_vat", "admin_doc_adminFees_vat"
+        // estimate_shipping_quote extra columns (300+), matches DB schema
+        const ESTIMATE_EXTRA_FIELDS = [
+            'cust_vat_qty', 'cust_vat_curr', 'cust_vat_cost', 'cust_vat_unitTyp', 'cust_vat_unit', 'cust_vat_TCost', 'cust_vat_roe', 'cust_vat_finalAmt', 'cust_vat_vatTyp', 'cust_vat_disc%', 'cust_vat_disc', 'cust_vat_vatIncl', 'cust_vat_exclusive', 'cust_vat_vat',
+            'cust_duty_qty', 'cust_duty_curr', 'cust_duty_cost', 'cust_duty_unitTyp', 'cust_duty_unit', 'cust_duty_TCost', 'cust_duty_roe', 'cust_duty_finalAmt', 'cust_duty_vatTyp', 'cust_duty_disc%', 'cust_duty_disc', 'cust_duty_vatIncl', 'cust_duty_exclusive', 'cust_duty_vat',
+            'surcharge_qty', 'surcharge_curr', 'surcharge_cost', 'surcharge_unitTyp', 'surcharge_unit', 'surcharge_TCost', 'surcharge_roe', 'surcharge_finalAmt', 'surcharge_vatTyp', 'surcharge_disc%', 'surcharge_disc', 'surcharge_vatIncl', 'surcharge_exclusive', 'surcharge_vat',
+            'disbursement_qty', 'disbursement_curr', 'disbursement_cost', 'disbursement_unitTyp', 'disbursement_unit', 'disbursement_TCost', 'disbursement_roe', 'disbursement_finalAmt', 'disbursement_vatTyp', 'disbursement_disc%', 'disbursement_disc', 'disbursement_vatIncl', 'disbursement_exclusive', 'disbursement_vat',
+            'clearing_fee_qty', 'clearing_fee_curr', 'clearing_fee_cost', 'clearing_fee_unitTyp', 'clearing_fee_unit', 'clearing_fee_TCost', 'clearing_fee_roe', 'clearing_fee_finalAmt', 'clearing_fee_vatTyp', 'clearing_fee_disc%', 'clearing_fee_disc', 'clearing_fee_vatIncl', 'clearing_fee_exclusive', 'clearing_fee_vat',
+            'cust_penalty_qty', 'cust_penalty_curr', 'cust_penalty_cost', 'cust_penalty_unitTyp', 'cust_penalty_unit', 'cust_penalty_TCost', 'cust_penalty_roe', 'cust_penalty_finalAmt', 'cust_penalty_vatTyp', 'cust_penalty_disc%', 'cust_penalty_disc', 'cust_penalty_vatIncl', 'cust_penalty_exclusive', 'cust_penalty_vat',
+            'adv_duty_qty', 'adv_duty_curr', 'adv_duty_cost', 'adv_duty_unitTyp', 'adv_duty_unit', 'adv_duty_TCost', 'adv_duty_roe', 'adv_duty_finalAmt', 'adv_duty_vatTyp', 'adv_duty_disc%', 'adv_duty_disc', 'adv_duty_vatIncl', 'adv_duty_exclusive', 'adv_duty_vat',
+            'trans_unpack_charg_vatTyp', 'trans_unpack_charg_disc%', 'trans_unpack_charg_disc', 'trans_unpack_charg_vatIncl', 'trans_unpack_charg_exclusive', 'trans_unpack_charg_vat',
+            'trans_THC_levy_vatTyp', 'trans_THC_levy_disc%', 'trans_THC_levy_disc', 'trans_THC_levy_vatIncl', 'trans_THC_levy_exclusive', 'trans_THC_levy_vat',
+            'trans_CFS_charg_vatTyp', 'trans_CFS_charg_disc%', 'trans_CFS_charg_disc', 'trans_CFS_charg_vatIncl', 'trans_CFS_charg_exclusive', 'trans_CFS_charg_vat',
+            'trans_admin_charg_vatTyp', 'trans_admin_charg_disc%', 'trans_admin_charg_disc', 'trans_admin_charg_vatIncl', 'trans_admin_charg_exclusive', 'trans_admin_charg_vat',
+            'trans_portCargo_vatTyp', 'trans_portCargo_disc%', 'trans_portCargo_disc', 'trans_portCargo_vatIncl', 'trans_portCargo_exclusive', 'trans_portCargo_vat',
+            'trans_adv_loadHouse_vatTyp', 'trans_adv_loadHouse_disc%', 'trans_adv_loadHouse_disc', 'trans_adv_loadHouse_vatIncl', 'trans_adv_loadHouse_exclusive', 'trans_adv_loadHouse_vat',
+            'trans_doc_fee_vatTyp', 'trans_doc_fee_disc%', 'trans_doc_fee_disc', 'trans_doc_fee_vatIncl', 'trans_doc_fee_exclusive', 'trans_doc_fee_vat',
+            'dest_clearing_fees_vatTyp', 'dest_clearing_fees_disc%', 'dest_clearing_fees_disc', 'dest_clearing_fees_vatIncl', 'dest_clearing_fees_exclusive', 'dest_clearing_fees_vat',
+            'dest_THC_levy_vatTyp', 'dest_THC_levy_disc%', 'dest_THC_levy_disc', 'dest_THC_levy_vatIncl', 'dest_THC_levy_exclusive', 'dest_THC_levy_vat',
+            'dest_unpack_chrg_vatTyp', 'dest_unpack_chrg_disc%', 'dest_unpack_chrg_disc', 'dest_unpack_chrg_vatIncl', 'dest_unpack_chrg_exclusive', 'dest_unpack_chrg_vat',
+            'dest_fuel_Surchar_vatTyp', 'dest_fuel_Surchar_disc%', 'dest_fuel_Surchar_disc', 'dest_fuel_Surchar_vatIncl', 'dest_fuel_Surchar_exclusive', 'dest_fuel_Surchar_vat',
+            'dest_admin_chrg_vatTyp', 'dest_admin_chrg_disc%', 'dest_admin_chrg_disc', 'dest_admin_chrg_vatIncl', 'dest_admin_chrg_exclusive', 'dest_admin_chrg_vat',
+            'dest_adv_loadHouse_vatTyp', 'dest_adv_loadHouse_disc%', 'dest_adv_loadHouse_disc', 'dest_adv_loadHouse_vatIncl', 'dest_adv_loadHouse_exclusive', 'dest_adv_loadHouse_vat',
+            'dest_CFS_charg_vatTyp', 'dest_CFS_charg_disc%', 'dest_CFS_charg_disc', 'dest_CFS_charg_vatIncl', 'dest_CFS_charg_exclusive', 'dest_CFS_charg_vat',
+            'dest_delivry_charge_vatTyp', 'dest_delivry_charge_disc%', 'dest_delivry_charge_disc', 'dest_delivry_charge_vatIncl', 'dest_delivry_charge_exclusive', 'dest_delivry_charge_vat',
+            'dest_fuel_surchrg_vatTyp', 'dest_fuel_surchrg_disc%', 'dest_fuel_surchrg_disc', 'dest_fuel_surchrg_vatIncl', 'dest_fuel_surchrg_exclusive', 'dest_fuel_surchrg_vat',
+            'admin_agencyFee_vatTyp', 'admin_agencyFee_disc%', 'admin_agencyFee_disc', 'admin_agencyFee_vatIncl', 'admin_agencyFee_exclusive', 'admin_agencyFee_vat',
+            'admin_disbur_fee_vatTyp', 'admin_disbur_fee_disc%', 'admin_disbur_fee_disc', 'admin_disbur_fee_vatIncl', 'admin_disbur_fee_exclusive', 'admin_disbur_fee_vat',
+            'admin_doc_adminFees_vatTyp', 'admin_doc_adminFees_disc%', 'admin_doc_adminFees_disc', 'admin_doc_adminFees_vatIncl', 'admin_doc_adminFees_exclusive', 'admin_doc_adminFees_vat',
+            'org_clearance_vatTyp', 'org_clearance_disc%', 'org_clearance_disc', 'org_clearance_vatIncl', 'org_clearance_exclusive', 'org_clearance_vat',
+            'org_forwFee_vatTyp', 'org_forwFee_disc%', 'org_forwFee_disc', 'org_forwFee_vatIncl', 'org_forwFee_exclusive', 'org_forwFee_vat',
+            'org_docFee_vatTyp', 'org_docFee_disc%', 'org_docFee_disc', 'org_docFee_vatIncl', 'org_docFee_exclusive', 'org_docFee_vat',
+            'origin_cfs_vatTyp', 'origin_cfs_disc%', 'origin_cfs_disc', 'origin_cfs_vatIncl', 'origin_cfs_exclusive', 'origin_cfs_vat',
+            'origin_fuelSur_vatTyp', 'origin_fuelSur_disc%', 'origin_fuelSur_disc', 'origin_fuelSur_vatIncl', 'origin_fuelSur_exclusive', 'origin_fuelSur_vat',
+            'org_pickUp_vatTyp', 'org_pickUp_disc%', 'org_pickUp_disc', 'org_pickUp_vatIncl', 'org_pickUp_exclusive', 'org_pickUp_vat',
+            'trans_clear_fees_vatTyp', 'trans_clear_fees_disc%', 'trans_clear_fees_disc', 'trans_clear_fees_vatIncl', 'trans_clear_fees_exclusive', 'trans_clear_fees_vat',
+            'insurance_vatTyp', 'insurance_disc%', 'insurance_disc', 'insurance_vatIncl', 'insurance_exclusive', 'insurance_vat',
+            'ocenfreight_charge_vatTyp', 'ocenfreight_charge_disc%', 'ocenfreight_charge_disc', 'ocenfreight_charge_vatIncl', 'ocenfreight_charge_exclusive', 'ocenfreight_charge_vat',
+            'custProv_pay_qty', 'custProv_pay_curr', 'custProv_pay_cost', 'custProv_pay_unitTyp', 'custProv_pay_unit', 'custProv_pay_TCost', 'custProv_pay_roe', 'custProv_pay_finalAmt', 'custProv_pay_vatTyp', 'custProv_pay_disc%', 'custProv_pay_disc', 'custProv_pay_vatIncl', 'custProv_pay_exclusive', 'custProv_pay_vat',
+            'dest_portCargo_vatTyp', 'dest_portCargo_disc_percent', 'dest_portCargo_disc', 'dest_portCargo_vatIncl', 'dest_portCargo_exclusive', 'dest_portCargo_vat'
+        ];
+
+        const ESTIMATE_BASE_FIELDS = [
+            'freight_id', 'client_id', 'supplier_id', 'client_name', 'is_approved', 'serial_number', 'date', 'client_ref', 'product_desc',
+            'type', 'freight', 'incoterm', 'dimension', 'weight',
+            'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
+            'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
+            'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
+            'orifuel4', 'finalfuel1', 'roe_origin_fuel_currency', 'finalvlaueoFuel',
+            'origin_pick_up_cfs_cost', 'origin_pick_up_cfs_fees', 'origin_pickup_vfs_gp',
+            'oricfs4', 'finalcfs1', 'roe_origin_cfs_currency', 'finalvlaueocfs',
+            'origin_pick_up_unitType',
+            'origin_pick_up_documantion_cost', 'origin_pick_up_documantation_fees',
+            'origin_pick_documantation_cost_gp', 'oridoc4', 'finaldoc1',
+            'roe_origin_doc_currency', 'finalvlaueodoc',
+            'origin_pick_up_forewarding_cost', 'origin_pick_up_forewarding_fees',
+            'origin_pickup_forewarding_gp', 'oriforewarding4', 'roe_origin_forewarding',
+            'finalforewarding1', 'finalvlaueoforewarding',
+            'origin_pick_up_custome_cost', 'origin_pick_up_custome_clearance',
+            'origin_pickup_custome_gp', 'oricustome4', 'roe_origin_customes',
+            'finalcustomes1', 'finalvlaueoCustomes',
+            'totalChageswithOutExchange', 'totalChangeRoeOrigin',
+            'freight_charge_currency_cost', 'freight_charge_currency_fees',
+            'freight_charge_currency_gp', 'orifreight4',
+            'finalValuefreight', 'finalfreight1', 'finalvlaueofreight',
+            'freight_currency_insurance_cost', 'freightorigin_insurance_gp',
+            'freight_currency_insurance_unit', 'oriinsurance4',
+            'roe_insurance_currency', 'finalinsurance1', 'finalvlaueoInsurance',
+            'totalChageswithOutExchangeinsurance',
+            'totalChangeRoeOriginaftercalcuinsurance',
+            'Transit_currency_Cost', 'Transit_currency_gp', 'Transit_currency_unit',
+            'finaltransit1', 'oritransit4', 'Transit_currency_roe',
+            'finalvlaueotransit',
+            'transit_currency_THC_cost', 'transit_currency_THC_init',
+            'transit_currency_THC_gp', 'oriThc4', 'finalThc1',
+            'finalvlaueotfineal', 'roe_Transit_Thc',
+            'Transit_currency_unpack_cost', 'Transit_currency_unpack_unit',
+            'Transit_currency_unpack_gp', 'finalunpack1', 'oriunpack4',
+            'finalvlaueotfunpack', 'Transit_unpack_roe',
+            'totalChaDestinationTransit', 'totalChaDestinationTransitRoe',
+            'sumofall', 'sumofRoe',
+            'transit_3rd_party_cost', 'transit_3rd_party_unit', 'transit_3rd_party_gp',
+            'ori3rdparty4', 'final3rdparty1', 'finalvlaueot3dparty', 'transit_currency_3rd',
+            'transit_admin_change', 'transit_admin_unit', 'transit_admin_gp', 'ori3rdAdmin4',
+            'final3rdAdmin1', 'finalvlaueotAdmin', 'roe_transit_admin',
+            'transit_currency_port', 'transit_currency_port_unit', 'transit_currency_port_gp',
+            'ori3rdport4', 'final3rdport1', 'finalvlaueotPort', 'roe_trans_port',
+            'Transit_advanced_load', 'Transit_advanced_unit', 'Transit_advanced_gp',
+            'oriadv4', 'final3rdadv1', 'finalvlaueotadv', 'Transit_advanced_gp_roe',
+            'transit_change_Documentation', 'transit_change_Documentation_unit', 'oridocumentation4',
+            'transit_change_Documentation_gp', 'final3rdocumantation1', 'finalvlaueotDocumantation',
+            'roe_transit_change_Documentation', 'totalChageswithOuTransit', 'transitRoe',
+            'Destination_freight_currency_cost', 'Destination_freight_currency_unit', 'Destination_freight_currency_gp',
+            'destinationdocumentation4', 'final3rdestinationRoe', 'final3rdestination1', 'Destination_freight_currency_Roe',
+            'Destination_THC_currency_cost', 'Destination_THC_currency_unit', 'Destination_THC_currency_gp',
+            'destinationTHCdocumentation4', 'final3rTHCdestination1', 'final3rTHCdestinationRoe', 'Destination_THC_currency_Roe',
+            'Destination_Unpack_currency_cost', 'Destination_Unpack_currency_unit', 'Destination_Unpack_currency_gp',
+            'destinationUnpackdocumentation4', 'Destination_Unpack_currency_roe', 'final3rUnpackdestinationRoe', 'final3runpackdestination1',
+            'totaAdminransit', 'totalAdminnsitRoe',
+            'Destination_fuelsurcharge_currency_cost', 'Destination_fuelsurcharge_currency_unit', 'Destination_fuelsurcharge_currency_gp',
+            'destinationfuelsurchargedocumentation4', 'final3rfuelsurchargedestination1', 'final3rfuelsurCahrgeestinationRoe', 'Destination_fuelsurcharge_currency_roe',
+            'Destination_adminsurcharge_currency_cost', 'Destination_adminsurcharge_currency_unit', 'Destination_adminsurcharge_currency_gp',
+            'destinatiadminsurcharge4', 'Valueadminsurchargedestanion', 'adminsurcharge2', 'Destination_adminsurcharge_currency_roe',
+            'Destination_portcargo_currency_cost', 'Destination_portcargo_currency_unit', 'Destination_portcargo_currency_gp',
+            'destinatiportcargo4', 'Vaportcargoion', 'admiportcargo2', 'Destination_portcargo_currency_roe',
+            'Destination_AdvancedLoad_currency_cost', 'Destination_AdvancedLoad_currency_unit', 'Destination_AdvancedLoad_currency_gp',
+            'destinatiAdvancedLoad4', 'VAdvancedLoadion', 'desdvancedLoadion', 'Destination_AdvancedLoad_currency_roe',
+            'Destination_3rdpartyDesc_currency_cost', 'Destination_3rdpartyDesc_currency_unit', 'Destination_3rdpartyDesc_currency_gp',
+            'destinati3rdpartyload4', 'VAdvanced3rdpartyLoadion', 'desdva3rdpartyion', 'Destination_3rdpartyDesc_currency_roe',
+            'Destination_delivery_currency_cost', 'Destination_delivery_currency_unit', 'Destination_delivery_currency_gp',
+            'destindeliveryyDesc4', 'VAdvandeliverytyLoadion', 'desddeliverytyion', 'Destination_delivery_currency_roe',
+            'Destination_fuelcharge_currency_cost', 'Destination_fuelcharge_currency_unit', 'Destination_fuelcharge_currency_gp',
+            'destindfuelchangerDesc4', 'VAdvfuelchangeon', 'defuelchangyion', 'Destination_fuelcharge_currency_roe',
+            'Destination_AdminAgrncy_currency_cost', 'Destination_AdminAgrncy_currency_unit', 'Destination_AdminAgrncy_currency_gp',
+            'deadminAgencyesc4', 'VAadminAgencyngeon', 'defuelchdminAgencyngangyion', 'Destination_AdminAgrncy_currency_roe',
+            'Destination_disbursemant_currency_cost', 'Destination_disbursemant_currency_unit', 'Destination_disbursemant_currency_gp',
+            'deaddisbursemantc4', 'VAdisbursemon', 'dedisbursementon', 'Destination_disbursemant_currency_roe',
+            'Destination_doc_currency_cost', 'Destination_doc_currency_unit', 'Destination_doc_currency_gp',
+            'deadoctc4', 'VAdocon', 'dedisbudoon', 'Destination_doc_currency_roe', 'roe_freight_currency',
+            'freight_charge_currency', 'freight_charge_currency_unitType', 'freight_currency_insurance_unittype',
+            'origin_pick_up_fuel_unitType', 'origin_pick_up_cfs_unitType', 'origin_pick_up_documantation_unitType', 'origin_pick_up_forewarding_unitType', 'origin_pick_up_custome_unitType',
+            'Transit_currency_unitTpe', 'transit_currency_THC_initType', 'Transit_currency_unpack_unitType',
+            'transit_3rd_party_unittype', 'transit_admin_unittype', 'transit_currency_port_unitType',
+            'Transit_advanced_unitType', 'transit_change_Documentation_unitType',
+            'Destination_freight_currency_unitType', 'Destination_THC_currency_unitType',
+            'Destination_Unpack_currency_unitType', 'Destination_fuelsurcharge_currency_typeUnit',
+            'Destination_adminsurcharge_currency_unitType', 'Destination_portcargo_currency_unitType',
+            'Destination_AdvancedLoad_currency_unitType', 'Destination_3rdpartyDesc_currency_unitType',
+            'Destination_delivery_currency_unitType', 'Destination_fuelcharge_currency_unitType',
+            'Destination_AdminAgrncy_currency_unitType', 'Destination_disbursemant_currency_unitType',
+            'Destination_doc_currency_unittype', 'freight_charge_currencyQTY', 'origin_pick_up_fuel_unitTypeQTY',
+            'origin_pick_up_cfs_unitTypeQTY', 'origin_pick_up_forewarding_unitTypeQTY',
+            'origin_pick_up_documantation_unitTypeQTY', 'origin_pick_up_custome_unitTypeQTY', 'chargable_rate',
+            'freight_charge_currency_unitTypeQTY', 'freight_currency_insurance_unittypeQTY',
+            'Transit_currency_unitTpeQTY', 'transit_currency_THC_initTypeQTY', 'transit_currency_THC_initTypeeQTY',
+            'transit_3rd_party_unittypeQTY', 'transit_admin_unittypeQTY', 'transit_currency_port_unitTypeQTY',
+            'Transit_advanced_unitTypeQTY', 'transit_change_Documentation_unitTypeQTY',
+            'Destination_freight_currency_unitTypeQTY', 'Destination_THC_currency_unitTypeQTY',
+            'Destination_Unpack_currency_unitTypeQTY', 'Destination_fuelsurcharge_currency_typeUnitQTY',
+            'Destination_adminsurcharge_currency_unitTypeQTY', 'Destination_portcargo_currency_unitTypeQTY',
+            'Destination_AdvancedLoad_currency_unitTypeQTY', 'Destination_3rdpartyDesc_currency_unitTypeQTY',
+            'Destination_delivery_currency_unitTypeQTY', 'Destination_fuelcharge_currency_unitTypeQTY',
+            'Destination_AdminAgrncy_currency_unitQTY', 'Destination_disbursemant_currency_unitTypeQTY',
+            'Destination_doc_currency_unittypeQTY', 'pickup_freight_currency', 'Transit_currency',
+            'Destination_freight_currency', 'admin_currency_charge', 'Destination_disbursemant_currenc_unitType1',
+            'user_type'
         ];
 
         if (data.quote_estimate_id) {
@@ -5254,113 +5345,14 @@ const addEstimateShippingQuote = async (req, res) => {
                 });
             }
 
-            // Helper arrays for query-building
-            const updateFields = [
-                "supplier_id", "client_name", "serial_number", "date", "client_ref", "product_desc",
-                "type", "freight", "incoterm", "dimension", "weight",
-                "origin_pick_up_cost", "origin_pick_up_fees", "origin_pickup_fee_gpcalc",
-                "oripick4", "finalori1", "roe_origin_currencyorigin", "finalvlaueoriginPickup",
-                "origin_pick_up_fuel_cost", "origin_pick_up_fuel_fees", "origin_pick_fuelGP",
-                "orifuel4", "finalfuel1", "roe_origin_fuel_currency", "finalvlaueoFuel",
-                "origin_pick_up_cfs_cost", "origin_pick_up_cfs_fees", "origin_pickup_vfs_gp",
-                "oricfs4", "finalcfs1", "roe_origin_cfs_currency", "finalvlaueocfs",
-                "origin_pick_up_documantion_cost", "origin_pick_up_documantation_fees",
-                "origin_pick_documantation_cost_gp", "oridoc4", "finaldoc1",
-                "roe_origin_doc_currency", "finalvlaueodoc",
-                "origin_pick_up_forewarding_cost", "origin_pick_up_forewarding_fees",
-                "origin_pickup_forewarding_gp", "oriforewarding4", "roe_origin_forewarding",
-                "finalforewarding1", "finalvlaueoforewarding",
-                "origin_pick_up_custome_cost", "origin_pick_up_custome_clearance",
-                "origin_pickup_custome_gp", "oricustome4", "roe_origin_customes",
-                "finalcustomes1", "finalvlaueoCustomes",
-                "totalChageswithOutExchange", "totalChangeRoeOrigin",
-                "freight_charge_currency_cost", "freight_charge_currency_fees",
-                "freight_charge_currency_gp", "orifreight4",
-                "finalValuefreight", "finalfreight1", "finalvlaueofreight",
-                "freight_currency_insurance_cost", "freightorigin_insurance_gp",
-                "freight_currency_insurance_unit", "oriinsurance4",
-                "roe_insurance_currency", "finalinsurance1", "finalvlaueoInsurance",
-                "totalChageswithOutExchangeinsurance",
-                "totalChangeRoeOriginaftercalcuinsurance",
-                "Transit_currency_Cost", "Transit_currency_gp", "Transit_currency_unit",
-                "finaltransit1", "oritransit4", "Transit_currency_roe",
-                "finalvlaueotransit",
-                "transit_currency_THC_cost", "transit_currency_THC_init",
-                "transit_currency_THC_gp", "oriThc4", "finalThc1",
-                "finalvlaueotfineal", "roe_Transit_Thc",
-                "Transit_currency_unpack_cost", "Transit_currency_unpack_unit",
-                "Transit_currency_unpack_gp", "finalunpack1", "oriunpack4",
-                "finalvlaueotfunpack", "Transit_unpack_roe",
-                "totalChaDestinationTransit", "totalChaDestinationTransitRoe",
-                "sumofall", "sumofRoe",
-                "transit_3rd_party_cost", "transit_3rd_party_unit", "transit_3rd_party_gp",
-                "ori3rdparty4", "final3rdparty1", "finalvlaueot3dparty", "transit_currency_3rd",
-                "transit_admin_change", "transit_admin_unit", "transit_admin_gp", "ori3rdAdmin4",
-                "final3rdAdmin1", "finalvlaueotAdmin", "roe_transit_admin",
-                "transit_currency_port", "transit_currency_port_unit", "transit_currency_port_gp",
-                "ori3rdport4", "final3rdport1", "finalvlaueotPort", "roe_trans_port",
-                "Transit_advanced_load", "Transit_advanced_unit", "Transit_advanced_gp",
-                "oriadv4", "final3rdadv1", "finalvlaueotadv", "Transit_advanced_gp_roe",
-                "transit_change_Documentation", "transit_change_Documentation_unit", "oridocumentation4",
-                "transit_change_Documentation_gp", "final3rdocumantation1", "finalvlaueotDocumantation",
-                "roe_transit_change_Documentation", "totalChageswithOuTransit", "transitRoe",
-                "Destination_freight_currency_cost", "Destination_freight_currency_unit", "Destination_freight_currency_gp",
-                "destinationdocumentation4", "final3rdestinationRoe", "final3rdestination1", "Destination_freight_currency_Roe",
-                "Destination_THC_currency_cost", "Destination_THC_currency_unit", "Destination_THC_currency_gp",
-                "destinationTHCdocumentation4", "final3rTHCdestination1", "final3rTHCdestinationRoe", "Destination_THC_currency_Roe",
-                "Destination_Unpack_currency_cost", "Destination_Unpack_currency_unit", "Destination_Unpack_currency_gp",
-                "destinationUnpackdocumentation4", "Destination_Unpack_currency_roe", "final3rUnpackdestinationRoe", "final3runpackdestination1",
-                "totaAdminransit", "totalAdminnsitRoe",
-                "Destination_fuelsurcharge_currency_cost", "Destination_fuelsurcharge_currency_unit", "Destination_fuelsurcharge_currency_gp",
-                "destinationfuelsurchargedocumentation4", "final3rfuelsurchargedestination1", "final3rfuelsurCahrgeestinationRoe", "Destination_fuelsurcharge_currency_roe",
-                "Destination_adminsurcharge_currency_cost", "Destination_adminsurcharge_currency_unit", "Destination_adminsurcharge_currency_gp",
-                "destinatiadminsurcharge4", "Valueadminsurchargedestanion", "adminsurcharge2", "Destination_adminsurcharge_currency_roe",
-                "Destination_portcargo_currency_cost", "Destination_portcargo_currency_unit", "Destination_portcargo_currency_gp",
-                "destinatiportcargo4", "Vaportcargoion", "admiportcargo2", "Destination_portcargo_currency_roe",
-                "Destination_AdvancedLoad_currency_cost", "Destination_AdvancedLoad_currency_unit", "Destination_AdvancedLoad_currency_gp",
-                "destinatiAdvancedLoad4", "VAdvancedLoadion", "desdvancedLoadion", "Destination_AdvancedLoad_currency_roe",
-                "Destination_3rdpartyDesc_currency_cost", "Destination_3rdpartyDesc_currency_unit", "Destination_3rdpartyDesc_currency_gp",
-                "destinati3rdpartyload4", "VAdvanced3rdpartyLoadion", "desdva3rdpartyion", "Destination_3rdpartyDesc_currency_roe",
-                "Destination_delivery_currency_cost", "Destination_delivery_currency_unit", "Destination_delivery_currency_gp",
-                "destindeliveryyDesc4", "VAdvandeliverytyLoadion", "desddeliverytyion", "Destination_delivery_currency_roe",
-                "Destination_fuelcharge_currency_cost", "Destination_fuelcharge_currency_unit", "Destination_fuelcharge_currency_gp",
-                "destindfuelchangerDesc4", "VAdvfuelchangeon", "defuelchangyion", "Destination_fuelcharge_currency_roe",
-                "Destination_AdminAgrncy_currency_cost", "Destination_AdminAgrncy_currency_unit", "Destination_AdminAgrncy_currency_gp",
-                "deadminAgencyesc4", "VAadminAgencyngeon", "defuelchdminAgencyngangyion", "Destination_AdminAgrncy_currency_roe",
-                "Destination_disbursemant_currency_cost", "Destination_disbursemant_currency_unit", "Destination_disbursemant_currency_gp",
-                "deaddisbursemantc4", "VAdisbursemon", "dedisbursementon", "Destination_disbursemant_currency_roe",
-                "Destination_doc_currency_cost", "Destination_doc_currency_unit", "Destination_doc_currency_gp",
-                "deadoctc4", "VAdocon", "dedisbudoon", "Destination_doc_currency_roe", "roe_freight_currency",
-                "freight_charge_currency", "freight_charge_currency_unitType", "freight_currency_insurance_unittype",
-                "origin_pick_up_unitType", "origin_pick_up_fuel_unitType", "origin_pick_up_cfs_unitType",
-                "origin_pick_up_documantation_unitType", "origin_pick_up_forewarding_unitType", "origin_pick_up_custome_unitType",
-                "Transit_currency_unitTpe", "transit_currency_THC_initType", "Transit_currency_unpack_unitType",
-                "transit_3rd_party_unittype", "transit_admin_unittype", "transit_currency_port_unitType",
-                "Transit_advanced_unitType", "transit_change_Documentation_unitType",
-                "Destination_freight_currency_unitType", "Destination_THC_currency_unitType",
-                "Destination_Unpack_currency_unitType", "Destination_fuelsurcharge_currency_typeUnit",
-                "Destination_adminsurcharge_currency_unitType", "Destination_portcargo_currency_unitType",
-                "Destination_AdvancedLoad_currency_unitType", "Destination_3rdpartyDesc_currency_unitType",
-                "Destination_delivery_currency_unitType", "Destination_fuelcharge_currency_unitType",
-                "Destination_AdminAgrncy_currency_unitType", "Destination_disbursemant_currency_unitType",
-                "Destination_doc_currency_unittype", "freight_charge_currencyQTY", "origin_pick_up_fuel_unitTypeQTY",
-                "origin_pick_up_cfs_unitTypeQTY", "origin_pick_up_forewarding_unitTypeQTY",
-                "origin_pick_up_documantation_unitTypeQTY", "origin_pick_up_custome_unitTypeQTY", "chargable_rate",
-                "freight_charge_currency_unitTypeQTY", "freight_currency_insurance_unittypeQTY",
-                "Transit_currency_unitTpeQTY", "transit_currency_THC_initTypeQTY", "transit_currency_THC_initTypeeQTY",
-                "transit_3rd_party_unittypeQTY", "transit_admin_unittypeQTY", "transit_currency_port_unitTypeQTY",
-                "Transit_advanced_unitTypeQTY", "transit_change_Documentation_unitTypeQTY",
-                "Destination_freight_currency_unitTypeQTY", "Destination_THC_currency_unitTypeQTY",
-                "Destination_Unpack_currency_unitTypeQTY", "Destination_fuelsurcharge_currency_typeUnitQTY",
-                "Destination_adminsurcharge_currency_unitTypeQTY", "Destination_portcargo_currency_unitTypeQTY",
-                "Destination_AdvancedLoad_currency_unitTypeQTY", "Destination_3rdpartyDesc_currency_unitTypeQTY",
-                "Destination_delivery_currency_unitTypeQTY", "Destination_fuelcharge_currency_unitTypeQTY",
-                "Destination_AdminAgrncy_currency_unitQTY", "Destination_disbursemant_currency_unitTypeQTY",
-                "Destination_doc_currency_unittypeQTY", "pickup_freight_currency", "Transit_currency",
-                "Destination_freight_currency", "admin_currency_charge", "Destination_disbursemant_currenc_unitType1",
-                // new fields!
-                ...NEW_FIELDS
-            ];
+            const updateFields = [...ESTIMATE_BASE_FIELDS, ...ESTIMATE_EXTRA_FIELDS];
+            const buildRowPayload = (fields) => {
+                const row = {};
+                fields.forEach(field => {
+                    row[field] = data[field] !== undefined ? data[field] : null;
+                });
+                return row;
+            };
 
             if (result.length > 0) {
                 // Build SQL dynamically to add new fields
@@ -5400,8 +5392,8 @@ const addEstimateShippingQuote = async (req, res) => {
             /* ================= INSERT ================= */
             else {
                 const insertQuery = `INSERT INTO estimate_shipping_quote SET ?`;
-                // All values including new fields in data (assume coming from FE)
-                con.query(insertQuery, data, (err, insertData) => {
+                const insertPayload = buildRowPayload(updateFields);
+                con.query(insertQuery, insertPayload, (err, insertResult) => {
                     if (err) {
                         return res.status(500).send({
                             success: false,
@@ -5412,14 +5404,14 @@ const addEstimateShippingQuote = async (req, res) => {
                     if (data.user_type == "1" || data.user_type == "2") {
                         con.query(
                             `UPDATE tbl_freight SET status=?, shipping_estimate_id=?, estimate_date=NOW() WHERE id=?`,
-                            [4, insertData.insertId, data.freight_id]
+                            [4, insertResult.insertId, data.freight_id]
                         );
                     }
 
                     return res.status(200).send({
                         success: true,
                         message: "Estimate shipping quote added successfully",
-                        ID: insertData.insertId
+                        ID: insertResult.insertId
                     });
                 });
             }
@@ -16683,7 +16675,7 @@ const createFreightFolders = async (req, res) => {
 const addEstimatSupplierInvoice = async (req, res) => {
     try {
         const data = req.body;
-
+        console.log(data)
         // ---------------- VALIDATION ----------------
         if (!data.shipment_id) {
             return res.status(400).send({
@@ -16704,39 +16696,49 @@ const addEstimatSupplierInvoice = async (req, res) => {
 
         console.log(data);
 
-        // List of extra fields to add
+        // supplier_sage_invoice columns (matches DB schema; excludes id, created_at, updated_at)
         const extraFields = [
-            // cust_vat, cust_duty, surcharge, disbursement, clearing_fee
-            'cust_vat_qty', 'cust_vat_curr', 'cust_vat_cost', 'cust_vat_unitTyp', 'cust_vat_unit', 'cust_vat_TCost', 'cust_vat_roe', 'cust_vat_finalAmt', 'cust_vat_vatTyp', 'cust_vat_disc', 'cust_vat_discExc', 'cust_vat_total',
-            'cust_duty_qty', 'cust_duty_curr', 'cust_duty_cost', 'cust_duty_unitTyp', 'cust_duty_unit', 'cust_duty_TCost', 'cust_duty_roe', 'cust_duty_finalAmt', 'cust_duty_vatTyp', 'cust_duty_disc', 'cust_duty_discExc', 'cust_duty_total',
-            'surcharge_qty', 'surcharge_curr', 'surcharge_cost', 'surcharge_unitTyp', 'surcharge_unit', 'surcharge_TCost', 'surcharge_roe', 'surcharge_finalAmt', 'surcharge_vatTyp', 'surcharge_disc', 'surcharge_discExc', 'surcharge_total',
-            'disbursement_qty', 'disbursement_curr', 'disbursement_cost', 'disbursement_unitTyp', 'disbursement_unit', 'disbursement_TCost', 'disbursement_roe', 'disbursement_finalAmt', 'disbursement_vatTyp', 'disbursement_disc', 'disbursement_discExc', 'disbursement_total',
-            'clearing_fee_qty', 'clearing_fee_curr', 'clearing_fee_cost', 'clearing_fee_unitTyp', 'clearing_fee_unit', 'clearing_fee_TCost', 'clearing_fee_roe', 'clearing_fee_finalAmt', 'clearing_fee_vatTyp', 'clearing_fee_disc', 'clearing_fee_discExc', 'clearing_fee_total',
-            // custProv_pay, cust_penalty, adv_duty
-            'custProv_pay_qty', 'custProv_pay_curr', 'custProv_pay_cost', 'custProv_pay_unitTyp', 'custProv_pay_unit', 'custProv_pay_TCost', 'custProv_pay_roe', 'custProv_pay_finalAmt', 'custProv_pay_vatTyp', 'custProv_pay_disc', 'custProv_pay_discExc', 'custProv_pay_total',
-            'cust_penalty_qty', 'cust_penalty_curr', 'cust_penalty_cost', 'cust_penalty_unitTyp', 'cust_penalty_unit', 'cust_penalty_TCost', 'cust_penalty_roe', 'cust_penalty_finalAmt', 'cust_penalty_vatTyp', 'cust_penalty_disc', 'cust_penalty_discExc', 'cust_penalty_total',
+            'cust_vat_qty', 'cust_vat_curr', 'cust_vat_cost', 'cust_vat_unitTyp', 'cust_vat_unit', 'cust_vat_TCost', 'cust_vat_roe', 'cust_vat_finalAmt', 'cust_vat_vatTyp', 'cust_vat_disc%', 'cust_vat_disc', 'cust_vat_vatIncl',
+            'cust_duty_qty', 'cust_duty_curr', 'cust_duty_cost', 'cust_duty_unitTyp', 'cust_duty_unit', 'cust_duty_TCost', 'cust_duty_roe', 'cust_duty_finalAmt', 'cust_duty_vatTyp', 'cust_duty_disc%', 'cust_duty_disc', 'cust_duty_vatIncl',
+            'surcharge_qty', 'surcharge_curr', 'surcharge_cost', 'surcharge_unitTyp', 'surcharge_unit', 'surcharge_TCost', 'surcharge_roe', 'surcharge_finalAmt', 'surcharge_vatTyp', 'surcharge_disc%', 'surcharge_disc', 'surcharge_vatIncl',
+            'disbursement_qty', 'disbursement_curr', 'disbursement_cost', 'disbursement_unitTyp', 'disbursement_unit', 'disbursement_TCost', 'disbursement_roe', 'disbursement_finalAmt', 'disbursement_vatTyp', 'disbursement_disc%', 'disbursement_disc', 'disbursement_vatIncl',
+            'clearing_fee_qty', 'clearing_fee_curr', 'clearing_fee_cost', 'clearing_fee_unitTyp', 'clearing_fee_unit', 'clearing_fee_TCost', 'clearing_fee_roe', 'clearing_fee_finalAmt', 'clearing_fee_vatTyp', 'clearing_fee_disc%', 'clearing_fee_disc', 'clearing_fee_vatIncl',
+            'custProv_pay_qty', 'custProv_pay_curr', 'custProv_pay_cost', 'custProv_pay_unitTyp', 'custProv_pay_unit', 'custProv_pay_TCost', 'custProv_pay_roe', 'custProv_pay_finalAmt', 'custProv_pay_vatTyp', 'custProv_pay_disc%', 'custProv_pay_disc', 'custProv_pay_vatIncl',
+            'cust_penalty_qty', 'cust_penalty_curr', 'cust_penalty_cost', 'cust_penalty_unitTyp', 'cust_penalty_unit', 'cust_penalty_TCost', 'cust_penalty_roe', 'cust_penalty_finalAmt', 'cust_penalty_vatTyp', 'cust_penalty_disc%', 'cust_penalty_disc', 'cust_penalty_vatIncl',
+            'custProv_pay_exclusive', 'custProv_pay_vat',
             'adv_duty_qty', 'adv_duty_curr', 'adv_duty_cost', 'adv_duty_unitTyp', 'adv_duty_unit', 'adv_duty_TCost', 'adv_duty_roe', 'adv_duty_finalAmt',
-            // vat, disc, total columns for other charge groups
             'trans_unpack_charg_vatTyp', 'trans_THC_levy_vatTyp', 'trans_clear_fees_vatTyp', 'insurance_vatTyp', 'ocenfreight_charge_vatTyp', 'org_clearance_vatTyp', 'org_forwFee_vatTyp', 'org_docFee_vatTyp', 'origin_cfs_vatTyp', 'origin_fuelSur_vatTyp', 'org_pickUp_vatTyp', 'adv_duty_vatTyp',
+            'trans_unpack_charg_disc%', 'trans_THC_levy_disc%', 'trans_clear_fees_disc%', 'insurance_disc%', 'ocenfreight_charge_disc%', 'org_clearance_disc%', 'org_forwFee_disc%', 'org_docFee_disc%', 'origin_cfs_disc%', 'origin_fuelSur_disc%', 'org_pickUp_disc%', 'adv_duty_disc%',
             'trans_unpack_charg_disc', 'trans_THC_levy_disc', 'trans_clear_fees_disc', 'insurance_disc', 'ocenfreight_charge_disc', 'org_clearance_disc', 'org_forwFee_disc', 'org_docFee_disc', 'origin_cfs_disc', 'origin_fuelSur_disc', 'org_pickUp_disc', 'adv_duty_disc',
-            'trans_unpack_charg_discExc', 'trans_THC_levy_discExc', 'trans_clear_fees_discExc', 'insurance_discExc', 'ocenfreight_charge_discExc', 'org_clearance_discExc', 'org_forwFee_discExc', 'org_docFee_discExc', 'origin_cfs_discExc', 'origin_fuelSur_discExc', 'org_pickUp_discExc', 'adv_duty_discExc',
-            'trans_unpack_charg_total', 'trans_THC_levy_total', 'trans_clear_fees_total', 'insurance_total', 'ocenfreight_charge_total', 'org_clearance_total', 'org_forwFee_total', 'org_docFee_total', 'origin_cfs_total', 'origin_fuelSur_total', 'org_pickUp_total', 'adv_duty_total',
-            // other breakdowns
-            'trans_CFS_charg_vatTyp', 'trans_CFS_charg_disc', 'trans_CFS_charg_discExc', 'trans_CFS_charg_total', 'trans_admin_charg_vatTyp', 'trans_admin_charg_disc', 'trans_admin_charg_discExc', 'trans_admin_charg_total',
-            'trans_portCargo_vatTyp', 'trans_portCargo_disc', 'trans_portCargo_discExc', 'trans_portCargo_total', 'trans_adv_loadHouse_vatTyp', 'trans_adv_loadHouse_disc', 'trans_adv_loadHouse_discExc', 'trans_adv_loadHouse_total',
-            'trans_doc_fee_vatTyp', 'trans_doc_fee_disc', 'trans_doc_fee_discExc', 'trans_doc_fee_total',
-            'dest_clearing_fees_vatTyp', 'dest_clearing_fees_disc', 'dest_clearing_fees_discExc', 'dest_clearing_fees_total',
-            'dest_THC_levy_vatTyp', 'dest_THC_levy_disc', 'dest_THC_levy_discExc', 'dest_THC_levy_total',
-            'dest_unpack_chrg_vatTyp', 'dest_unpack_chrg_disc', 'dest_unpack_chrg_discExc', 'dest_unpack_chrg_total',
-            'dest_fuel_Surchar_vatTyp', 'dest_fuel_Surchar_disc', 'dest_fuel_Surchar_discExc', 'dest_fuel_Surchar_total',
-            'dest_admin_chrg_vatTyp', 'dest_admin_chrg_disc', 'dest_admin_chrg_discExc', 'dest_admin_chrg_total',
-            'dest_adv_loadHouse_vatTyp', 'dest_adv_loadHouse_disc', 'dest_adv_loadHouse_discExc', 'dest_adv_loadHouse_total',
-            'dest_CFS_charg_vatTyp', 'dest_CFS_charg_disc', 'dest_CFS_charg_discExc', 'dest_CFS_charg_total',
-            'dest_delivry_charge_vatTyp', 'dest_delivry_charge_disc', 'dest_delivry_charge_discExc', 'dest_delivry_charge_total',
-            'dest_fuel_surchrg_vatTyp', 'dest_fuel_surchrg_disc', 'dest_fuel_surchrg_discExc', 'dest_fuel_surchrg_total',
-            'admin_agencyFee_vatTyp', 'admin_agencyFee_disc', 'admin_agencyFee_discExc', 'admin_agencyFee_total',
-            'admin_disbur_fee_vatTyp', 'admin_disbur_fee_disc', 'admin_disbur_fee_discExc', 'admin_disbur_fee_total',
-            'admin_doc_adminFees_vatTyp', 'admin_doc_adminFees_disc', 'admin_doc_adminFees_discExc', 'admin_doc_adminFees_total'
+            'trans_unpack_charg_vatIncl', 'trans_THC_levy_vatIncl', 'trans_clear_fees_vatIncl', 'insurance_vatIncl', 'ocenfreight_charge_vatIncl', 'org_clearance_vatIncl', 'org_forwFee_vatIncl', 'org_docFee_vatIncl', 'origin_cfs_vatIncl', 'origin_fuelSur_vatIncl', 'org_pickUp_vatIncl', 'adv_duty_vatIncl',
+            'trans_CFS_charg_vatTyp', 'trans_CFS_charg_disc%', 'trans_CFS_charg_disc', 'trans_CFS_charg_vatIncl',
+            'trans_admin_charg_vatTyp', 'trans_admin_charg_disc%', 'trans_admin_charg_disc', 'trans_admin_charg_vatIncl',
+            'trans_portCargo_vatTyp', 'trans_portCargo_disc%', 'trans_portCargo_disc', 'trans_portCargo_vatIncl',
+            'trans_adv_loadHouse_vatTyp', 'trans_adv_loadHouse_disc%', 'trans_adv_loadHouse_disc', 'trans_adv_loadHouse_vatIncl',
+            'trans_doc_fee_vatTyp', 'trans_doc_fee_disc%', 'trans_doc_fee_disc', 'trans_doc_fee_vatIncl',
+            'dest_clearing_fees_vatTyp', 'dest_clearing_fees_disc%', 'dest_clearing_fees_disc', 'dest_clearing_fees_vatIncl',
+            'dest_THC_levy_vatTyp', 'dest_THC_levy_disc%', 'dest_THC_levy_disc', 'dest_THC_levy_vatIncl',
+            'dest_unpack_chrg_vatTyp', 'dest_unpack_chrg_disc%', 'dest_unpack_chrg_disc', 'dest_unpack_chrg_vatIncl',
+            'dest_fuel_Surchar_vatTyp', 'dest_fuel_Surchar_disc%', 'dest_fuel_Surchar_disc', 'dest_fuel_Surchar_vatIncl',
+            'dest_admin_chrg_vatTyp', 'dest_admin_chrg_disc%', 'dest_admin_chrg_disc', 'dest_admin_chrg_vatIncl',
+            'dest_adv_loadHouse_vatTyp', 'dest_adv_loadHouse_disc%', 'dest_adv_loadHouse_disc', 'dest_adv_loadHouse_vatIncl',
+            'dest_CFS_charg_vatTyp', 'dest_CFS_charg_disc%', 'dest_CFS_charg_disc', 'dest_CFS_charg_vatIncl',
+            'dest_delivry_charge_vatTyp', 'dest_delivry_charge_disc%', 'dest_delivry_charge_disc', 'dest_delivry_charge_vatIncl',
+            'dest_fuel_surchrg_vatTyp', 'dest_fuel_surchrg_disc%', 'dest_fuel_surchrg_disc', 'dest_fuel_surchrg_vatIncl',
+            'admin_agencyFee_vatTyp', 'admin_agencyFee_disc%', 'admin_agencyFee_disc', 'admin_agencyFee_vatIncl',
+            'admin_disbur_fee_vatTyp', 'admin_disbur_fee_disc%', 'admin_disbur_fee_disc', 'admin_disbur_fee_vatIncl',
+            'admin_doc_adminFees_vatTyp', 'admin_doc_adminFees_disc%', 'admin_doc_adminFees_disc', 'admin_doc_adminFees_vatIncl',
+            'cust_vat_exclusive', 'cust_duty_exclusive', 'surcharge_exclusive', 'disbursement_exclusive', 'clearing_fee_exclusive', 'cust_penalty_exclusive',
+            'trans_unpack_charg_exclusive', 'trans_THC_levy_exclusive', 'trans_clear_fees_exclusive', 'insurance_exclusive', 'ocenfreight_charge_exclusive', 'org_clearance_exclusive', 'org_forwFee_exclusive', 'org_docFee_exclusive', 'origin_cfs_exclusive', 'origin_fuelSur_exclusive', 'org_pickUp_exclusive', 'adv_duty_exclusive',
+            'trans_CFS_charg_exclusive', 'trans_admin_charg_exclusive', 'trans_portCargo_exclusive', 'trans_adv_loadHouse_exclusive', 'trans_doc_fee_exclusive',
+            'dest_clearing_fees_exclusive', 'dest_THC_levy_exclusive', 'dest_unpack_chrg_exclusive', 'dest_fuel_Surchar_exclusive', 'dest_admin_chrg_exclusive', 'dest_adv_loadHouse_exclusive', 'dest_CFS_charg_exclusive', 'dest_delivry_charge_exclusive', 'dest_fuel_surchrg_exclusive',
+            'admin_agencyFee_exclusive', 'admin_disbur_fee_exclusive', 'admin_doc_adminFees_exclusive',
+            'cust_vat_vat', 'cust_duty_vat', 'surcharge_vat', 'disbursement_vat', 'clearing_fee_vat', 'cust_penalty_vat',
+            'trans_unpack_charg_vat', 'trans_THC_levy_vat', 'trans_clear_fees_vat', 'insurance_vat', 'ocenfreight_charge_vat', 'org_clearance_vat', 'org_forwFee_vat', 'org_docFee_vat', 'origin_cfs_vat', 'origin_fuelSur_vat', 'org_pickUp_vat', 'adv_duty_vat',
+            'trans_CFS_charg_vat', 'trans_admin_charg_vat', 'trans_portCargo_vat', 'trans_adv_loadHouse_vat', 'trans_doc_fee_vat',
+            'dest_clearing_fees_vat', 'dest_THC_levy_vat', 'dest_unpack_chrg_vat', 'dest_fuel_Surchar_vat', 'dest_admin_chrg_vat', 'dest_adv_loadHouse_vat', 'dest_CFS_charg_vat', 'dest_delivry_charge_vat', 'dest_fuel_surchrg_vat',
+            'admin_agencyFee_vat', 'admin_disbur_fee_vat', 'admin_doc_adminFees_vat',
+            'dest_portCargo_vatTyp', 'dest_portCargo_disc_percent', 'dest_portCargo_disc', 'dest_portCargo_vatIncl', 'dest_portCargo_exclusive', 'dest_portCargo_vat'
         ];
 
         if (data.supplier_invoice_id) {
@@ -16841,7 +16843,7 @@ const addEstimatSupplierInvoice = async (req, res) => {
 
                 const updateQuery = `
                     UPDATE supplier_sage_invoice SET
-                        ${updateFieldsArr.map(field => `${field}=?`).join(', ')}
+                        ${updateFieldsArr.map(field => `\`${field}\`=?`).join(', ')}
                     WHERE id=?
                 `;
 
@@ -16870,10 +16872,78 @@ const addEstimatSupplierInvoice = async (req, res) => {
             }
             /* ================= INSERT ================= */
             else {
-                // Compose all fields for insert: combine old and extra fields
-                const insertData = { ...data };
-                extraFields.forEach(field => {
-                    if (!(field in insertData)) insertData[field] = null;
+                const baseFields = [
+                    'supplier_id', 'shipment_id',
+                    'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
+                    'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
+                    'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
+                    'orifuel4', 'finalfuel1', 'roe_origin_fuel_currency', 'finalvlaueoFuel',
+                    'origin_pick_up_cfs_cost', 'origin_pick_up_cfs_fees', 'origin_pickup_vfs_gp',
+                    'oricfs4', 'finalcfs1', 'roe_origin_cfs_currency', 'finalvlaueocfs',
+                    'origin_pick_up_unitType',
+                    'origin_pick_up_documantion_cost', 'origin_pick_up_documantation_fees',
+                    'origin_pick_documantation_cost_gp', 'oridoc4', 'finaldoc1',
+                    'roe_origin_doc_currency', 'finalvlaueodoc',
+                    'origin_pick_up_forewarding_cost', 'origin_pick_up_forewarding_fees',
+                    'origin_pickup_forewarding_gp', 'oriforewarding4', 'roe_origin_forewarding',
+                    'finalforewarding1', 'finalvlaueoforewarding',
+                    'origin_pick_up_custome_cost', 'origin_pick_up_custome_clearance',
+                    'origin_pickup_custome_gp', 'oricustome4', 'roe_origin_customes',
+                    'finalcustomes1', 'finalvlaueoCustomes',
+                    'totalChageswithOutExchange', 'totalChangeRoeOrigin',
+                    'freight_charge_currency_cost', 'freight_charge_currency_fees',
+                    'freight_charge_currency_gp', 'orifreight4',
+                    'finalValuefreight', 'finalfreight1', 'finalvlaueofreight',
+                    'freight_currency_insurance_cost', 'freightorigin_insurance_gp',
+                    'freight_currency_insurance_unit', 'oriinsurance4',
+                    'roe_insurance_currency', 'finalinsurance1', 'finalvlaueoInsurance',
+                    'totalChageswithOutExchangeinsurance',
+                    'totalChangeRoeOriginaftercalcuinsurance',
+                    'Transit_currency_Cost', 'Transit_currency_gp', 'Transit_currency_unit',
+                    'finaltransit1', 'oritransit4', 'Transit_currency_roe',
+                    'finalvlaueotransit',
+                    'transit_currency_THC_cost', 'transit_currency_THC_init',
+                    'transit_currency_THC_gp', 'oriThc4', 'finalThc1',
+                    'finalvlaueotfineal', 'roe_Transit_Thc',
+                    'Transit_currency_unpack_cost', 'Transit_currency_unpack_unit',
+                    'Transit_currency_unpack_gp', 'finalunpack1', 'oriunpack4',
+                    'finalvlaueotfunpack', 'Transit_unpack_roe',
+                    'totalChaDestinationTransit', 'totalChaDestinationTransitRoe',
+                    'sumofall', 'sumofRoe',
+                    'transit_3rd_party_cost', 'transit_3rd_party_unit', 'transit_3rd_party_gp', 'ori3rdparty4', 'final3rdparty1', 'finalvlaueot3dparty', 'transit_currency_3rd',
+                    'transit_admin_change', 'transit_admin_unit', 'transit_admin_gp',
+                    'ori3rdAdmin4', 'final3rdAdmin1', 'finalvlaueotAdmin', 'roe_transit_admin',
+                    'transit_currency_port', 'transit_currency_port_unit', 'transit_currency_port_gp', 'ori3rdport4', 'final3rdport1', 'finalvlaueotPort', 'roe_trans_port',
+                    'Transit_advanced_load', 'Transit_advanced_unit', 'Transit_advanced_gp', 'oriadv4', 'final3rdadv1', 'finalvlaueotadv', 'Transit_advanced_gp_roe',
+                    'transit_change_Documentation', 'transit_change_Documentation_unit', 'oridocumentation4', 'transit_change_Documentation_gp', 'final3rdocumantation1', 'finalvlaueotDocumantation', 'roe_transit_change_Documentation',
+                    'totalChageswithOuTransit', 'transitRoe',
+                    'Destination_freight_currency_cost', 'Destination_freight_currency_unit', 'Destination_freight_currency_gp', 'destinationdocumentation4', 'final3rdestinationRoe', 'final3rdestination1', 'Destination_freight_currency_Roe',
+                    'Destination_THC_currency_cost', 'Destination_THC_currency_unit', 'Destination_THC_currency_gp', 'destinationTHCdocumentation4', 'final3rTHCdestination1', 'final3rTHCdestinationRoe', 'Destination_THC_currency_Roe',
+                    'Destination_Unpack_currency_cost', 'Destination_Unpack_currency_unit', 'Destination_Unpack_currency_gp', 'destinationUnpackdocumentation4', 'Destination_Unpack_currency_roe', 'final3rUnpackdestinationRoe', 'final3runpackdestination1',
+                    'totaAdminransit', 'totalAdminnsitRoe',
+                    'Destination_fuelsurcharge_currency_cost', 'Destination_fuelsurcharge_currency_unit', 'Destination_fuelsurcharge_currency_gp', 'destinationfuelsurchargedocumentation4', 'final3rfuelsurchargedestination1', 'final3rfuelsurCahrgeestinationRoe', 'Destination_fuelsurcharge_currency_roe',
+                    'Destination_adminsurcharge_currency_cost', 'Destination_adminsurcharge_currency_unit', 'Destination_adminsurcharge_currency_gp', 'destinatiadminsurcharge4', 'Valueadminsurchargedestanion', 'adminsurcharge2', 'Destination_adminsurcharge_currency_roe',
+                    'Destination_portcargo_currency_cost', 'Destination_portcargo_currency_unit', 'Destination_portcargo_currency_gp', 'destinatiportcargo4', 'Vaportcargoion', 'admiportcargo2', 'Destination_portcargo_currency_roe',
+                    'Destination_AdvancedLoad_currency_cost', 'Destination_AdvancedLoad_currency_unit', 'Destination_AdvancedLoad_currency_gp', 'destinatiAdvancedLoad4', 'VAdvancedLoadion', 'desdvancedLoadion', 'Destination_AdvancedLoad_currency_roe',
+                    'Destination_3rdpartyDesc_currency_cost', 'Destination_3rdpartyDesc_currency_unit', 'Destination_3rdpartyDesc_currency_gp', 'destinati3rdpartyload4', 'VAdvanced3rdpartyLoadion', 'desdva3rdpartyion', 'Destination_3rdpartyDesc_currency_roe',
+                    'Destination_delivery_currency_cost', 'Destination_delivery_currency_unit', 'Destination_delivery_currency_gp', 'destindeliveryyDesc4', 'VAdvandeliverytyLoadion', 'desddeliverytyion', 'Destination_delivery_currency_roe',
+                    'Destination_fuelcharge_currency_cost', 'Destination_fuelcharge_currency_unit', 'Destination_fuelcharge_currency_gp', 'destindfuelchangerDesc4', 'VAdvfuelchangeon', 'defuelchangyion', 'Destination_fuelcharge_currency_roe',
+                    'Destination_AdminAgrncy_currency_cost', 'Destination_AdminAgrncy_currency_unit', 'Destination_AdminAgrncy_currency_gp', 'deadminAgencyesc4', 'VAadminAgencyngeon', 'defuelchdminAgencyngangyion', 'Destination_AdminAgrncy_currency_roe',
+                    'Destination_disbursemant_currency_cost', 'Destination_disbursemant_currency_unit', 'Destination_disbursemant_currency_gp', 'deaddisbursemantc4', 'VAdisbursemon', 'dedisbursementon', 'Destination_disbursemant_currency_roe',
+                    'Destination_doc_currency_cost', 'Destination_doc_currency_unit', 'Destination_doc_currency_gp', 'deadoctc4', 'VAdocon', 'dedisbudoon', 'Destination_doc_currency_roe', 'roe_freight_currency',
+                    'freight_charge_currency', 'freight_charge_currency_unitType', 'freight_currency_insurance_unittype',
+                    'origin_pick_up_fuel_unitType', 'origin_pick_up_cfs_unitType', 'origin_pick_up_documantation_unitType', 'origin_pick_up_forewarding_unitType', 'origin_pick_up_custome_unitType',
+                    'Transit_currency_unitTpe', 'transit_currency_THC_initType', 'Transit_currency_unpack_unitType', 'transit_3rd_party_unittype', 'transit_admin_unittype', 'transit_currency_port_unitType', 'Transit_advanced_unitType', 'transit_change_Documentation_unitType',
+                    'Destination_freight_currency_unitType', 'Destination_THC_currency_unitType', 'Destination_Unpack_currency_unitType', 'Destination_fuelsurcharge_currency_typeUnit', 'Destination_adminsurcharge_currency_unitType', 'Destination_portcargo_currency_unitType', 'Destination_AdvancedLoad_currency_unitType', 'Destination_3rdpartyDesc_currency_unitType', 'Destination_delivery_currency_unitType', 'Destination_fuelcharge_currency_unitType',
+                    'Destination_AdminAgrncy_currency_unitType', 'Destination_disbursemant_currency_unitType', 'Destination_doc_currency_unittype',
+                    'freight_charge_currencyQTY', 'origin_pick_up_fuel_unitTypeQTY', 'origin_pick_up_cfs_unitTypeQTY', 'origin_pick_up_forewarding_unitTypeQTY', 'origin_pick_up_documantation_unitTypeQTY', 'origin_pick_up_custome_unitTypeQTY', 'chargable_rate', 'freight_charge_currency_unitTypeQTY', 'freight_currency_insurance_unittypeQTY',
+                    'Transit_currency_unitTpeQTY', 'transit_currency_THC_initTypeQTY', 'transit_currency_THC_initTypeeQTY', 'transit_3rd_party_unittypeQTY', 'transit_admin_unittypeQTY', 'transit_currency_port_unitTypeQTY', 'Transit_advanced_unitTypeQTY', 'transit_change_Documentation_unitTypeQTY',
+                    'Destination_freight_currency_unitTypeQTY', 'Destination_THC_currency_unitTypeQTY', 'Destination_Unpack_currency_unitTypeQTY', 'Destination_fuelsurcharge_currency_typeUnitQTY', 'Destination_adminsurcharge_currency_unitTypeQTY', 'Destination_portcargo_currency_unitTypeQTY', 'Destination_AdvancedLoad_currency_unitTypeQTY', 'Destination_3rdpartyDesc_currency_unitTypeQTY', 'Destination_delivery_currency_unitTypeQTY', 'Destination_fuelcharge_currency_unitTypeQTY', 'Destination_AdminAgrncy_currency_unitQTY', 'Destination_disbursemant_currency_unitTypeQTY', 'Destination_doc_currency_unittypeQTY', 'pickup_freight_currency', 'Transit_currency', 'Destination_freight_currency', 'admin_currency_charge', 'Destination_disbursemant_currenc_unitType1'
+                ];
+                const insertFields = [...baseFields, ...extraFields];
+                const insertData = {};
+                insertFields.forEach(field => {
+                    insertData[field] = data[field] !== undefined ? data[field] : null;
                 });
                 const insertQuery = `INSERT INTO supplier_sage_invoice SET ?`;
                 con.query(insertQuery, insertData, (err, insertDataRes) => {
