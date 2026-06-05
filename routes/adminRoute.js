@@ -71,6 +71,23 @@ admin_route.post('/new-freight-list', adminController.GetFreightCustomer);
 admin_route.post('/edit-freight', upload.fields([{ name: 'Customs Documents', maxCount: 5 }, { name: 'Waybills', maxCount: 5 }, { name: 'Supporting Documents', maxCount: 5 }, { name: 'Invoice, Packing List', maxCount: 5 },
 { name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }, { name: 'Invoice (AD)', maxCount: 5 },
 { name: 'POP (AD)', maxCount: 5 }, { name: 'Delivery note', maxCount: 5 }]), adminController.EditFreight);
+admin_route.post(
+    '/upload-freight-document',
+    upload.fields([
+        { name: 'Customs Documents', maxCount: 5 },
+        { name: 'Waybills', maxCount: 5 },
+        { name: 'Supporting Documents', maxCount: 5 },
+        { name: 'Invoice, Packing List', maxCount: 5 },
+        { name: 'Product Literature', maxCount: 5 },
+        { name: 'Letters of authority', maxCount: 5 },
+        { name: 'AD_Quotations', maxCount: 5 },
+        { name: 'Supplier Invoices', maxCount: 5 },
+        { name: 'Invoice (AD)', maxCount: 5 },
+        { name: 'POP (AD)', maxCount: 5 },
+        { name: 'Delivery note', maxCount: 5 }
+    ]),
+    adminController.UploadFreightDocument
+);
 admin_route.post('/get-freight', adminController.GetFreightById);
 admin_route.post('/delete-freight', adminController.DeleteFreight);
 

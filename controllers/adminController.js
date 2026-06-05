@@ -2347,41 +2347,90 @@ const getMainFolderForDoc = (docName) => {
 
 
 // Upload file to matching subfolder
+// const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
+//     // Map document to main folder type
+//     const mainFolderName = getMainFolderForDoc(documentName);
+//     if (!mainFolderName) {
+//         console.log(`Document name "${documentName}" does not match any known subfolder. Upload skipped.`);
+//         return null;
+//     }
+
+//     // Find the main freight folder by freightNumber
+//     const freightFolderId = await findFolderId(freightNumber);
+//     if (!freightFolderId) {
+//         console.log(`Freight folder "${freightNumber}" not found. Upload skipped.`);
+//         return null;
+//     }
+
+//     // Find main folder inside the freight folder
+//     const mainFolderId = await findFolderId(mainFolderName, freightFolderId);
+//     if (!mainFolderId) {
+//         console.log(`Main folder "${mainFolderName}" not found inside "${freightNumber}". Upload skipped.`);
+//         return null;
+//     }
+
+//     // Find subfolder inside the main folder
+//     const subFolderId = await findFolderId(documentName, mainFolderId);
+//     if (!subFolderId) {
+//         console.log(`Subfolder "${documentName}" not found inside "${mainFolderName}". Upload skipped.`);
+//         return null;
+//     }
+
+//     // Upload file to the subfolder
+//     const result = await uploadFile(subFolderId, file);
+//     console.log(`Uploaded ${file.originalname} to ${freightNumber}/${mainFolderName}/${documentName}`);
+//     return result;
+// };
+
 const uploadToMatchingFolder = async (file, documentName, freightNumber) => {
-    // Map document to main folder type
+
     const mainFolderName = getMainFolderForDoc(documentName);
+
     if (!mainFolderName) {
-        console.log(`Document name "${documentName}" does not match any known subfolder. Upload skipped.`);
+        console.log(`Document name "${documentName}" does not match any known subfolder.`);
         return null;
     }
 
-    // Find the main freight folder by freightNumber
+    // Ensure full folder structure exists
+    // await findOrCreateFolder(freightNumber);
+
     const freightFolderId = await findFolderId(freightNumber);
+
     if (!freightFolderId) {
-        console.log(`Freight folder "${freightNumber}" not found. Upload skipped.`);
+        console.log(`Freight folder "${freightNumber}" not found.`);
         return null;
     }
 
-    // Find main folder inside the freight folder
-    const mainFolderId = await findFolderId(mainFolderName, freightFolderId);
+    const mainFolderId = await findFolderId(
+        mainFolderName,
+        freightFolderId
+    );
+
     if (!mainFolderId) {
-        console.log(`Main folder "${mainFolderName}" not found inside "${freightNumber}". Upload skipped.`);
+        console.log(`Main folder "${mainFolderName}" not found.`);
         return null;
     }
 
-    // Find subfolder inside the main folder
-    const subFolderId = await findFolderId(documentName, mainFolderId);
+    const subFolderId = await findFolderId(
+        documentName,
+        mainFolderId
+    );
+
     if (!subFolderId) {
-        console.log(`Subfolder "${documentName}" not found inside "${mainFolderName}". Upload skipped.`);
+        console.log(
+            `Subfolder "${documentName}" not found inside "${mainFolderName}".`
+        );
         return null;
     }
 
-    // Upload file to the subfolder
     const result = await uploadFile(subFolderId, file);
-    console.log(`Uploaded ${file.originalname} to ${freightNumber}/${mainFolderName}/${documentName}`);
+
+    console.log(
+        `Uploaded ${file.originalname} to ${freightNumber}/${mainFolderName}/${documentName}`
+    );
+
     return result;
 };
-
 
 // const Addfreight = async (req, res) => {
 //     try {
@@ -3738,6 +3787,114 @@ require_for_delivery_status = ?,
     } catch (error) {
         // console.error('Error in EditFreight function:', error);
         res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
+    }
+};
+
+const UploadFreightDocument = async (req, res) => {
+    try {
+
+        const { freight_id } = req.body;
+
+        if (!freight_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_id is required"
+            });
+        }
+
+        const freightQuery = `
+            SELECT freight_number
+            FROM tbl_freight
+            WHERE id = ?
+        `;
+
+        const freightData = await new Promise((resolve, reject) => {
+            con.query(freightQuery, [freight_id], (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
+
+        if (!freightData.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Freight not found"
+            });
+        }
+
+        const freightNumber = freightData[0].freight_number;
+
+        let uploadedFiles = [];
+
+        await findOrCreateFolder(freightNumber);
+
+        if (req.files && Object.keys(req.files).length > 0) {
+
+            for (const fieldName of Object.keys(req.files)) {
+
+                const filesArray = req.files[fieldName];
+
+                for (const file of filesArray) {
+
+                    // Upload to Google Drive / Folder
+                    await uploadToMatchingFolder(
+                        file,
+                        fieldName,
+                        freightNumber
+                    );
+
+                    // Save document record
+                    const docQuery = `
+                        INSERT INTO freight_doc
+                        (
+                            freight_id,
+                            uploaded_by,
+                            document_name,
+                            document
+                        )
+                        VALUES (?, ?, ?, ?)
+                    `;
+
+                    await new Promise((resolve, reject) => {
+                        con.query(
+                            docQuery,
+                            [
+                                freight_id,
+                                req.user?.id || 1,
+                                fieldName,
+                                file.filename
+                            ],
+                            (err) => {
+                                if (err) return reject(err);
+                                resolve();
+                            }
+                        );
+                    });
+
+                    uploadedFiles.push({
+                        document_name: fieldName,
+                        file_name: file.filename
+                    });
+                }
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Documents uploaded successfully",
+            totalUploaded: uploadedFiles.length,
+            data: uploadedFiles
+        });
+
+    } catch (error) {
+
+        console.error("UploadFreightDocument Error:", error);
+
+        return res.status(500).json({
             success: false,
             message: "Internal Server Error",
             error: error.message
@@ -8264,21 +8421,21 @@ const OrderDetailsById = async (req, res) => {
                 sds.freight as shipments_freight,
                 sds.carrier as shipments_carrier,
                 sds.vessel as shipments_vessel,
-                sds.waybill as shipments_date_of_dispatch,
-                sds.waybill as shipments_ETD,
-                sds.waybill as shipments_ATD,
-                sds.waybill as shipments_status,
-                sds.waybill as shipments_origin_agent,
-                sds.waybill as shipments_port_of_loading,
-                sds.waybill as shipments_port_of_discharge,
-                sds.waybill as shipments_origin_country_id,
-                sds.waybill as shipments_des_country_id,
-                sds.waybill as shipments_destination_agent,
-                sds.waybill as shipments_load,
-                sds.waybill as shipments_release_type,
-                sds.waybill as shipments_container,
-                sds.waybill as shipments_seal,
-                sds.waybill as shipments_document,
+                sds.date_of_dispatch as shipments_date_of_dispatch,
+                sds.ETD as shipments_ETD,
+                sds.ATD as shipments_ATD,
+                sds.status as shipments_status,
+                sds.origin_agent as shipments_origin_agent,
+                sds.port_of_loading as shipments_port_of_loading,
+                sds.port_of_discharge as shipments_port_of_discharge,
+                sds.origin_country_id as shipments_origin_country_id,
+                sds.des_country_id as shipments_des_country_id,
+                sds.destination_agent as shipments_destination_agent,
+                sds.load as shipments_load,
+                sds.release_type as shipments_release_type,
+                sds.container as shipments_container,
+                sds.seal as shipments_seal,
+                sds.document as shipments_document,
                 cos.name AS shipment_collection_country, 
                 coss.name AS shipment_delivery_country
             FROM tbl_orders
@@ -8324,8 +8481,6 @@ const OrderDetailsById = async (req, res) => {
         });
     }
 };
-
-
 
 const sendMessage = async (req, res) => {
     try {
@@ -17463,7 +17618,7 @@ const copySupplierInvoice = async (req, res) => {
 
 module.exports = {
     AdminLogin, ChangePassword, PrivacyPolicy, GetPrivacy, TermCondition, GetTerms, Addfreight,
-    GetFreightAdmin, GetReadyFreightAdmin, ManageFreightStatus, EditFreight, GetFreightById, DeleteFreight, AddCountryOrigin, getCountryOriginList,
+    GetFreightAdmin, GetReadyFreightAdmin, ManageFreightStatus, EditFreight, UploadFreightDocument, GetFreightById, DeleteFreight, AddCountryOrigin, getCountryOriginList,
     updateCountryOrigin, GetCountryById, DeleteCountry, clientListAddFreight, CountryListAddFreight,
     Shipping_Estimate, Shipping_Estimate_supplier, updateShippingEstimate, ShipEstimateList, GetShipEstimateById, DeleteShipEstimate,
     updateProfile, forgotPassword, ResetPassword, SendNotification, GetNotification, deleteNotification,
