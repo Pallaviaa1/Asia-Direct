@@ -1733,10 +1733,114 @@ const UploadSageInvoiceLlist = async (req, res) => {
     }
 }; */
 
+// const GetSageInvoiceList = async (req, res) => {
+//     try {
+//         const { order_ID, search, page = 1, limit = 1000 } = req.query;
+//         const offset = (page - 1) * limit;
+//         let query;
+//         let countQuery;
+//         let queryParams = [];
+//         let countParams = [];
+
+//         let searchCondition = "";
+//         if (search) {
+//             searchCondition = `AND (customer_name LIKE ? OR document_number LIKE ? OR customer_ref LIKE ?)`;
+//         }
+
+//         if (order_ID) {
+//             // Get available sage_invoice_id except those assigned to other orders
+//             query = `
+//                 SELECT * FROM sage_invoice_list 
+//                 WHERE (id NOT IN (
+//                     SELECT DISTINCT sage_invoice_id FROM tbl_orders 
+//                     WHERE sage_invoice_id IS NOT NULL AND id != ?
+//                 ) OR id = (SELECT sage_invoice_id FROM tbl_orders WHERE id = ?))
+//                 ${search ? searchCondition : ""}
+//                 ORDER BY document_number DESC 
+//                 LIMIT ? OFFSET ?;
+//             `;
+
+//             countQuery = `
+//                 SELECT COUNT(*) AS total FROM sage_invoice_list 
+//                 WHERE (id NOT IN (
+//                     SELECT DISTINCT sage_invoice_id FROM tbl_orders 
+//                     WHERE sage_invoice_id IS NOT NULL AND id != ?
+//                 ) OR id = (SELECT sage_invoice_id FROM tbl_orders WHERE id = ?))
+//                 ${search ? searchCondition : ""};
+//             `;
+
+//             queryParams = search
+//                 ? [order_ID, order_ID, `%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)]
+//                 : [order_ID, order_ID, parseInt(limit), parseInt(offset)];
+
+//             countParams = search
+//                 ? [order_ID, order_ID, `%${search}%`, `%${search}%`, `%${search}%`]
+//                 : [order_ID, order_ID];
+//         } else {
+//             // Fetch all invoices with optional search
+//             query = `
+//                 SELECT * FROM sage_invoice_list 
+//                 WHERE 1 ${search ? searchCondition : ""}
+//                 ORDER BY document_number DESC 
+//                 LIMIT ? OFFSET ?;
+//             `;
+
+//             countQuery = `
+//                 SELECT COUNT(*) AS total FROM sage_invoice_list 
+//                 WHERE 1 ${search ? searchCondition : ""};
+//             `;
+
+//             queryParams = search
+//                 ? [`%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)]
+//                 : [parseInt(limit), parseInt(offset)];
+
+//             countParams = search
+//                 ? [`%${search}%`, `%${search}%`, `%${search}%`]
+//                 : [];
+//         }
+
+//         // Execute count query first
+//         con.query(countQuery, countParams, (err, countResult) => {
+//             if (err) {
+//                 console.error("Database error (count query):", err.message);
+//                 return res.status(500).json({ success: false, message: "Database query failed." });
+//             }
+
+//             const totalRecords = countResult[0].total;
+//             const totalPages = Math.ceil(totalRecords / limit);
+
+//             // Execute main data query
+//             con.query(query, queryParams, (err, data) => {
+//                 if (err) {
+//                     console.error("Database error:", err.message);
+//                     return res.status(500).json({ success: false, message: "Database query failed." });
+//                 }
+
+//                 res.status(200).json({
+//                     success: true,
+//                     data,
+//                     pagination: {
+//                         totalRecords,
+//                         totalPages,
+//                         currentPage: parseInt(page),
+//                         pageSize: parseInt(limit),
+//                     }
+//                 });
+//             });
+//         });
+
+//     } catch (error) {
+//         console.error("Unexpected error:", error.message);
+//         res.status(500).json({ success: false, message: "An unexpected error occurred." });
+//     }
+// };
+
+
 const GetSageInvoiceList = async (req, res) => {
     try {
         const { order_ID, search, page = 1, limit = 10 } = req.query;
         const offset = (page - 1) * limit;
+
         let query;
         let countQuery;
         let queryParams = [];
@@ -1744,96 +1848,248 @@ const GetSageInvoiceList = async (req, res) => {
 
         let searchCondition = "";
         if (search) {
-            searchCondition = `AND (customer_name LIKE ? OR document_number LIKE ? OR customer_ref LIKE ?)`;
+            searchCondition = `
+                AND (
+                    sil.customer_name LIKE ?
+                    OR sil.document_number LIKE ?
+                    OR sil.customer_ref LIKE ?
+                )
+            `;
         }
 
         if (order_ID) {
-            // Get available sage_invoice_id except those assigned to other orders
+
             query = `
-                SELECT * FROM sage_invoice_list 
-                WHERE (id NOT IN (
-                    SELECT DISTINCT sage_invoice_id FROM tbl_orders 
-                    WHERE sage_invoice_id IS NOT NULL AND id != ?
-                ) OR id = (SELECT sage_invoice_id FROM tbl_orders WHERE id = ?))
+                SELECT
+                    sil.*,
+                    ti.id AS invoice_id,
+                    ti.order_id,
+                    o.freight_id
+                FROM sage_invoice_list sil
+                LEFT JOIN tbl_invoices ti
+                    ON ti.sage_invoice_id = sil.id
+                LEFT JOIN tbl_orders o
+                    ON o.id = ti.order_id
+                WHERE (
+                    sil.id NOT IN (
+                        SELECT DISTINCT sage_invoice_id
+                        FROM tbl_orders
+                        WHERE sage_invoice_id IS NOT NULL
+                        AND id != ?
+                    )
+                    OR sil.id = (
+                        SELECT sage_invoice_id
+                        FROM tbl_orders
+                        WHERE id = ?
+                    )
+                )
                 ${search ? searchCondition : ""}
-                ORDER BY document_number DESC 
+                ORDER BY sil.document_number DESC
                 LIMIT ? OFFSET ?;
             `;
 
             countQuery = `
-                SELECT COUNT(*) AS total FROM sage_invoice_list 
-                WHERE (id NOT IN (
-                    SELECT DISTINCT sage_invoice_id FROM tbl_orders 
-                    WHERE sage_invoice_id IS NOT NULL AND id != ?
-                ) OR id = (SELECT sage_invoice_id FROM tbl_orders WHERE id = ?))
+                SELECT COUNT(*) AS total
+                FROM sage_invoice_list sil
+                WHERE (
+                    sil.id NOT IN (
+                        SELECT DISTINCT sage_invoice_id
+                        FROM tbl_orders
+                        WHERE sage_invoice_id IS NOT NULL
+                        AND id != ?
+                    )
+                    OR sil.id = (
+                        SELECT sage_invoice_id
+                        FROM tbl_orders
+                        WHERE id = ?
+                    )
+                )
                 ${search ? searchCondition : ""};
             `;
 
             queryParams = search
-                ? [order_ID, order_ID, `%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)]
-                : [order_ID, order_ID, parseInt(limit), parseInt(offset)];
+                ? [
+                    order_ID,
+                    order_ID,
+                    `%${search}%`,
+                    `%${search}%`,
+                    `%${search}%`,
+                    parseInt(limit),
+                    parseInt(offset)
+                ]
+                : [
+                    order_ID,
+                    order_ID,
+                    parseInt(limit),
+                    parseInt(offset)
+                ];
 
             countParams = search
-                ? [order_ID, order_ID, `%${search}%`, `%${search}%`, `%${search}%`]
-                : [order_ID, order_ID];
+                ? [
+                    order_ID,
+                    order_ID,
+                    `%${search}%`,
+                    `%${search}%`,
+                    `%${search}%`
+                ]
+                : [
+                    order_ID,
+                    order_ID
+                ];
+
         } else {
-            // Fetch all invoices with optional search
+
             query = `
-                SELECT * FROM sage_invoice_list 
-                WHERE 1 ${search ? searchCondition : ""}
-                ORDER BY document_number DESC 
+                SELECT
+                    sil.*,
+                    ti.id AS invoice_id,
+                    ti.order_id,
+                    o.freight_id
+                FROM sage_invoice_list sil
+                LEFT JOIN tbl_invoices ti
+                    ON ti.sage_invoice_id = sil.id
+                LEFT JOIN tbl_orders o
+                    ON o.id = ti.order_id
+                WHERE 1 = 1
+                ${search ? searchCondition : ""}
+                ORDER BY sil.document_number DESC
                 LIMIT ? OFFSET ?;
             `;
 
             countQuery = `
-                SELECT COUNT(*) AS total FROM sage_invoice_list 
-                WHERE 1 ${search ? searchCondition : ""};
+                SELECT COUNT(*) AS total
+                FROM sage_invoice_list sil
+                WHERE 1 = 1
+                ${search ? searchCondition : ""};
             `;
 
             queryParams = search
-                ? [`%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)]
-                : [parseInt(limit), parseInt(offset)];
+                ? [
+                    `%${search}%`,
+                    `%${search}%`,
+                    `%${search}%`,
+                    parseInt(limit),
+                    parseInt(offset)
+                ]
+                : [
+                    parseInt(limit),
+                    parseInt(offset)
+                ];
 
             countParams = search
-                ? [`%${search}%`, `%${search}%`, `%${search}%`]
+                ? [
+                    `%${search}%`,
+                    `%${search}%`,
+                    `%${search}%`
+                ]
                 : [];
         }
 
-        // Execute count query first
+        // Count Query
         con.query(countQuery, countParams, (err, countResult) => {
+
             if (err) {
                 console.error("Database error (count query):", err.message);
-                return res.status(500).json({ success: false, message: "Database query failed." });
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query failed."
+                });
             }
 
             const totalRecords = countResult[0].total;
             const totalPages = Math.ceil(totalRecords / limit);
 
-            // Execute main data query
-            con.query(query, queryParams, (err, data) => {
+            // Main Query
+            con.query(query, queryParams, async (err, data) => {
+
                 if (err) {
                     console.error("Database error:", err.message);
-                    return res.status(500).json({ success: false, message: "Database query failed." });
+
+                    return res.status(500).json({
+                        success: false,
+                        message: "Database query failed."
+                    });
                 }
 
-                res.status(200).json({
-                    success: true,
-                    data,
-                    pagination: {
-                        totalRecords,
-                        totalPages,
-                        currentPage: parseInt(page),
-                        pageSize: parseInt(limit),
-                    }
-                });
+                try {
+
+                    const updatedData = await Promise.all(
+                        data.map(async (invoice) => {
+
+                            if (!invoice.freight_id) {
+                                invoice.freight_invoice_docs = [];
+                                return invoice;
+                            }
+
+                            const docs = await new Promise((resolve, reject) => {
+
+                                con.query(
+                                    `
+                                    SELECT
+                                        id,
+                                        freight_id,
+                                        document_name,
+                                        document,
+                                        uploaded_by,
+                                        created_at
+                                    FROM freight_doc
+                                    WHERE freight_id = ?
+                                    AND document_name = 'Invoice (AD)'
+                                    ORDER BY id DESC
+                                    `,
+                                    [invoice.freight_id],
+                                    (err, result) => {
+                                        if (err) return reject(err);
+                                        resolve(result);
+                                    }
+                                );
+
+                            });
+
+                            invoice.freight_invoice_docs = docs;
+
+                            return invoice;
+
+                        })
+                    );
+
+                    return res.status(200).json({
+                        success: true,
+                        data: updatedData,
+                        pagination: {
+                            totalRecords,
+                            totalPages,
+                            currentPage: parseInt(page),
+                            pageSize: parseInt(limit)
+                        }
+                    });
+
+                } catch (error) {
+
+                    console.error("Document fetch error:", error);
+
+                    return res.status(500).json({
+                        success: false,
+                        message: "Error fetching freight documents",
+                        error: error.message
+                    });
+                }
             });
         });
 
     } catch (error) {
+
         console.error("Unexpected error:", error.message);
-        res.status(500).json({ success: false, message: "An unexpected error occurred." });
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+        });
     }
 };
+
 
 const GetSageInvoiceDropdown = async (req, res) => {
 
@@ -2263,67 +2519,239 @@ const UploadCashbookList = async (req, res) => {
 };
 
 
+// const GetCashbookList = async (req, res) => {
+//     try {
+//         const { page = 1, limit = 10, search } = req.query;
+//         const offset = (page - 1) * limit;
+//         let queryParams = [parseInt(limit), parseInt(offset)];
+//         let countParams = [];
+
+//         let searchCondition = "";
+//         if (search) {
+//             searchCondition = `WHERE bank_ref LIKE ? OR description_on_receipt LIKE ? OR receipt LIKE ? OR payment LIKE ?`;
+//             queryParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)];
+//             countParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+//         }
+
+//         // Query to fetch paginated results
+//         const query = `
+//             SELECT * FROM tbl_cashbook 
+//             ${search ? searchCondition : ""}
+//             ORDER BY id DESC 
+//             LIMIT ? OFFSET ?;
+//         `;
+
+//         // Query to get total records count
+//         const countQuery = `
+//             SELECT COUNT(*) AS total FROM tbl_cashbook 
+//             ${search ? searchCondition : ""};
+//         `;
+
+//         // First, get the total record count
+//         con.query(countQuery, countParams, (err, countResult) => {
+//             if (err) {
+//                 console.error("Database error (count query):", err.message);
+//                 return res.status(500).json({ success: false, message: "Database query failed." });
+//             }
+
+//             const totalRecords = countResult[0].total;
+//             const totalPages = Math.ceil(totalRecords / limit);
+
+//             // Now, fetch paginated data
+//             con.query(query, queryParams, (err, data) => {
+//                 if (err) {
+//                     console.error("Database error:", err.message);
+//                     return res.status(500).json({ success: false, message: "Database query failed." });
+//                 }
+
+//                 res.status(200).json({
+//                     success: true,
+//                     data,
+//                     pagination: {
+//                         totalRecords,
+//                         totalPages,
+//                         currentPage: parseInt(page),
+//                         pageSize: parseInt(limit),
+//                     }
+//                 });
+//             });
+//         });
+
+//     } catch (error) {
+//         console.error("Unexpected error:", error.message);
+//         res.status(500).json({ success: false, message: "An unexpected error occurred." });
+//     }
+// };
+
 const GetCashbookList = async (req, res) => {
     try {
+
         const { page = 1, limit = 10, search } = req.query;
-        const offset = (page - 1) * limit;
-        let queryParams = [parseInt(limit), parseInt(offset)];
+
+        const currentPage = parseInt(page);
+        const pageSize = parseInt(limit);
+        const offset = (currentPage - 1) * pageSize;
+
+        let queryParams = [pageSize, offset];
         let countParams = [];
 
         let searchCondition = "";
+
         if (search) {
-            searchCondition = `WHERE bank_ref LIKE ? OR description_on_receipt LIKE ? OR receipt LIKE ? OR payment LIKE ?`;
-            queryParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, parseInt(limit), parseInt(offset)];
-            countParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+
+            searchCondition = `
+                WHERE (
+                    bank_ref LIKE ?
+                    OR description_on_receipt LIKE ?
+                    OR receipt LIKE ?
+                    OR payment LIKE ?
+                )
+            `;
+
+            queryParams = [
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                pageSize,
+                offset
+            ];
+
+            countParams = [
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`
+            ];
         }
 
-        // Query to fetch paginated results
         const query = `
-            SELECT * FROM tbl_cashbook 
+            SELECT
+                cb.*,
+                o.freight_id
+            FROM tbl_cashbook cb
+            LEFT JOIN tbl_orders o
+                ON o.id = cb.order_id
             ${search ? searchCondition : ""}
-            ORDER BY id DESC 
-            LIMIT ? OFFSET ?;
+            ORDER BY cb.id DESC
+            LIMIT ? OFFSET ?
         `;
 
-        // Query to get total records count
         const countQuery = `
-            SELECT COUNT(*) AS total FROM tbl_cashbook 
-            ${search ? searchCondition : ""};
+            SELECT COUNT(*) AS total
+            FROM tbl_cashbook
+            ${search ? searchCondition : ""}
         `;
 
-        // First, get the total record count
-        con.query(countQuery, countParams, (err, countResult) => {
-            if (err) {
-                console.error("Database error (count query):", err.message);
-                return res.status(500).json({ success: false, message: "Database query failed." });
+        // Total Count
+        const totalRecords = await new Promise((resolve, reject) => {
+
+            con.query(countQuery, countParams, (err, result) => {
+
+                if (err) return reject(err);
+
+                resolve(result[0].total);
+
+            });
+
+        });
+
+        const totalPages = Math.ceil(totalRecords / pageSize);
+
+        // Cashbook Data
+        const cashbookData = await new Promise((resolve, reject) => {
+
+            con.query(query, queryParams, (err, result) => {
+
+                if (err) return reject(err);
+
+                resolve(result);
+
+            });
+
+        });
+
+        // Get Freight IDs
+        const freightIds = [
+            ...new Set(
+                cashbookData
+                    .map(item => item.freight_id)
+                    .filter(id => id)
+            )
+        ];
+
+        let popDocs = [];
+
+        if (freightIds.length > 0) {
+
+            popDocs = await new Promise((resolve, reject) => {
+
+                const docQuery = `
+                    SELECT
+                        id,
+                        freight_id,
+                        document_name,
+                        document,
+                        uploaded_by,
+                        created_at
+                    FROM freight_doc
+                    WHERE freight_id IN (?)
+                    AND document_name = 'POP (AD)'
+                    ORDER BY id DESC
+                `;
+
+                con.query(docQuery, [freightIds], (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                });
+
+            });
+
+        }
+
+        // Group POP Docs by freight_id
+        const popDocsMap = {};
+
+        popDocs.forEach(doc => {
+
+            if (!popDocsMap[doc.freight_id]) {
+                popDocsMap[doc.freight_id] = [];
             }
 
-            const totalRecords = countResult[0].total;
-            const totalPages = Math.ceil(totalRecords / limit);
+            popDocsMap[doc.freight_id].push(doc);
 
-            // Now, fetch paginated data
-            con.query(query, queryParams, (err, data) => {
-                if (err) {
-                    console.error("Database error:", err.message);
-                    return res.status(500).json({ success: false, message: "Database query failed." });
-                }
+        });
 
-                res.status(200).json({
-                    success: true,
-                    data,
-                    pagination: {
-                        totalRecords,
-                        totalPages,
-                        currentPage: parseInt(page),
-                        pageSize: parseInt(limit),
-                    }
-                });
-            });
+        // Attach freight_pop_docs
+        const finalData = cashbookData.map(item => ({
+            ...item,
+            freight_pop_docs: popDocsMap[item.freight_id] || []
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data: finalData,
+            pagination: {
+                totalRecords,
+                totalPages,
+                currentPage,
+                pageSize
+            }
         });
 
     } catch (error) {
-        console.error("Unexpected error:", error.message);
-        res.status(500).json({ success: false, message: "An unexpected error occurred." });
+
+        console.error("GetCashbookList Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+        });
+
     }
 };
 

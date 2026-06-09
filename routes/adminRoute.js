@@ -106,6 +106,7 @@ admin_route.get('/countrylist', adminController.CountryListAddFreight);
 admin_route.post('/addEstimateShippingQuote', adminController.addEstimateShippingQuote);
 admin_route.post('/GetQuoteShipEstimateById', adminController.GetQuoteShipEstimateById);
 admin_route.post('/GetQuoteShipEstimateBySupplier', adminController.GetQuoteShipEstimateBySupplier);
+admin_route.get('/getAllFreightQuoteList', adminController.getAllFreightQuoteList);
 
 admin_route.post('/shipping_estimate', upload.single('Supplier_Quote_Attachment'), adminController.Shipping_Estimate);
 admin_route.post('/Shipping_Estimate_supplier', adminController.Shipping_Estimate_supplier)

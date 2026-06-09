@@ -3829,7 +3829,9 @@ const UploadFreightDocument = async (req, res) => {
         const freightNumber = freightData[0].freight_number;
 
         let uploadedFiles = [];
+        let isDeliveryNoteUploaded = false;
 
+        // Create folder structure only once
         await findOrCreateFolder(freightNumber);
 
         if (req.files && Object.keys(req.files).length > 0) {
@@ -3840,7 +3842,7 @@ const UploadFreightDocument = async (req, res) => {
 
                 for (const file of filesArray) {
 
-                    // Upload to Google Drive / Folder
+                    // Upload file to Google Drive
                     await uploadToMatchingFolder(
                         file,
                         fieldName,
@@ -3860,6 +3862,7 @@ const UploadFreightDocument = async (req, res) => {
                     `;
 
                     await new Promise((resolve, reject) => {
+
                         con.query(
                             docQuery,
                             [
@@ -3869,11 +3872,20 @@ const UploadFreightDocument = async (req, res) => {
                                 file.filename
                             ],
                             (err) => {
+
                                 if (err) return reject(err);
+
                                 resolve();
+
                             }
                         );
+
                     });
+
+                    // Check Delivery Note uploaded
+                    if (fieldName === "Delivery note") {
+                        isDeliveryNoteUploaded = true;
+                    }
 
                     uploadedFiles.push({
                         document_name: fieldName,
@@ -3883,10 +3895,38 @@ const UploadFreightDocument = async (req, res) => {
             }
         }
 
+        // Update Order Status if Delivery Note uploaded
+        if (isDeliveryNoteUploaded) {
+
+            await new Promise((resolve, reject) => {
+
+                const updateOrderQuery = `
+                    UPDATE tbl_orders
+                    SET track_status = 'Delivered'
+                    WHERE freight_id = ?
+                `;
+
+                con.query(
+                    updateOrderQuery,
+                    [freight_id],
+                    (err, result) => {
+
+                        if (err) return reject(err);
+
+                        resolve(result);
+
+                    }
+                );
+
+            });
+
+        }
+
         return res.status(200).json({
             success: true,
             message: "Documents uploaded successfully",
             totalUploaded: uploadedFiles.length,
+            orderStatusUpdated: isDeliveryNoteUploaded,
             data: uploadedFiles
         });
 
@@ -3899,6 +3939,7 @@ const UploadFreightDocument = async (req, res) => {
             message: "Internal Server Error",
             error: error.message
         });
+
     }
 };
 
@@ -5322,6 +5363,20 @@ const CountryListAddFreight = async (req, res) => {
 //     }
 // };
 
+const buildFreightQuoteReferenceNo = (quoteId) => {
+    return `ADINV${10000 + Number(quoteId)}`.slice(0, 20);
+};
+
+const applyFreightQuoteReferenceNo = (quoteId, callback) => {
+    const referenceNo = buildFreightQuoteReferenceNo(quoteId);
+
+    con.query(
+        `UPDATE estimate_shipping_quote SET reference_no = ? WHERE id = ?`,
+        [referenceNo, quoteId],
+        (updateErr) => callback(updateErr, referenceNo)
+    );
+};
+
 const addEstimateShippingQuote = async (req, res) => {
     try {
         const data = req.body;
@@ -5373,7 +5428,7 @@ const addEstimateShippingQuote = async (req, res) => {
         ];
 
         const ESTIMATE_BASE_FIELDS = [
-            'freight_id', 'client_id', 'supplier_id', 'client_name', 'is_approved', 'serial_number', 'date', 'client_ref', 'product_desc',
+            'freight_id', 'client_id', 'supplier_id', 'client_name', 'is_approved', 'serial_number', 'date', 'client_ref', 'customer_invoice_no', 'final_base_currency', 'product_desc',
             'type', 'freight', 'incoterm', 'dimension', 'weight',
             'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
             'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
@@ -5521,7 +5576,7 @@ const addEstimateShippingQuote = async (req, res) => {
                 `;
 
                 const updateParams = [
-                    ...updateFields.map(f => data[f]),
+                    ...updateFields.map(f => (data[f] !== undefined ? data[f] : null)),
                     result[0].quote_estimate_id
                 ];
 
@@ -5532,17 +5587,43 @@ const addEstimateShippingQuote = async (req, res) => {
                             message: err.message
                         });
                     }
+
+                    const quoteEstimateId = result[0].quote_estimate_id;
+
                     if (data.user_type == "1" || data.user_type == "2") {
                         con.query(
                             `UPDATE tbl_freight SET status=?, shipping_estimate_id=?, estimate_date=NOW() WHERE id=?`,
-                            [4, result[0].quote_estimate_id, data.freight_id]
+                            [4, quoteEstimateId, data.freight_id]
                         );
                     }
 
-                    return res.status(200).send({
-                        success: true,
-                        message: "Estimate shipping quote updated successfully"
-                    });
+                    const finishUpdate = (referenceNo = null) => {
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight quote updated successfully",
+                            ID: quoteEstimateId,
+                            customer_invoice_no: data.customer_invoice_no || null,
+                            final_base_currency: data.final_base_currency || null,
+                            ...(referenceNo && { reference_no: referenceNo })
+                        });
+                    };
+
+                    if (data.regenerate_reference_no) {
+                        return applyFreightQuoteReferenceNo(
+                            quoteEstimateId,
+                            (refErr, referenceNo) => {
+                                if (refErr) {
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: refErr.message
+                                    });
+                                }
+                                finishUpdate(referenceNo);
+                            }
+                        );
+                    }
+
+                    finishUpdate();
                 });
 
             }
@@ -5558,17 +5639,31 @@ const addEstimateShippingQuote = async (req, res) => {
                         });
                     }
 
+                    const newQuoteId = insertResult.insertId;
+
                     if (data.user_type == "1" || data.user_type == "2") {
                         con.query(
                             `UPDATE tbl_freight SET status=?, shipping_estimate_id=?, estimate_date=NOW() WHERE id=?`,
-                            [4, insertResult.insertId, data.freight_id]
+                            [4, newQuoteId, data.freight_id]
                         );
                     }
 
-                    return res.status(200).send({
-                        success: true,
-                        message: "Estimate shipping quote added successfully",
-                        ID: insertResult.insertId
+                    applyFreightQuoteReferenceNo(newQuoteId, (refErr, referenceNo) => {
+                        if (refErr) {
+                            return res.status(500).send({
+                                success: false,
+                                message: refErr.message
+                            });
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight quote added successfully",
+                            ID: newQuoteId,
+                            reference_no: referenceNo,
+                            customer_invoice_no: data.customer_invoice_no || null,
+                            final_base_currency: data.final_base_currency || null
+                        });
                     });
                 });
             }
@@ -5692,6 +5787,124 @@ WHERE estimate_shipping_quote.freight_id = ?
 
     } catch (error) {
         return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getAllFreightQuoteList = async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search
+        } = req.query;
+
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const offset = (pageNumber - 1) * pageLimit;
+
+        let condition = "";
+        let params = [];
+
+        if (search) {
+            const s = `%${search}%`;
+            condition += `
+                AND (
+                    esq.id LIKE ?
+                    OR esq.freight_id LIKE ?
+                    OR esq.supplier_id LIKE ?
+                    OR esq.serial_number LIKE ?
+                    OR esq.client_ref LIKE ?
+                    OR esq.reference_no LIKE ?
+                    OR esq.customer_invoice_no LIKE ?
+                    OR esq.final_base_currency LIKE ?
+                    OR sup.name LIKE ?
+                    OR tbl_freight.freight_number LIKE ?
+                    OR tbl_freight.product_desc LIKE ?
+                    OR tbl_users.full_name LIKE ?
+                )
+            `;
+            params.push(s, s, s, s, s, s, s, s, s, s, s, s);
+        }
+
+        const countQuery = `
+            SELECT COUNT(*) AS total
+            FROM estimate_shipping_quote esq
+            LEFT JOIN tbl_freight ON tbl_freight.id = esq.freight_id
+            LEFT JOIN tbl_suppliers sup ON sup.id = esq.supplier_id
+            LEFT JOIN tbl_users ON tbl_users.id = esq.client_id
+            WHERE tbl_freight.is_deleted = 0
+            ${condition}
+        `;
+
+        const total = await new Promise((resolve, reject) => {
+            con.query(countQuery, params, (err, rows) => {
+                if (err) return reject(err);
+                resolve(rows[0].total);
+            });
+        });
+
+        const dataQuery = `
+            SELECT
+                esq.id AS quote_estimate_id,
+                esq.serial_number,
+                esq.client_ref,
+                esq.reference_no,
+                esq.customer_invoice_no,
+                esq.date AS quote_date,
+                esq.is_approved,
+                esq.final_base_currency,
+                COALESCE(esq.sumofRoe, 0) AS quote_total,
+
+                sup.name AS supplier_name,
+                sup.email AS supplier_email,
+                sup.phone_no AS supplier_phone,
+
+                tbl_users.full_name AS client_name,
+
+                tbl_freight.id AS freight_id,
+                tbl_freight.freight_number,
+                tbl_freight.status AS freight_status,
+                tbl_freight.priority,
+                tbl_freight.type,
+                tbl_freight.freight,
+                tbl_freight.product_desc,
+                tbl_freight.date AS freight_date,
+                c1.name AS origin_country,
+                c2.name AS destination_country
+
+            FROM estimate_shipping_quote esq
+            LEFT JOIN tbl_suppliers sup ON sup.id = esq.supplier_id
+            LEFT JOIN tbl_freight ON tbl_freight.id = esq.freight_id
+            LEFT JOIN tbl_users ON tbl_users.id = esq.client_id
+            LEFT JOIN countries c1 ON c1.id = tbl_freight.collection_from
+            LEFT JOIN countries c2 ON c2.id = tbl_freight.delivery_to
+
+            WHERE tbl_freight.is_deleted = 0
+            ${condition}
+
+            ORDER BY esq.id DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const data = await new Promise((resolve, reject) => {
+            con.query(dataQuery, [...params, pageLimit, offset], (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
+
+        return res.status(200).send({
+            success: true,
+            total,
+            page: pageNumber,
+            limit: pageLimit,
+            data
+        });
+    } catch (error) {
+        return res.status(500).send({
             success: false,
             message: error.message
         });
@@ -8313,6 +8526,176 @@ const getAllAssignedOrdersToWarehouseBySupplier = (req, res) => {
 };
 
 
+// const OrderDetailsById = async (req, res) => {
+//     const { origin, destination, startDate, endDate, freightType, freightSpeed, orderId } = req.body;
+
+//     try {
+//         // Ensure the orderId is provided
+//         if (!orderId) {
+//             return res.status(400).send({ success: false, message: "Order ID is required" });
+//         }
+
+//         // Build the WHERE conditions dynamically
+//         let conditions = [`tbl_orders.id = ${orderId}`];  // Always filter by the specific orderId
+
+//         if (origin) conditions.push(`f.collection_from = '${origin}'`);
+//         if (destination) conditions.push(`f.delivery_to = '${destination}'`);
+//         if (startDate && endDate) {
+//             conditions.push(`DATE(tbl_orders.created_at) BETWEEN '${startDate}' AND '${endDate}'`);
+//         }
+//         if (freightType) conditions.push(`f.freight = '${freightType}'`);
+//         if (freightSpeed) conditions.push(`f.type = '${freightSpeed}'`);
+
+//         // Combine conditions into a WHERE clause
+//         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+//         // Execute the query
+//         con.query(
+//             `SELECT tbl_orders.*, 
+//                 tbl_orders.dimensions AS order_dimensions,
+//                 tbl_orders.created_at as order_created_date,
+//                 f.*, cm.name as commodity_name,
+//                 tbl_orders.weight AS order_weight, 
+//                 tbl_orders.id AS order_id,
+//                 CONCAT('OR000', tbl_orders.id) AS order_number,
+//                 tbl_users.*, 
+//                 tbl_users.id AS user_id, 
+//                 CASE 
+//                     WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
+//                     ELSE tbl_users.full_name 
+//                 END as client_name,
+//                 tbl_users.email AS client_email,
+//                 tbl_users.client_number AS client_number,
+//                 o.status AS delivery_status, 
+//                 o.date_dispatched, 
+//                 o.ETA AS delivery_ETA,
+//                 o.actual_delivery_date, 
+//                 o.freight_option AS delivery_freight_option, 
+//                 o.port_of_loading AS delivery_port_of_loading,
+//                 o.port_of_discharge AS delivery_port_of_discharge, 
+//                 o.co_loader, 
+//                 o.carrier,
+//                 o.vessel, 
+//                 o.master_landing_bill, 
+//                 o.house_bill_landing, 
+//                 o.release_type,
+//                 o.container_no, 
+//                 o.seal_no, 
+//                 o.local_handler, 
+//                 o.local_carrier, 
+//                 o.driver_name, 
+//                 o.vehicle_registration,
+//                 o.comments AS delivery_comment, 
+//                 o.last_check_in, 
+//                 o.location_check_in, 
+//                 o.driver_license_id, 
+//                 o.status_updated_at,
+//                 o.Delivery_Instruction, 
+//                 o.cargo_pickup,
+//                 o.Carrier_code,
+//                 wao.ware_receipt_no, 
+//                 wao.tracking_number, 
+//                 wao.warehouse_collect, 
+//                 wao.date_received,
+//                 w.warehouse_name,
+//                 w.warehouse_address,
+//                 w.town,
+//                 w.country,
+//                 w.email,
+//                 w.contact_person,
+//                 w.mobile_number,
+//                 b.batch_number, 
+//                 b.freight AS batch_freight, 
+//                 b.date_start, 
+//                 b.total_weight, 
+//                 b.total_dimensions, 
+//                 b.dispatched, 
+//                 b.time_in_storage, 
+//                 b.costs_to_collect,
+//                 b.destination, 
+//                 b.waybill, 
+//                 b.agent, 
+//                 b.forwarding_agent,
+//                 c.name AS collection_from_country, 
+//                 co.name AS delivery_to_country,
+//                 u.name AS user_country_name,
+//                 s.id as estimate_id,
+//                 s.origin_pick_up AS estimate_origin_pick_up, 
+//                 s.origin_pickup_gp AS estimate_origin_pickup_gp,
+//                 s.origin_warehouse AS estimate_origin_warehouse, 
+//                 s.origin_warehouse_gp AS estimate_origin_warehouse_gp, 
+//                 s.des_warehouse AS estimate_des_warehouse, 
+//                 s.des_warehouse_gp AS estimate_des_warehouse_gp, 
+//                 s.des_delivery AS estimate_des_delivery, 
+//                 s.des_delivery_gp AS estimate_des_delivery_gp,
+//                 s.freight_amount as estimate_freight_amount,
+//                 s.freight_gp as estimate_freight_gp,
+//                 sds.waybill as shipments_waybill,
+//                 sds.freight as shipments_freight,
+//                 sds.carrier as shipments_carrier,
+//                 sds.vessel as shipments_vessel,
+//                 sds.waybill as shipments_date_of_dispatch,
+//                 sds.waybill as shipments_ETD,
+//                 sds.waybill as shipments_ATD,
+//                 sds.waybill as shipments_status,
+//                 sds.waybill as shipments_origin_agent,
+//                 sds.waybill as shipments_port_of_loading,
+//                 sds.waybill as shipments_port_of_discharge,
+//                 sds.waybill as shipments_origin_country_id,
+//                 sds.waybill as shipments_des_country_id,
+//                 sds.waybill as shipments_destination_agent,
+//                 sds.waybill as shipments_load,
+//                 sds.waybill as shipments_release_type,
+//                 sds.waybill as shipments_container,
+//                 sds.waybill as shipments_seal,
+//                 sds.waybill as shipments_document,
+//                 cos.name AS shipment_collection_country, 
+//                 coss.name AS shipment_delivery_country
+//             FROM tbl_orders
+//             LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
+//             LEFT JOIN order_delivery_details AS o ON o.order_id = tbl_orders.id
+//             LEFT JOIN tbl_freight AS f ON tbl_orders.freight_id = f.id
+//             LEFT JOIN warehouse_assign_order AS wao ON wao.order_id = tbl_orders.id
+//             LEFT JOIN batches AS b ON b.id = wao.batch_id
+//             LEFT JOIN warehouse_tbl AS w ON w.id = b.warehouse_id
+//             LEFT JOIN countries AS co ON co.id = f.delivery_to
+//             LEFT JOIN countries AS c ON c.id = f.collection_from
+//             LEFT JOIN countries AS u ON u.id = tbl_users.country
+//             LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_orders.freight_id
+//             LEFT JOIN tbl_commodity  AS cm ON cm.id = f.commodity
+//             LEFT JOIN shipment_details As sd ON sd.order_id = tbl_orders.id
+//             LEFT JOIN tbl_shipments As sds ON sds.id = sd.shipment_id
+//             LEFT JOIN countries AS cos ON co.id = sds.des_country_id
+//             LEFT JOIN countries AS coss ON c.id = sds.origin_country_id
+//             ${whereClause}
+//             GROUP BY tbl_orders.id
+//             ORDER BY tbl_orders.id DESC`,
+//             async (err, data) => {
+//                 if (err) {
+//                     console.error("Error executing query: ", err);
+//                     return res.status(500).send({ success: false, message: "Database query error", error: err.message });
+//                 }
+
+//                 // If no data found for the given order ID
+//                 if (data.length === 0) {
+//                     return res.status(404).send({ success: false, message: "Order not found" });
+//                 }
+
+//                 res.status(200).send({
+//                     success: true,
+//                     data: data
+//                 });
+//             }
+//         );
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+
 const OrderDetailsById = async (req, res) => {
     const { origin, destination, startDate, endDate, freightType, freightSpeed, orderId } = req.body;
 
@@ -8338,51 +8721,51 @@ const OrderDetailsById = async (req, res) => {
 
         // Execute the query
         con.query(
-            `SELECT tbl_orders.*, 
+            `SELECT tbl_orders.*,
                 tbl_orders.dimensions AS order_dimensions,
                 tbl_orders.created_at as order_created_date,
                 f.*, cm.name as commodity_name,
-                tbl_orders.weight AS order_weight, 
+                tbl_orders.weight AS order_weight,
                 tbl_orders.id AS order_id,
                 CONCAT('OR000', tbl_orders.id) AS order_number,
-                tbl_users.*, 
-                tbl_users.id AS user_id, 
-                CASE 
-                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
-                    ELSE tbl_users.full_name 
+                tbl_users.*,
+                tbl_users.id AS user_id,
+                CASE
+                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                    ELSE tbl_users.full_name
                 END as client_name,
                 tbl_users.email AS client_email,
                 tbl_users.client_number AS client_number,
-                o.status AS delivery_status, 
-                o.date_dispatched, 
+                o.status AS delivery_status,
+                o.date_dispatched,
                 o.ETA AS delivery_ETA,
-                o.actual_delivery_date, 
-                o.freight_option AS delivery_freight_option, 
+                o.actual_delivery_date,
+                o.freight_option AS delivery_freight_option,
                 o.port_of_loading AS delivery_port_of_loading,
-                o.port_of_discharge AS delivery_port_of_discharge, 
-                o.co_loader, 
+                o.port_of_discharge AS delivery_port_of_discharge,
+                o.co_loader,
                 o.carrier,
-                o.vessel, 
-                o.master_landing_bill, 
-                o.house_bill_landing, 
+                o.vessel,
+                o.master_landing_bill,
+                o.house_bill_landing,
                 o.release_type,
-                o.container_no, 
-                o.seal_no, 
-                o.local_handler, 
-                o.local_carrier, 
-                o.driver_name, 
+                o.container_no,
+                o.seal_no,
+                o.local_handler,
+                o.local_carrier,
+                o.driver_name,
                 o.vehicle_registration,
-                o.comments AS delivery_comment, 
-                o.last_check_in, 
-                o.location_check_in, 
-                o.driver_license_id, 
+                o.comments AS delivery_comment,
+                o.last_check_in,
+                o.location_check_in,
+                o.driver_license_id,
                 o.status_updated_at,
-                o.Delivery_Instruction, 
+                o.Delivery_Instruction,
                 o.cargo_pickup,
                 o.Carrier_code,
-                wao.ware_receipt_no, 
-                wao.tracking_number, 
-                wao.warehouse_collect, 
+                wao.ware_receipt_no,
+                wao.tracking_number,
+                wao.warehouse_collect,
                 wao.date_received,
                 w.warehouse_name,
                 w.warehouse_address,
@@ -8391,29 +8774,29 @@ const OrderDetailsById = async (req, res) => {
                 w.email,
                 w.contact_person,
                 w.mobile_number,
-                b.batch_number, 
-                b.freight AS batch_freight, 
-                b.date_start, 
-                b.total_weight, 
-                b.total_dimensions, 
-                b.dispatched, 
-                b.time_in_storage, 
+                b.batch_number,
+                b.freight AS batch_freight,
+                b.date_start,
+                b.total_weight,
+                b.total_dimensions,
+                b.dispatched,
+                b.time_in_storage,
                 b.costs_to_collect,
-                b.destination, 
-                b.waybill, 
-                b.agent, 
+                b.destination,
+                b.waybill,
+                b.agent,
                 b.forwarding_agent,
-                c.name AS collection_from_country, 
+                c.name AS collection_from_country,
                 co.name AS delivery_to_country,
                 u.name AS user_country_name,
                 s.id as estimate_id,
-                s.origin_pick_up AS estimate_origin_pick_up, 
+                s.origin_pick_up AS estimate_origin_pick_up,
                 s.origin_pickup_gp AS estimate_origin_pickup_gp,
-                s.origin_warehouse AS estimate_origin_warehouse, 
-                s.origin_warehouse_gp AS estimate_origin_warehouse_gp, 
-                s.des_warehouse AS estimate_des_warehouse, 
-                s.des_warehouse_gp AS estimate_des_warehouse_gp, 
-                s.des_delivery AS estimate_des_delivery, 
+                s.origin_warehouse AS estimate_origin_warehouse,
+                s.origin_warehouse_gp AS estimate_origin_warehouse_gp,
+                s.des_warehouse AS estimate_des_warehouse,
+                s.des_warehouse_gp AS estimate_des_warehouse_gp,
+                s.des_delivery AS estimate_des_delivery,
                 s.des_delivery_gp AS estimate_des_delivery_gp,
                 s.freight_amount as estimate_freight_amount,
                 s.freight_gp as estimate_freight_gp,
@@ -8436,7 +8819,7 @@ const OrderDetailsById = async (req, res) => {
                 sds.container as shipments_container,
                 sds.seal as shipments_seal,
                 sds.document as shipments_document,
-                cos.name AS shipment_collection_country, 
+                cos.name AS shipment_collection_country,
                 coss.name AS shipment_delivery_country
             FROM tbl_orders
             LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
@@ -8481,6 +8864,7 @@ const OrderDetailsById = async (req, res) => {
         });
     }
 };
+
 
 const sendMessage = async (req, res) => {
     try {
@@ -15826,94 +16210,303 @@ GROUP BY tbl_orders.id
 };
 
 
+// const OrderInvoiceList = async (req, res) => {
+//     try {
+//         const { search, client_id, page = 1, limit = 10 } = req.query; // Default page=1, limit=10
+//         const offset = (page - 1) * limit; // Calculate offset for pagination
+
+//         let query = `SELECT 
+//                         tbl_orders.id AS order_ID, 
+//                         tbl_invoices.id AS invoice_id, 
+//                         tbl_invoices.*, 
+//                         CONCAT('OR000', tbl_orders.id) AS order_number, 
+//                         tbl_users.id AS client_id, 
+//                         CASE 
+//                             WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
+//                             ELSE tbl_users.full_name 
+//                         END AS client_name
+//                     FROM tbl_orders
+//                     LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
+//                     LEFT JOIN tbl_invoices ON tbl_invoices.order_id = tbl_orders.id`;
+
+//         let queryParams = [];
+//         let countQuery = `SELECT COUNT(*) AS total FROM tbl_orders`;
+//         let countParams = [];
+
+//         // Add search condition if 'search' query param is provided
+//         if (search) {
+//             query += ` WHERE (CONCAT('OR000', tbl_orders.id) LIKE ? 
+//                             OR tbl_users.full_name LIKE ? 
+//                             OR tbl_invoices.id LIKE ?
+//                             OR tbl_invoices.invoice_amt LIKE ?
+//                             OR tbl_invoices.due_date LIKE ?)`;
+
+//             // Add search parameters for multiple columns
+//             queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+//         }
+
+//         if (client_id) {
+//             query += query.includes("WHERE") ? " AND" : " WHERE";
+//             query += ` tbl_orders.client_id = ?`;
+//             queryParams.push(client_id);
+//             countQuery += ` WHERE client_id = ?`;
+//             countParams.push(client_id);
+//         }
+
+//         // Pagination logic
+//         query += ` ORDER BY tbl_orders.id DESC LIMIT ? OFFSET ?;`;
+//         queryParams.push(parseInt(limit), parseInt(offset));
+
+//         // Count query
+//         con.query(countQuery, countParams, (err, countResult) => {
+//             if (err) {
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: "Database query error",
+//                     error: err.message
+//                 });
+//             }
+
+//             const totalRecords = countResult[0].total;
+//             const totalPages = Math.ceil(totalRecords / limit);
+
+//             // Fetch paginated records
+//             con.query(query, queryParams, (err, data) => {
+//                 if (err) {
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: "Database query error",
+//                         error: err.message
+//                     });
+//                 }
+
+//                 res.status(200).json({
+//                     success: true,
+//                     data: data,
+//                     pagination: {
+//                         totalRecords,
+//                         totalPages,
+//                         currentPage: parseInt(page),
+//                         pageSize: parseInt(limit)
+//                     }
+//                 });
+//             });
+//         });
+//     } catch (error) {
+//         res.status(500).json({
+//             success: false,
+//             message: "An error occurred while fetching data.",
+//             error: error.message
+//         });
+//     }
+// };
+
+
 const OrderInvoiceList = async (req, res) => {
     try {
-        const { search, client_id, page = 1, limit = 10 } = req.query; // Default page=1, limit=10
-        const offset = (page - 1) * limit; // Calculate offset for pagination
 
-        let query = `SELECT 
-                        tbl_orders.id AS order_ID, 
-                        tbl_invoices.id AS invoice_id, 
-                        tbl_invoices.*, 
-                        CONCAT('OR000', tbl_orders.id) AS order_number, 
-                        tbl_users.id AS client_id, 
-                        CASE 
-                            WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
-                            ELSE tbl_users.full_name 
-                        END AS client_name
-                    FROM tbl_orders
-                    LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
-                    LEFT JOIN tbl_invoices ON tbl_invoices.order_id = tbl_orders.id`;
+        const { search, client_id, page = 1, limit = 10 } = req.query;
+
+        const currentPage = parseInt(page);
+        const pageSize = parseInt(limit);
+        const offset = (currentPage - 1) * pageSize;
+
+        let query = `
+            SELECT
+                tbl_orders.id AS order_ID,
+                tbl_orders.freight_id,
+                tbl_invoices.id AS invoice_id,
+                tbl_invoices.*,
+                CONCAT('OR000', tbl_orders.id) AS order_number,
+                tbl_users.id AS client_id,
+                CASE
+                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                    ELSE tbl_users.full_name
+                END AS client_name
+            FROM tbl_orders
+            LEFT JOIN tbl_users
+                ON tbl_users.id = tbl_orders.client_id
+            LEFT JOIN tbl_invoices
+                ON tbl_invoices.order_id = tbl_orders.id
+        `;
 
         let queryParams = [];
-        let countQuery = `SELECT COUNT(*) AS total FROM tbl_orders`;
+
+        let countQuery = `
+            SELECT COUNT(*) AS total
+            FROM tbl_orders
+        `;
+
         let countParams = [];
 
-        // Add search condition if 'search' query param is provided
+        // Search Filter
         if (search) {
-            query += ` WHERE (CONCAT('OR000', tbl_orders.id) LIKE ? 
-                            OR tbl_users.full_name LIKE ? 
-                            OR tbl_invoices.id LIKE ?
-                            OR tbl_invoices.invoice_amt LIKE ?
-                            OR tbl_invoices.due_date LIKE ?)`;
 
-            // Add search parameters for multiple columns
-            queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+            query += `
+                WHERE (
+                    CONCAT('OR000', tbl_orders.id) LIKE ?
+                    OR tbl_users.full_name LIKE ?
+                    OR tbl_invoices.id LIKE ?
+                    OR tbl_invoices.invoice_amt LIKE ?
+                    OR tbl_invoices.due_date LIKE ?
+                )
+            `;
+
+            queryParams.push(
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`
+            );
+
+            countQuery += `
+                WHERE (
+                    CONCAT('OR000', id) LIKE ?
+                )
+            `;
+
+            countParams.push(`%${search}%`);
         }
 
+        // Client Filter
         if (client_id) {
-            query += query.includes("WHERE") ? " AND" : " WHERE";
-            query += ` tbl_orders.client_id = ?`;
+
+            query += query.includes("WHERE") ? " AND " : " WHERE ";
+            query += ` tbl_orders.client_id = ? `;
+
             queryParams.push(client_id);
-            countQuery += ` WHERE client_id = ?`;
+
+            countQuery += countQuery.includes("WHERE")
+                ? " AND client_id = ? "
+                : " WHERE client_id = ? ";
+
             countParams.push(client_id);
         }
 
-        // Pagination logic
-        query += ` ORDER BY tbl_orders.id DESC LIMIT ? OFFSET ?;`;
-        queryParams.push(parseInt(limit), parseInt(offset));
+        query += `
+            ORDER BY tbl_orders.id DESC
+            LIMIT ? OFFSET ?
+        `;
 
-        // Count query
-        con.query(countQuery, countParams, (err, countResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    message: "Database query error",
-                    error: err.message
+        queryParams.push(pageSize, offset);
+
+        // Total Count
+        const totalRecords = await new Promise((resolve, reject) => {
+
+            con.query(countQuery, countParams, (err, result) => {
+                if (err) return reject(err);
+                resolve(result[0].total);
+            });
+
+        });
+
+        const totalPages = Math.ceil(totalRecords / pageSize);
+
+        // Orders + Invoices
+        const orders = await new Promise((resolve, reject) => {
+
+            con.query(query, queryParams, (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+
+        });
+
+        // Get unique freight ids
+        const freightIds = [
+            ...new Set(
+                orders
+                    .map(item => item.freight_id)
+                    .filter(id => id)
+            )
+        ];
+
+        let freightDocs = [];
+
+        if (freightIds.length > 0) {
+
+            freightDocs = await new Promise((resolve, reject) => {
+
+                const docQuery = `
+                    SELECT
+                        id,
+                        freight_id,
+                        document_name,
+                        document,
+                        uploaded_by,
+                        created_at
+                    FROM freight_doc
+                    WHERE freight_id IN (?)
+                    AND document_name IN ('Invoice (AD)', 'POP (AD)')
+                    ORDER BY id DESC
+                `;
+
+                con.query(docQuery, [freightIds], (err, result) => {
+                    if (err) return reject(err);
+                    resolve(result);
                 });
-            }
 
-            const totalRecords = countResult[0].total;
-            const totalPages = Math.ceil(totalRecords / limit);
+            });
 
-            // Fetch paginated records
-            con.query(query, queryParams, (err, data) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        message: "Database query error",
-                        error: err.message
-                    });
+        }
+
+        // Group documents by freight_id
+        const invoiceDocsMap = {};
+        const popDocsMap = {};
+
+        freightDocs.forEach(doc => {
+
+            if (doc.document_name === "Invoice (AD)") {
+
+                if (!invoiceDocsMap[doc.freight_id]) {
+                    invoiceDocsMap[doc.freight_id] = [];
                 }
 
-                res.status(200).json({
-                    success: true,
-                    data: data,
-                    pagination: {
-                        totalRecords,
-                        totalPages,
-                        currentPage: parseInt(page),
-                        pageSize: parseInt(limit)
-                    }
-                });
-            });
+                invoiceDocsMap[doc.freight_id].push(doc);
+            }
+
+            if (doc.document_name === "POP (AD)") {
+
+                if (!popDocsMap[doc.freight_id]) {
+                    popDocsMap[doc.freight_id] = [];
+                }
+
+                popDocsMap[doc.freight_id].push(doc);
+            }
+
         });
+
+        // Attach docs
+        const finalData = orders.map(order => ({
+            ...order,
+            freight_invoice_docs:
+                invoiceDocsMap[order.freight_id] || [],
+            freight_pop_docs:
+                popDocsMap[order.freight_id] || []
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data: finalData,
+            pagination: {
+                totalRecords,
+                totalPages,
+                currentPage,
+                pageSize
+            }
+        });
+
     } catch (error) {
-        res.status(500).json({
+
+        console.error("OrderInvoiceList Error:", error);
+
+        return res.status(500).json({
             success: false,
             message: "An error occurred while fetching data.",
             error: error.message
         });
+
     }
 };
 
@@ -16846,6 +17439,13 @@ const addEstimatSupplierInvoice = async (req, res) => {
             });
         }
 
+        if (data.due_date && isNaN(Date.parse(data.due_date))) {
+            return res.status(400).send({
+                success: false,
+                message: "Invalid due_date format. Use YYYY-MM-DD."
+            });
+        }
+
         let selectQuery = "";
         let selectParams = [];
 
@@ -16927,7 +17527,7 @@ const addEstimatSupplierInvoice = async (req, res) => {
                 // Prepare update query with extra fields
                 const updateFieldsArr = [
                     // pre-existing fields...
-                    'supplier_id', 'shipment_id',
+                    'supplier_id', 'shipment_id', 'supplier_invoice_no', 'due_date', 'final_base_currency',
                     'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
                     'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
                     'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
@@ -17028,7 +17628,7 @@ const addEstimatSupplierInvoice = async (req, res) => {
             /* ================= INSERT ================= */
             else {
                 const baseFields = [
-                    'supplier_id', 'shipment_id',
+                    'supplier_id', 'shipment_id', 'supplier_invoice_no', 'due_date', 'final_base_currency',
                     'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
                     'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
                     'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
@@ -17108,14 +17708,24 @@ const addEstimatSupplierInvoice = async (req, res) => {
                             message: err.message
                         });
                     }
+
+                    const referenceNo = `ADINV${10000 + insertDataRes.insertId}`;
+
+                    con.query(
+                        `UPDATE supplier_sage_invoice SET reference_no = ? WHERE id = ?`,
+                        [referenceNo, insertDataRes.insertId]
+                    );
+
                     con.query(
                         `UPDATE tbl_shipments SET supplier_invoice_id=?, supplier_invoice_date=NOW() WHERE id=?`,
                         [insertDataRes.insertId, data.shipment_id]
                     );
+
                     return res.status(200).send({
                         success: true,
                         message: "Estimate shipping quote added successfully",
-                        ID: insertDataRes.insertId
+                        ID: insertDataRes.insertId,
+                        reference_no: referenceNo
                     });
                 });
             }
@@ -17230,14 +17840,18 @@ const getAllSupplierInvoices = async (req, res) => {
                     ssi.id LIKE ?
                     OR ssi.supplier_id LIKE ?
                     OR ssi.shipment_id LIKE ?
+                    OR ssi.supplier_invoice_no LIKE ?
+                    OR ssi.reference_no LIKE ?
                     OR sup.name LIKE ?
                     OR tbl_shipments.waybill LIKE ?
                     OR tbl_shipments.vessel LIKE ?
-                    OR tbl_shipments.status LIKE ?
+                    OR ssi.status LIKE ?
+                    OR ssi.final_base_currency LIKE ?
+                    OR ssi.due_date LIKE ?
                 )
             `;
 
-            params.push(s, s, s, s, s, s, s);
+            params.push(s, s, s, s, s, s, s, s, s, s, s);
         }
 
         // ================= COUNT =================
@@ -17260,6 +17874,10 @@ const getAllSupplierInvoices = async (req, res) => {
         const dataQuery = `
             SELECT 
               ssi.id AS supplier_invoice_id,
+              ssi.supplier_invoice_no,
+              ssi.reference_no,
+              ssi.due_date,
+              ssi.final_base_currency,
                COALESCE(ssi.sumofRoe, 0) AS invoice_total,
 
                 -- Supplier Info
@@ -17271,7 +17889,7 @@ const getAllSupplierInvoices = async (req, res) => {
                 tbl_shipments.id AS shipment_id,
                 tbl_shipments.waybill,
                 tbl_shipments.vessel,
-                tbl_shipments.status,
+                ssi.status,
                 tbl_shipments.container,
                 tbl_shipments.seal,
                 tbl_shipments.freight,
@@ -17279,11 +17897,12 @@ const getAllSupplierInvoices = async (req, res) => {
                 tbl_shipments.release_type,
                 tbl_shipments.ATD,
                 tbl_shipments.ETD,
-tbl_shipments.date_of_dispatch,
-                 tbl_shipments.destination_agent,
+                tbl_shipments.date_of_dispatch,
+                tbl_shipments.destination_agent,
                 tbl_shipments.port_of_loading,
-                 tbl_shipments.port_of_discharge,
+                tbl_shipments.port_of_discharge,
                 tbl_shipments.origin_agent,
+                tbl_shipments.supplier_invoice_date,
                 tbl_shipments.carrier,
                 c1.name AS origin_country,
                 c2.name AS destination_country
@@ -17631,7 +18250,7 @@ module.exports = {
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, getWarehouseBySupplierId, DeleteWarehouse, editWarehouseDetails, GetCountries,
     GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, getWarehouseProductById, updateWarehouseProduct, deleteWarehouseProduct, updateClientWarehouseProduct, DeleteWarehouseProduct, GetFreightImages,
     DeleteDocument, clearanceDocument, ShipmentDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight, createFreightFolders, GetShipEstimateSupplierId, ApproveShippingEstimate,
-    addEstimateShippingQuote, GetQuoteShipEstimateById, GetQuoteShipEstimateBySupplier, NewGetAllBatch, assignWarehouseSupplierToOrder, getAllAssignedOrdersToWarehouse, GetFreightAdminById,
+    addEstimateShippingQuote, GetQuoteShipEstimateById, GetQuoteShipEstimateBySupplier, getAllFreightQuoteList, NewGetAllBatch, assignWarehouseSupplierToOrder, getAllAssignedOrdersToWarehouse, GetFreightAdminById,
     getAllAssignedOrdersToWarehouseBySupplier, assignWarehouseOrderToSupplier, getAssignedOrdersBySupplier, updateWareHouseProductBySupplier,
     addEstimatSupplierInvoice, getWaybillDropdown, getAllSupplierInvoices, deleteSupplierInvoice, getSupplierInvoiceById, copySupplierInvoice
 }
