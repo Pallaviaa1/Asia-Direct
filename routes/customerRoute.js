@@ -119,6 +119,7 @@ customer_route.post('/remove-notification', customerController.deleteOneNotifica
 customer_route.post('/remove-all-notifications', customerController.DeleteAllNotification);
 
 customer_route.post('/add-clearing-customer', upload, customerController.AddClearingByCustomer)
+customer_route.post('/estimate-clearance-charges', customerController.addNewEstimateClearance);
 customer_route.post('/get-client-clearing', customerController.GetClearingClient)
 customer_route.post('/get-list-clearance-quotation', customerController.getListClearanceQuotation);
 
@@ -145,6 +146,7 @@ customer_route.post("/getQueriesByUserId", customerController.getQueriesByUserId
 customer_route.post("/deleteQueries", customerController.deleteQueries)
 customer_route.post("/addCommodity", customerController.addCommodity)
 customer_route.get("/getCommodities", customerController.getCommodities)
+customer_route.get("/getFreightDropdown", customerController.getFreightDropdown)
 customer_route.post("/AllFreightOrderNumbers", customerController.AllFreightOrderNumbers)
 customer_route.post("/AllBatchNumbers", customerController.AllBatchNumbers)
 customer_route.post("/getAssignShipmentList", customerController.getAssignShipmentList)

@@ -1,0 +1,3901 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workspace AI Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 400;
+  background: #e8eef5;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.workspace-demo {
+  padding: 32px;
+  max-width: 960px;
+  margin: 0 auto;
+  font-family: "Inter", sans-serif;
+}
+.workspace-demo h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.workspace-demo p {
+  margin: 0;
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.workspace-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+.workspace-cards .box {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 20px;
+  min-height: 100px;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Dark theme scoped to chatbot only */
+.chatbot-root {
+  --bg: #050505;
+  --bg-elevated: #0c0c0c;
+  --surface: #141414;
+  --surface-2: #1a1a1a;
+  --border: #2a2a2a;
+  --border-soft: #222;
+  --text: #f5f5f5;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+  --accent: #22d3ee;
+  --accent-2: #14b8a6;
+  --accent-soft: rgba(34, 211, 238, 0.12);
+  --user-bubble: #1f2937;
+  --danger: #f87171;
+  --radius: 16px;
+  --font: "Inter", sans-serif;
+
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9999;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.chat-toggle {
+  width: 60px;
+  height: 60px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #22d3ee, #0d9488);
+  color: #041016;
+  cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.15), 0 10px 30px rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.chat-toggle:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 5px rgba(34, 211, 238, 0.22), 0 12px 34px rgba(0, 0, 0, 0.6);
+}
+.chat-toggle svg { width: 28px; height: 28px; fill: currentColor; }
+.chat-toggle.open { display: none; }
+
+.chat-panel,
+.chat-container {
+  display: none;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  height: 650px;
+  max-height: calc(100vh - 40px);
+  background: var(--bg-elevated);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--text);
+}
+.chat-panel.open {
+  display: flex;
+  animation: slideUp 0.22s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.chat-header {
+  background: transparent;
+  color: var(--text);
+  padding: 14px 16px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.chat-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #67e8f9 0%, #22d3ee 35%, #0f766e 75%, #042f2e 100%);
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-avatar svg { width: 18px; height: 18px; fill: rgba(255,255,255,0.92); }
+
+.chat-header-info { flex: 1; min-width: 0; }
+.chat-header-info h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.chat-header-info p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.chat-new {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.chat-new:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.chat-close {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  font-family: inherit;
+}
+.chat-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+#sessionId {
+  display: none;
+}
+
+.chat-config {
+  padding: 6px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.chat-config input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1.3;
+  outline: none;
+}
+.chat-config input:focus { border-color: #2dd4bf; }
+.chat-config input::placeholder { color: var(--text-dim); }
+#roleLabel {
+  font-size: 12px !important;
+  color: var(--text-dim) !important;
+  white-space: nowrap;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0; /* critical so flex child can scroll instead of growing the panel */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg);
+  font-family: var(--font);
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+.chat-messages::-webkit-scrollbar { width: 6px; }
+.chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 999px; }
+
+.bubble {
+  max-width: 92%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: linear-gradient(145deg, #1f2937, #111827);
+  color: var(--text);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-bottom-right-radius: 6px;
+}
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+  white-space: pre-wrap;
+}
+.bubble.assistant.card-only {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  white-space: normal;
+  max-width: 100%;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.bubble.system {
+  align-self: center;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: center;
+  max-width: 100%;
+  padding: 4px;
+  line-height: 1.5;
+}
+.bubble.typing {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* Bot avatar beside assistant / typing messages */
+.msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+  align-self: stretch;
+}
+.msg-row .bot-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background: radial-gradient(circle at 35% 30%, #67e8f9 0%, #22d3ee 40%, #0f766e 100%);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.msg-row .bot-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: #fff;
+}
+.msg-row .msg-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-row .bubble {
+  max-width: 100%;
+}
+.msg-row .bubble.assistant.card-only {
+  max-width: 100%;
+}
+
+.result-card {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: none;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.result-card-head {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.result-card-head .head-main {
+  min-width: 0;
+  width: 100%;
+}
+.result-card-head .ref {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.result-card-head .sub {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.status-badge {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  background: #262626;
+  color: #d1d5db;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.status-badge.completed,
+.status-badge.done,
+.status-badge.paid,
+.status-badge.accepted {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+.status-badge.new,
+.status-badge.pending,
+.status-badge.unpaid,
+.status-badge.hold {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+.status-badge.progress,
+.status-badge.active {
+  background: rgba(34, 211, 238, 0.14);
+  color: #67e8f9;
+}
+
+.result-card-body { padding: 4px 0; }
+
+.answer-card { border-color: var(--border); background: var(--surface); }
+.answer-card .answer-meta {
+  padding: 12px 14px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.answer-card .answer-label {
+  padding: 4px 14px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.answer-card .answer-value {
+  padding: 6px 14px 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.5;
+}
+.answer-card .answer-detail {
+  padding: 0 14px 12px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: start;
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-row .lbl {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-top: 2px;
+}
+.detail-row .val {
+  color: var(--text);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.section-label {
+  padding: 10px 14px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.section-item {
+  margin: 0 14px 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  font-size: 13px;
+  font-weight: 400;
+  color: #d1d5db;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.section-item strong { color: var(--text); font-weight: 600; }
+
+.empty-note {
+  padding: 12px 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.list-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.list-row:last-child { border-bottom: none; }
+.list-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.list-row-id {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.list-row-amount {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.list-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.list-row-meta .status-badge {
+  max-width: 100%;
+}
+.list-row-meta .meta-sep { color: #444; }
+.list-row-meta .freight-ref {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.candidate-btn {
+  display: block;
+  width: calc(100% - 28px);
+  text-align: left;
+  margin: 0 14px 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.5;
+}
+.candidate-btn:hover {
+  border-color: #2dd4bf;
+  background: var(--accent-soft);
+}
+
+.welcome-card {
+  align-self: stretch;
+  max-width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 2px 4px;
+  box-shadow: none;
+  font-family: var(--font);
+  text-align: left;
+}
+.welcome-orb {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  margin: 2px auto 12px;
+  background: radial-gradient(circle at 35% 30%, #a5f3fc 0%, #22d3ee 32%, #0f766e 70%, #042f2e 100%);
+  box-shadow: 0 0 22px rgba(34, 211, 238, 0.35);
+}
+.welcome-card .greeting {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  text-align: center;
+}
+.welcome-card .sub-greeting {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.45;
+  text-align: center;
+}
+.welcome-card .hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  text-align: center;
+}
+.suggest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.suggest-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 11px 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  min-height: 0;
+}
+.suggest-btn:hover {
+  border-color: #2dd4bf;
+  background: #171717;
+  transform: translateY(-1px);
+}
+.suggest-btn .title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+}
+.suggest-btn .desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.quick-replies {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  background: var(--bg);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  /* Keep swipe/scroll, hide the ugly bar */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.quick-replies.visible {
+  display: flex;
+}
+.quick-replies::-webkit-scrollbar {
+  display: none;
+  height: 0;
+}
+.quick-replies button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: #d1d5db;
+  cursor: pointer;
+  line-height: 1.3;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.quick-replies button:hover {
+  border-color: #2dd4bf;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.quick-replies button.more-btn {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+.shortcuts-sheet {
+  display: none;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 100%;
+  margin-bottom: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  z-index: 5;
+}
+.shortcuts-sheet.open { display: block; }
+.shortcuts-sheet .sheet-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 4px 8px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.shortcuts-sheet button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+.shortcuts-sheet button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.shortcuts-sheet button .sheet-desc {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.composer-wrap {
+  position: relative;
+}
+.composer-bar .shortcuts-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-right: auto;
+}
+.composer-bar .shortcuts-toggle:hover {
+  border-color: #2dd4bf;
+  color: var(--accent);
+}
+
+.chat-footer {
+  padding: 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 10px 12px 10px;
+}
+.composer:focus-within {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+}
+.chat-footer input {
+  flex: 1;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 2px;
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.5;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+.chat-footer input::placeholder {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.composer-model {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.chat-footer button#sendBtn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #22d3ee, #0d9488);
+  color: #042f2e;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-footer button#sendBtn:hover { filter: brightness(1.08); }
+.chat-footer button#sendBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-footer button#sendBtn svg { width: 16px; height: 16px; fill: currentColor; }
+.composer-note {
+  margin: 8px 4px 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+@media (max-width: 480px) {
+  .chatbot-root {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+  }
+  .chat-panel,
+  .chat-container {
+    width: 100%;
+    height: min(78vh, 640px);
+    max-width: none;
+  }
+  .chat-toggle { margin-left: auto; display: flex; }
+  .chat-toggle.open { display: none; }
+}
+
+  </style>
+</head>
+
+<body>
+  <!-- Fake workspace page behind the chatbot -->
+  <div class="workspace-demo">
+    <h1>Workspace</h1>
+    <p>This is a sample page. The AI assistant opens as a chatbot in the bottom-right corner — the same pattern you can
+      embed in the real Workspace app.</p>
+    <div class="workspace-cards">
+      <div class="box">Freights</div>
+      <div class="box">Quotations</div>
+      <div class="box">Invoices</div>
+      <div class="box">Shipments</div>
+    </div>
+  </div>
+
+  <div class="chatbot-root" id="chatbotRoot">
+    <div class="chat-panel chat-container" id="chatPanel">
+      <div class="chat-header">
+        <div class="chat-avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5 2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5 2.5 2.5 0 0 0-2.5-2.5Z"/></svg>
+        </div>
+        <div class="chat-header-info">
+          <h2>Workspace AI</h2>
+          <p id="statusLine">Online · Ask about freights, orders, warehouse, batches, shipments & clearance</p>
+        </div>
+        <div class="chat-header-actions">
+          <button type="button" class="chat-new" id="newChatBtn" title="Start a new chat">New chat</button>
+          <button type="button" class="chat-close" id="closeBtn" title="Close">×</button>
+        </div>
+      </div>
+
+      <div class="chat-config">
+        <input type="number" id="userId" placeholder="User ID" value="1" title="Logged-in user ID" />
+        <input type="text" id="sessionId" placeholder="Session (auto)" />
+        <span id="roleLabel"></span>
+      </div>
+
+      <div class="chat-messages" id="chatMessages"></div>
+
+      <div class="quick-replies" id="quickReplies"></div>
+
+      <div class="chat-footer">
+        <div class="composer-wrap">
+          <div class="shortcuts-sheet" id="shortcutsSheet" hidden></div>
+          <div class="composer">
+            <input id="messageInput" placeholder="How can Workspace AI help you today?"
+              onkeydown="if(event.key==='Enter')send()" />
+            <div class="composer-bar">
+              <button type="button" class="shortcuts-toggle" id="shortcutsToggle" title="Shortcuts">Shortcuts</button>
+              <span class="composer-model">Workspace AI</span>
+              <button type="button" id="sendBtn" onclick="send()" title="Send">
+                <svg viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="composer-note">AI can make mistakes. Check freight, order, and invoice details before acting.</div>
+      </div>
+    </div>
+
+    <button type="button" class="chat-toggle" id="toggleBtn" title="Open assistant" aria-label="Open chat">
+      <svg viewBox="0 0 24 24">
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z" />
+      </svg>
+    </button>
+  </div>
+
+  <script>
+    const panel = document.getElementById('chatPanel');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const closeBtn = document.getElementById('closeBtn');
+    const newChatBtn = document.getElementById('newChatBtn');
+    const messages = document.getElementById('chatMessages');
+    const input = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const quickReplies = document.getElementById('quickReplies');
+    const shortcutsSheet = document.getElementById('shortcutsSheet');
+    const shortcutsToggle = document.getElementById('shortcutsToggle');
+    const SESSION_KEY_PREFIX = 'ai-chat-session:';
+    let sessionId = null;
+    let open = false;
+    let pendingPrompt = null;
+    let menuShown = false;
+    let historyLoaded = false;
+    let userRole = null;
+    let TOPICS = [];
+    const PRIMARY_CHIPS = 3; // keep one slim row; rest under More / Shortcuts
+
+    function sessionStorageKey(userId) {
+      return SESSION_KEY_PREFIX + String(userId || '');
+    }
+
+    function getStoredSession(userId) {
+      try {
+        return localStorage.getItem(sessionStorageKey(userId)) || null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function storeSession(userId, sid) {
+      sessionId = sid || null;
+      document.getElementById('sessionId').value = sid || '';
+      try {
+        if (sid) localStorage.setItem(sessionStorageKey(userId), sid);
+        else localStorage.removeItem(sessionStorageKey(userId));
+      } catch (_) {}
+    }
+
+    function currentUserId() {
+      return document.getElementById('userId').value;
+    }
+
+    async function ensureSession() {
+      const userId = currentUserId();
+      if (!userId) return null;
+      let sid = getStoredSession(userId) || sessionId;
+      if (sid) {
+        storeSession(userId, sid);
+        return sid;
+      }
+      try {
+        const res = await fetch('/api/ai-chat/history?user_id=' + encodeURIComponent(userId));
+        const data = await res.json();
+        if (data.success && data.sessionId) {
+          storeSession(userId, data.sessionId);
+          return data.sessionId;
+        }
+      } catch (_) {}
+      try {
+        const res = await fetch('/api/ai-chat/new-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: Number(userId) }),
+        });
+        const data = await res.json();
+        if (data.success && data.sessionId) {
+          storeSession(userId, data.sessionId);
+          return data.sessionId;
+        }
+      } catch (_) {}
+      sid = 'u' + userId + '-' + Date.now().toString(36);
+      storeSession(userId, sid);
+      return sid;
+    }
+
+    async function loadHistory() {
+      const userId = currentUserId();
+      if (!userId) return false;
+      const sid = await ensureSession();
+      if (!sid) return false;
+      try {
+        const res = await fetch(
+          '/api/ai-chat/history?user_id=' + encodeURIComponent(userId) +
+          '&session_id=' + encodeURIComponent(sid)
+        );
+        const data = await res.json();
+        if (!data.success) return false;
+        const list = data.messages || [];
+        if (!list.length) {
+          // Expired or empty (inactivity TTL) — clear stale browser session
+          storeSession(userId, null);
+          return false;
+        }
+        if (data.sessionId) storeSession(userId, data.sessionId);
+        messages.innerHTML = '';
+        list.forEach((m) => {
+          if (m.role === 'user') addBubble('user', m.content);
+          else addBubble('assistant', m.content, m.data || null);
+        });
+        setQuickRepliesVisible(false);
+        scrollMessagesToBottom();
+        menuShown = true;
+        historyLoaded = true;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    async function startNewChat() {
+      const userId = currentUserId();
+      if (!userId) {
+        alert('Please enter a User ID');
+        return;
+      }
+      try {
+        const res = await fetch('/api/ai-chat/new-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: Number(userId) }),
+        });
+        const data = await res.json();
+        if (!data.success || !data.sessionId) {
+          alert(data.message || 'Could not start a new chat');
+          return;
+        }
+        storeSession(userId, data.sessionId);
+        messages.innerHTML = '';
+        menuShown = false;
+        historyLoaded = false;
+        pendingPrompt = null;
+        showWelcome();
+        menuShown = true;
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    const STAFF_TOPICS = [
+      { id: 'freight', title: 'Freight status', desc: 'Track any freight by number', needsInput: true, prompt: 'Type your freight number (format: F-2026xxxxxx)' },
+      { id: 'order', title: 'Order lookup', desc: 'Find an order by number', needsInput: true, prompt: 'Type your order number (format: OR000xxx)' },
+      { id: 'orders_client', title: 'Client orders', desc: 'Look up by client name or ID', needsInput: true, prompt: 'Type a client name (e.g. John) or Client ID' },
+      { id: 'invoices_client', title: 'Client invoices', desc: 'Look up by client name or ID', needsInput: true, prompt: 'Type a client name (e.g. John) or Client ID' },
+      { id: 'supplier', title: 'Find supplier', desc: 'Check if a supplier exists', needsInput: true, prompt: 'Type the supplier name' },
+      { id: 'quotation', title: 'Quotation / quote', desc: 'Quote details for a freight', needsInput: true, prompt: 'Type the freight number for the quotation' },
+    ];
+    const CUSTOMER_TOPICS = [
+      { id: 'freight', title: 'Freight status', desc: 'Track your freight by number', needsInput: true, prompt: 'Type the freight number' },
+      { id: 'order', title: 'Order lookup', desc: 'Find an order by number', needsInput: true, prompt: 'Type the order number' },
+      { id: 'orders', title: 'My orders', desc: 'Orders on your account', needsInput: false, message: 'Show my orders' },
+      { id: 'invoices', title: 'My invoices', desc: 'Invoices on your account', needsInput: false, message: 'Show my invoices' },
+      { id: 'quotation', title: 'Quotation / quote', desc: 'Your quote for a freight', needsInput: true, prompt: 'Type the freight number' },
+      { id: 'supplier', title: 'Find supplier', desc: 'Check a supplier name', needsInput: true, prompt: 'Type the supplier name' },
+    ];
+
+    function setOpen(v) {
+      open = v;
+      panel.classList.toggle('open', open);
+      toggleBtn.classList.toggle('open', open);
+      if (open) {
+        loadContext().then(async () => {
+          if (!menuShown) {
+            const restored = await loadHistory();
+            if (!restored) {
+              showWelcome();
+              menuShown = true;
+            }
+          }
+        });
+        setTimeout(() => input.focus(), 50);
+      }
+    }
+
+    toggleBtn.addEventListener('click', () => setOpen(true));
+    closeBtn.addEventListener('click', () => setOpen(false));
+    newChatBtn.addEventListener('click', () => startNewChat());
+    document.getElementById('userId').addEventListener('change', () => {
+      menuShown = false;
+      historyLoaded = false;
+      sessionId = null;
+      messages.innerHTML = '';
+      loadContext().then(async () => {
+        if (open) {
+          const restored = await loadHistory();
+          if (!restored) {
+            showWelcome();
+            menuShown = true;
+          }
+        }
+      });
+    });
+
+    async function loadContext() {
+      const userId = document.getElementById('userId').value;
+      try {
+        const res = await fetch('/api/ai-chat/context?user_id=' + encodeURIComponent(userId));
+        const data = await res.json();
+        if (data.success) {
+          userRole = data.user;
+          TOPICS = data.topics || [];
+          document.getElementById('roleLabel').textContent = data.user.roleLabel + ': ' + (data.user.name || '');
+        } else {
+          TOPICS = Number(userId) > 1 ? CUSTOMER_TOPICS : STAFF_TOPICS;
+          document.getElementById('roleLabel').textContent = '';
+        }
+      } catch (e) {
+        TOPICS = STAFF_TOPICS;
+      }
+      renderQuickReplies();
+    }
+
+    function closeShortcutsSheet() {
+      shortcutsSheet.classList.remove('open');
+      shortcutsSheet.hidden = true;
+    }
+
+    function openShortcutsSheet() {
+      shortcutsSheet.innerHTML = '<div class="sheet-title">All shortcuts</div>';
+      TOPICS.forEach((t) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.innerHTML = `${esc(t.title)}<span class="sheet-desc">${esc(t.desc || '')}</span>`;
+        btn.addEventListener('click', () => {
+          closeShortcutsSheet();
+          startTopic(t.id);
+        });
+        shortcutsSheet.appendChild(btn);
+      });
+      shortcutsSheet.hidden = false;
+      shortcutsSheet.classList.add('open');
+    }
+
+    function renderQuickReplies() {
+      quickReplies.innerHTML = '';
+      const primary = TOPICS.slice(0, PRIMARY_CHIPS);
+      primary.forEach((t) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = t.title;
+        btn.addEventListener('click', () => {
+          closeShortcutsSheet();
+          startTopic(t.id);
+        });
+        quickReplies.appendChild(btn);
+      });
+      if (TOPICS.length > PRIMARY_CHIPS) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'more-btn';
+        more.textContent = `More (${TOPICS.length - PRIMARY_CHIPS})`;
+        more.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (shortcutsSheet.classList.contains('open')) closeShortcutsSheet();
+          else openShortcutsSheet();
+        });
+        quickReplies.appendChild(more);
+      }
+    }
+
+    function setQuickRepliesVisible(visible) {
+      quickReplies.classList.toggle('visible', Boolean(visible));
+      if (!visible) closeShortcutsSheet();
+    }
+
+    shortcutsToggle.addEventListener('click', () => {
+      if (shortcutsSheet.classList.contains('open')) closeShortcutsSheet();
+      else openShortcutsSheet();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!shortcutsSheet.classList.contains('open')) return;
+      if (shortcutsSheet.contains(e.target) || shortcutsToggle.contains(e.target)) return;
+      // Ignore the same click that just opened the sheet (welcome card + quick-reply More)
+      if (e.target.closest && e.target.closest('.more-btn, [data-open-shortcuts]')) return;
+      closeShortcutsSheet();
+    });
+
+    function showWelcome() {
+      const hour = new Date().getHours();
+      const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+      const name = userRole?.name || '';
+      setQuickRepliesVisible(false);
+      closeShortcutsSheet();
+      messages.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'welcome-card';
+      card.innerHTML = `
+        <div class="welcome-orb" aria-hidden="true"></div>
+        <p class="greeting">${hello}${name ? ', ' + name : ''}</p>
+        <p class="sub-greeting">Can I help you with freights, orders, warehouse, clients, suppliers, staff, Client KPI, collection, invoices, or more?</p>
+        <div class="hint">Try a prompt</div>
+        <div class="suggest-grid"></div>
+      `;
+      const grid = card.querySelector('.suggest-grid');
+      // Keep welcome compact — first 4 shortcuts fit above the fold
+      TOPICS.slice(0, 4).forEach((t) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'suggest-btn';
+        btn.innerHTML = `<span class="title">${t.title}</span><span class="desc">${t.desc}</span>`;
+        btn.addEventListener('click', () => startTopic(t.id));
+        grid.appendChild(btn);
+      });
+      if (TOPICS.length > 4) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'suggest-btn';
+        more.setAttribute('data-open-shortcuts', '1');
+        more.innerHTML = `<span class="title">More shortcuts</span><span class="desc">${TOPICS.length - 4} more options</span>`;
+        more.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openShortcutsSheet();
+        });
+        grid.appendChild(more);
+      }
+      messages.appendChild(card);
+      // Always open welcome from the top
+      messages.scrollTop = 0;
+      requestAnimationFrame(() => { messages.scrollTop = 0; });
+    }
+
+    function showMenu() {
+      if (!open) setOpen(true);
+      openShortcutsSheet();
+    }
+
+    function startTopic(id) {
+      if (!open) setOpen(true);
+      const topic = TOPICS.find((t) => t.id === id);
+      if (!topic) return;
+
+      if (!topic.needsInput) {
+        pendingPrompt = null;
+        sendMessage(topic.message, topic.title);
+        return;
+      }
+
+      setQuickRepliesVisible(true);
+      messages.innerHTML = '';
+      pendingPrompt = id;
+      addBubble('user', topic.title);
+      addBubble('assistant', topic.prompt);
+      input.placeholder =
+        id === 'supplier' ? 'Enter supplier name...' :
+          id === 'order' ? 'Enter order number...' :
+            id === 'batch' ? 'Enter batch number...' :
+              id === 'shipment' ? 'Enter waybill number...' :
+                id === 'clearance' || id === 'clearance_orders_client' ? 'Enter clearance or client...' :
+                  id === 'warehouse' || id === 'warehouse_client' ? 'Enter warehouse id, freight, order, or client...' :
+                    id === 'orders_client' || id === 'invoices_client' || id === 'client_search' ? 'Enter client name or ID...' :
+                      id === 'sage_invoice' ? 'Enter Sage doc no. or customer...' :
+                        id === 'disputes' ? 'Enter Dispute ID (D-…) or name...' :
+                          id === 'release_dashboard' ? 'Enter order number or customer name...' :
+                            id === 'quotation' ? 'Enter ADQO…, freight, or customer...' :
+                              id === 'freight_invoice' ? 'Enter ADINV…, freight, or customer...' :
+                                id === 'cashbook' ? 'Enter bank ref, customer, or order...' :
+                                  id === 'supplier_invoice' ? 'Enter SUPINV…, supplier, or waybill...' :
+                                    'Enter freight number...';
+      input.focus();
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/ai-chat/status');
+        const data = await res.json();
+        document.getElementById('statusLine').textContent = !data.geminiConfigured
+          ? 'Online · Rule-based mode'
+          : data.geminiAvailable
+            ? `Online · AI ready`
+            : data.cooldownSeconds
+              ? `Online · Rules (AI cooldown ${data.cooldownSeconds}s)`
+              : 'Online · Rules (AI unavailable)';
+      } catch (e) {
+        document.getElementById('statusLine').textContent = 'Offline';
+      }
+    }
+
+    function esc(v) {
+      return String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function statusClass(label) {
+      const l = String(label || '').toLowerCase();
+      if (/complete|paid|accept|done|released|confirm/.test(l)) return 'completed';
+      if (/new|pending|unpaid|hold|reject|declin/.test(l)) return 'pending';
+      if (/progress|transit|active|quote issued|partial/.test(l)) return 'progress';
+      return '';
+    }
+
+    function detail(label, value) {
+      if (value == null || value === '') return '';
+      return `<div class="detail-row"><div class="lbl">${esc(label)}</div><div class="val">${esc(value)}</div></div>`;
+    }
+
+    function renderFocusedAnswer(data) {
+      const a = data.focusedAnswer;
+      if (!a) return '';
+      return `
+        <div class="result-card answer-card">
+          ${a.freightNumber ? `<div class="answer-meta">${esc(a.freightNumber)}</div>` : ''}
+          <div class="answer-label">${esc(a.label || 'Answer')}</div>
+          <div class="answer-value">${esc(a.value || '—')}</div>
+          ${a.detail ? `<div class="answer-detail">${esc(a.detail)}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function renderCountCard(data) {
+      if (!data.count) return '';
+      const c = data.count;
+      const entityMap = {
+        freights: 'Freights',
+        orders: 'Orders',
+        warehouse_orders: 'Warehouse orders',
+        batches: 'Batches',
+        shipments: 'Shipments',
+        clearances: 'Clearances',
+        clearance_orders: 'Clearance orders',
+        disputes: 'Disputes',
+        releases: 'Release dashboard',
+        'sage invoices': 'Sage invoices',
+      };
+      const entity = entityMap[c.entity] || String(c.entity || 'Records');
+      return `
+        <div class="result-card answer-card">
+          <div class="answer-meta">${esc(c.scope || 'Total')}</div>
+          <div class="answer-label">Total ${esc(entity.toLowerCase())}</div>
+          <div class="answer-value">${esc(Number(c.total).toLocaleString())}</div>
+        </div>
+      `;
+    }
+
+    function renderFreightCard(data) {
+      if (data.focusedAnswer) return '';
+      const f = data.freight;
+      if (!f) return '';
+      const status = f.status_label || f.status || 'Unknown';
+      const client = `${data.client?.full_name || f.client_name || '—'}${data.client?.client_number ? ' (' + data.client.client_number + ')' : ''}`;
+      const mode = f.freight_option_label || f.freight
+        ? `${f.freight_option_label || f.freight}${f.fcl_lcl_label || f.fcl_lcl ? ' · ' + (f.fcl_lcl_label || f.fcl_lcl) : ''}`
+        : '';
+      const est = data.estimateSummary;
+      const br = data.estimateBreakdown;
+
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">${esc(f.freight_number)}</div>
+              <div class="sub">Freight order details</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">
+            ${detail('Client', client)}
+            ${detail('Route', `${f.collection_from_name || '—'} → ${f.delivery_to_name || '—'}`)}
+            ${detail('Mode', mode)}
+            ${detail('Priority', f.priority)}
+            ${detail('Sales rep', f.sales_rep_name)}
+            ${detail('Supplier', data.supplier?.name || f.assigned_supplier_name)}
+      `;
+
+      html += `<div class="section-label">Shipper details</div>`;
+      html += detail('Shipper', f.shipper_label);
+      html += detail('Pickup address', f.pickup_address_label);
+      html += detail('Origin country', f.collection_from_name);
+
+      html += `<div class="section-label">Consignee details</div>`;
+      html += detail('Consignee', f.consignee_label || data.client?.full_name);
+      html += detail('Contact', f.consignee_contact);
+      html += detail('Cell', f.consignee_cell);
+      html += detail('Telephone', f.consignee_telephone);
+      html += detail('Email', f.consignee_email);
+      html += detail('Delivery address', f.delivery_address_label);
+      html += detail('City', f.consignee_city);
+      html += detail('Province', f.consignee_province);
+      html += detail('Country', f.consignee_country || f.delivery_to_name);
+      html += detail('Postal / export code', f.export_code_label);
+      html += detail('Vat/Tax No', f.vat_tax_label);
+
+      html += `<div class="section-label">Cargo details</div>`;
+      html += detail('Product', f.product_desc);
+      html += detail('Commodity', f.commodity_name);
+      html += detail('Industry', f.industry_label);
+      html += detail('Hazardous', f.hazardous_label);
+      html += detail('Packaging', f.packing_label);
+      html += detail('No of packages', f.packages_label);
+      html += detail('Dimensions (CBM)', f.dimension_label);
+      html += detail('Weight (KGS)', f.weight_label);
+      html += detail('Vol weight (kgs)', f.volumetric_weight_label);
+      html += detail('Chargeable weight', est?.chargeable);
+
+      html += `<div class="section-label">Booking information</div>`;
+      html += detail('Port of loading', f.port_of_loading_label);
+      html += detail('Collection instructions', f.collection_instructions);
+      html += detail('Freight option', f.freight_option_label);
+      html += detail('Efficiency', f.efficiency_label);
+      html += detail('Incoterms', f.incoterm_label);
+      html += detail('Insurance', f.insurance_label);
+      html += detail('Type', f.fcl_lcl_label);
+      html += detail('Warehouse', f.warehouse_label);
+      html += detail('Place of delivery', f.place_of_delivery_label);
+      html += detail('Port of discharge', f.port_of_discharge_label);
+      html += detail('Delivery instructions', f.delivery_instructions);
+
+      html += `<div class="section-label">Shipping estimate</div>`;
+      if (est && est.amount != null) {
+        html += detail(
+          'Estimate',
+          `${est.currency || ''} ${Number(est.amount).toLocaleString()}`.trim() +
+            (est.reference ? ` · ${est.reference}` : '') +
+            (est.status ? ` · ${est.status}` : '')
+        );
+        if (est.vat_incl != null) {
+          html += detail('VAT incl', `${est.currency || ''} ${Number(est.vat_incl).toLocaleString()}`.trim());
+        }
+      } else {
+        html += detail('Estimate', 'Not available yet');
+      }
+      if (br) {
+        if (br.freight_cost != null) {
+          html += detail('Freight cost', `${br.freight_billing || ''} ${br.freight_cost}`.trim());
+        }
+        if (br.origin) {
+          Object.entries(br.origin).forEach(([k, v]) => {
+            if (v != null) html += detail(`Origin ${k}`, v);
+          });
+        }
+        if (br.destination) {
+          Object.entries(br.destination).forEach(([k, v]) => {
+            if (v != null) html += detail(`Destination ${k}`, v);
+          });
+        }
+      }
+      if (f.attachment_estimate_label) {
+        html += detail('Invoice / packing list', f.attachment_estimate_label);
+      }
+
+      if (data.clearance?.length) {
+        html += `<div class="section-label">Clearance</div>`;
+        data.clearance.slice(0, 2).forEach((c) => {
+          html += `<div class="section-item"><strong>${esc(c.clearance_number || 'Clearance')}</strong> — ${esc(c.clearing_status || 'Pending')}</div>`;
+        });
+      }
+      if (data.shipments?.length) {
+        html += `<div class="section-label">Shipment</div>`;
+        data.shipments.slice(0, 2).forEach((s) => {
+          html += `<div class="section-item"><strong>${esc(s.waybill || 'Shipment')}</strong> · ${esc(s.vessel || 'No vessel')} · ${esc(s.status || '—')}</div>`;
+        });
+      }
+      if (data.invoices_access && data.invoices?.length) {
+        html += `<div class="section-label">Invoices</div>`;
+        data.invoices.slice(0, 3).forEach((inv) => {
+          const num = inv.reference_no || inv.sage_invoice_number || inv.document_number || `Invoice #${inv.invoice_id}`;
+          html += `<div class="section-item"><strong>${esc(num)}</strong>${inv.invoice_amt != null ? ' · ' + esc(inv.invoice_currency || '') + ' ' + esc(inv.invoice_amt) : ''}</div>`;
+        });
+      }
+
+      html += `</div></div>`;
+      return html;
+    }
+
+    function formatMoney(amount, currency) {
+      if (amount == null || amount === '') return '';
+      const n = Number(amount);
+      const formatted = Number.isFinite(n)
+        ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : String(amount);
+      return `${currency || ''} ${formatted}`.trim();
+    }
+
+    function renderFreightListCard(data) {
+      if (!data.freights || data.freight || data.focusedAnswer || data.orders) return '';
+      const name = data.client?.full_name || 'Client';
+      const count = data.freights.length;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Freights</div>
+              <div class="sub">${esc(name)}${data.client?.client_number ? ' · ' + esc(data.client.client_number) : ''} · ${count} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!count) {
+        html += `<div class="empty-note">No freights found for this client.</div>`;
+      } else {
+        data.freights.slice(0, 15).forEach((f) => {
+          const status = f.status_label || f.status || '—';
+          const mode = f.freight ? `${f.freight}${f.fcl_lcl ? ' · ' + f.fcl_lcl : ''}` : '';
+          const route = (f.collection_from_name || f.delivery_to_name)
+            ? `${f.collection_from_name || '—'} → ${f.delivery_to_name || '—'}`
+            : '';
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(f.freight_number)}</div>
+                <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+              </div>
+              <div class="list-row-meta">
+                ${mode ? `<span>${esc(mode)}</span>` : ''}
+                ${mode && route ? `<span class="meta-sep">·</span>` : ''}
+                ${route ? `<span>${esc(route)}</span>` : ''}
+              </div>
+            </div>`;
+        });
+        if (count > 15) {
+          html += `<div class="empty-note">Showing 15 of ${count}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderOrderCard(data) {
+      if (!data.order || data.orders || data.focusedAnswer) return '';
+      const o = data.order;
+      const status = o.tracking_started === false
+        ? 'Tracking not started'
+        : (o.status_label || '—');
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">${esc(o.order_number)}</div>
+              <div class="sub">${esc(o.client_name || 'Order')}${o.freight_number ? ' · ' + esc(o.freight_number) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Client', o.client_name || '—');
+      if (o.freight_number) html += detail('Freight', o.freight_number);
+      if (o.goods_description) html += detail('Goods', o.goods_description);
+      if (o.freight) {
+        html += detail('Mode', `${o.freight}${o.fcl_lcl ? ' · ' + o.fcl_lcl : ''}${o.freight_speed ? ' · ' + o.freight_speed : ''}`);
+      }
+      if (o.dimensions) html += detail('Dimensions', o.dimensions);
+      if (o.weight) html += detail('Weight', o.weight);
+      if (o.cartons) html += detail('Cartons', o.cartons);
+      if (o.CBM) html += detail('CBM', o.CBM);
+      if (o.date_of_collection) html += detail('Collection', o.date_of_collection);
+      if (o.collection_from_name || o.delivery_to_name) {
+        html += detail('Route', `${o.collection_from_name || '?'} → ${o.delivery_to_name || '?'}`);
+      }
+      if (o.sales_rep_name) html += detail('Sales rep', o.sales_rep_name);
+      if (o.warehouse_status_label) html += detail('Warehouse', o.warehouse_status_label);
+      if (o.track_status && String(o.track_status).trim()) html += detail('Track', o.track_status);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderOrderListCard(data) {
+      // Nested orders on a freight details payload are not a client order-list result
+      if (!data.orders || data.order || data.freight || data.focusedAnswer) return '';
+      const name = data.client?.full_name || data.freightNumber || 'Orders';
+      const count = data.orders.length;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Orders</div>
+              <div class="sub">${esc(name)}${data.client?.client_number ? ' · ' + esc(data.client.client_number) : ''} · ${count} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!count) {
+        html += `<div class="empty-note">No orders found.</div>`;
+      } else {
+        data.orders.slice(0, 15).forEach((o) => {
+          const status = o.status_label || '—';
+          const freight = o.freight_number || '';
+          const goods = o.goods_description
+            ? String(o.goods_description).slice(0, 48) + (String(o.goods_description).length > 48 ? '…' : '')
+            : '';
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(o.order_number)}</div>
+                <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+              </div>
+              <div class="list-row-meta">
+                ${freight ? `<span class="freight-ref">${esc(freight)}</span>` : ''}
+                ${freight && goods ? `<span class="meta-sep">·</span>` : ''}
+                ${goods ? `<span>${esc(goods)}</span>` : ''}
+              </div>
+            </div>`;
+        });
+        if (count > 15) {
+          html += `<div class="empty-note">Showing 15 of ${count}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderSageInvoiceCard(data) {
+      if (!data.sageInvoice || data.sageInvoices) return '';
+      const inv = data.sageInvoice;
+      const title = inv.document_number || inv.display_title || 'Sage invoice';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(title)}">${esc(title)}</div>
+              <div class="sub">Sage Invoice${inv.customer_name ? ' · ' + esc(inv.customer_name) : ''}</div>
+            </div>
+            <span class="status-badge">${esc(inv.total_label != null ? inv.total_label : '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Document number', inv.document_number || '—');
+      html += detail('Customer name', inv.customer_name || '—');
+      html += detail('Customer ref.', inv.customer_ref || '—');
+      html += detail('Date', inv.date_label || '—');
+      html += detail('Total', inv.total_label || '—');
+      html += detail('Upload', inv.upload_label || '—');
+      html += detail('Invoice (AD)', inv.invoice_ad_label || '—');
+      if (inv.freight_number) html += detail('Freight', inv.freight_number);
+      if (inv.order_id) html += detail('Order', 'OR000' + inv.order_id);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderReleaseCard(data) {
+      if (!data.release || data.releases || data.focusedAnswer) return '';
+      const r = data.release;
+      const status = r.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(r.order_number || '')}">${esc(r.order_number || 'Release')}</div>
+              <div class="sub">Release Dashboard${r.customer_name ? ' · ' + esc(r.customer_name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Order number', r.order_number || '—');
+      html += detail('Customer name', r.customer_name || '—');
+      html += detail('Clearing status', r.clearing_status);
+      html += detail('Cargo inspection', r.cargo_inspection);
+      html += detail('Payment', r.payment_label);
+      html += detail('Release instruction', r.release_instruction);
+      html += detail('Delivery', r.delivery_label);
+      html += detail('Status', status);
+      if (r.freight_number) html += detail('Freight', r.freight_number);
+      if (r.sage_document_number) html += detail('Sage invoice', r.sage_document_number);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderReleaseListCard(data) {
+      if (!data.releases || data.release || data.focusedAnswer) return '';
+      const rows = data.releases || [];
+      const label = data.search || data.status || 'Release Dashboard';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Release Dashboard</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No release entries found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((r) => {
+          const meta = [
+            r.clearing_status,
+            r.cargo_inspection,
+            r.payment_label,
+            r.release_instruction,
+            r.delivery_label,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(r.order_number || '—')} · ${esc(r.customer_name || '—')}</div>
+                <span class="status-badge ${statusClass(r.status_label || '')}">${esc(r.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function moneyLabel(amount, currency) {
+      if (amount == null || amount === '') return '—';
+      const n = Number(amount);
+      const formatted = Number.isFinite(n) ? n.toLocaleString() : String(amount);
+      return currency ? `${esc(currency)} ${formatted}` : formatted;
+    }
+
+    function renderQuoteCard(data) {
+      if (!data.quote || data.quotes || data.focusedAnswer) return '';
+      const q = data.quote;
+      const status = q.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(q.reference_no || '')}">${esc(q.reference_no || 'Quote')}</div>
+              <div class="sub">Freight Quote Estimate${q.customer_name ? ' · ' + esc(q.customer_name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Reference', q.reference_no || '—');
+      html += detail('Customer name', q.customer_name || '—');
+      html += detail('Freight number', q.freight_number || '—');
+      html += detail('Customer invoice number', q.customer_invoice_no || '—');
+      html += detail('Inv date', q.inv_date_label || '—');
+      html += detail('Quote date', q.quote_date_label || '—');
+      html += detail('Country', q.country || '—');
+      html += detail('Currency', q.currency || '—');
+      html += detail('Total', moneyLabel(q.total, q.currency));
+      html += detail('Amount due', moneyLabel(q.amount_due, q.currency));
+      html += detail('Status', status);
+      if (q.chargeable != null) html += detail('Chargeable', q.chargeable);
+      if (q.payment_terms) html += detail('Payment terms', q.payment_terms);
+      if (q.quote_validity != null) html += detail('Quote validity', q.quote_validity);
+
+      html += `<div class="section-label">Cargo details</div>`;
+      html += detail('Commodity', q.commodity_name || q.product_desc || '—');
+      html += detail('Hazardous', q.hazardous_label || '—');
+      html += detail('No. of packages', q.packages != null ? q.packages : '—');
+      html += detail('Package type', q.package_type || '—');
+      html += detail('Gross weight (kgs)', q.weight != null ? q.weight : '—');
+      html += detail('Dimensions (M3)', q.dimension != null ? q.dimension : '—');
+      html += detail('Volumetric (kgs)', q.volumetric_weight != null ? q.volumetric_weight : '—');
+
+      html += `<div class="section-label">Routing details</div>`;
+      html += detail('Country of origin', q.origin_country || '—');
+      html += detail('Place of receipt', q.place_of_receipt || '—');
+      html += detail('Port of loading', q.port_of_loading || '—');
+      html += detail('Port of discharge', q.port_of_discharge || '—');
+      html += detail('Place of delivery', q.place_of_delivery || '—');
+      html += detail('Incoterm', q.incoterm || '—');
+      html += detail('Mode of transport', q.mode_of_transport || '—');
+      html += detail('Load type', q.load_type || '—');
+      html += detail('Insurance', q.insurance_label || '—');
+
+      if (q.charge_groups && q.charge_groups.length) {
+        html += `<div class="section-label">Shipment estimate</div>`;
+        q.charge_groups.forEach((g) => {
+          html += detail(g.category || 'Charges', moneyLabel(g.total, q.currency));
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderQuoteListCard(data) {
+      if (!data.quotes || data.quote || data.focusedAnswer) return '';
+      const rows = data.quotes || [];
+      const label = data.search || data.status || 'Quotations';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Quotations</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No quotations found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((q) => {
+          const meta = [
+            q.freight_number,
+            q.country,
+            moneyLabel(q.total, q.currency),
+            q.amount_due != null ? 'Due ' + moneyLabel(q.amount_due, q.currency) : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(q.reference_no || '—')} · ${esc(q.customer_name || '—')}</div>
+                <span class="status-badge ${statusClass(q.status_label || '')}">${esc(q.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${meta}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderFreightInvoiceCard(data) {
+      if (!data.freightInvoice || data.freightInvoices || data.focusedAnswer) return '';
+      const inv = data.freightInvoice;
+      const status = inv.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(inv.reference_no || '')}">${esc(inv.reference_no || 'Invoice')}</div>
+              <div class="sub">Freight Invoice${inv.customer_name ? ' · ' + esc(inv.customer_name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Reference', inv.reference_no || '—');
+      html += detail('Customer name', inv.customer_name || '—');
+      html += detail('Freight / Order number', inv.freight_or_order || inv.freight_number || inv.order_number || '—');
+      html += detail('Customer ref', inv.customer_ref || '—');
+      html += detail('Customer invoice number', inv.customer_invoice_no || '—');
+      html += detail('Inv date', inv.inv_date_label || '—');
+      html += detail('Quote date', inv.quote_date_label || '—');
+      html += detail('Country', inv.country || '—');
+      html += detail('Currency', inv.currency || '—');
+      html += detail('Total', moneyLabel(inv.total, inv.currency));
+      html += detail('Amount due', moneyLabel(inv.amount_due, inv.currency));
+      html += detail('Status', status);
+      if (inv.chargeable != null) html += detail('Chargeable', inv.chargeable);
+      if (inv.payment_terms) html += detail('Payment terms', inv.payment_terms);
+      if (inv.quote_validity != null) html += detail('Quote validity', inv.quote_validity);
+
+      html += `<div class="section-label">Cargo details</div>`;
+      html += detail('Commodity', inv.commodity_name || inv.product_desc || '—');
+      html += detail('Hazardous', inv.hazardous_label || '—');
+      html += detail('No. of packages', inv.packages != null ? inv.packages : '—');
+      html += detail('Package type', inv.package_type || '—');
+      html += detail('Gross weight (kgs)', inv.weight != null ? inv.weight : '—');
+      html += detail('Dimensions (M3)', inv.dimension != null ? inv.dimension : '—');
+      html += detail('Volumetric (kgs)', inv.volumetric_weight != null ? inv.volumetric_weight : '—');
+
+      html += `<div class="section-label">Routing details</div>`;
+      html += detail('Country of origin', inv.origin_country || '—');
+      html += detail('Place of receipt', inv.place_of_receipt || '—');
+      html += detail('Port of loading', inv.port_of_loading || '—');
+      html += detail('Port of discharge', inv.port_of_discharge || '—');
+      html += detail('Place of delivery', inv.place_of_delivery || '—');
+      html += detail('Incoterm', inv.incoterm || '—');
+      html += detail('Mode of transport', inv.mode_of_transport || '—');
+      html += detail('Load type', inv.load_type || '—');
+      html += detail('Insurance', inv.insurance_label || '—');
+
+      if (inv.charge_groups && inv.charge_groups.length) {
+        html += `<div class="section-label">Shipment estimate</div>`;
+        inv.charge_groups.forEach((g) => {
+          html += detail(g.category || 'Charges', moneyLabel(g.total, inv.currency));
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderFreightInvoiceListCard(data) {
+      if (!data.freightInvoices || data.freightInvoice || data.focusedAnswer) return '';
+      const rows = data.freightInvoices || [];
+      const label = data.search || data.status || 'Freight invoices';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Freight Invoices</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No freight invoices found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((inv) => {
+          const meta = [
+            inv.freight_or_order || inv.freight_number || inv.order_number,
+            inv.country,
+            moneyLabel(inv.total, inv.currency),
+            inv.amount_due != null ? 'Due ' + moneyLabel(inv.amount_due, inv.currency) : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(inv.reference_no || '—')} · ${esc(inv.customer_name || '—')}</div>
+                <span class="status-badge ${statusClass(inv.status_label || '')}">${esc(inv.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${meta}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCashbookCard(data) {
+      if (!data.cashbook || data.cashbookEntries || data.focusedAnswer) return '';
+      const c = data.cashbook;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(c.bank_ref || '')}">${esc(c.bank_ref || 'Cashbook')}</div>
+              <div class="sub">Cashbook${c.customer_name ? ' · ' + esc(c.customer_name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(c.allocated_label || '')}">${esc(c.allocated_label || '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Date', c.date_label || '—');
+      html += detail('Bank ref.', c.bank_ref || '—');
+      html += detail('Description of receipt', c.description || '—');
+      html += detail('Receipt', c.receipt != null ? Number(c.receipt).toLocaleString() : '—');
+      html += detail('Payment', c.payment != null ? Number(c.payment).toLocaleString() : '—');
+      html += detail('Customer', c.customer_name || '—');
+      html += detail('Shipment ref', c.shipment_ref || '—');
+      html += detail('Allocated', c.allocated_label || '—');
+      html += detail('Invoice (POP)', c.invoice_pop_label || '—');
+      if (c.freight_number) html += detail('Freight', c.freight_number);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCashbookListCard(data) {
+      if (!data.cashbookEntries || data.cashbook || data.focusedAnswer) return '';
+      const rows = data.cashbookEntries || [];
+      const label = data.search || data.allocated || 'Cashbook';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Cashbook</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No cashbook entries found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((c) => {
+          const meta = [
+            c.description,
+            c.customer_name,
+            c.shipment_ref,
+            c.receipt != null ? 'Receipt ' + Number(c.receipt).toLocaleString() : null,
+            c.allocated_label && c.allocated_label !== '—' ? 'Alloc ' + c.allocated_label : null,
+            c.invoice_pop_label && c.invoice_pop_label !== '—' ? 'POP ' + c.invoice_pop_label : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(c.date_label || '—')} · ${esc(c.bank_ref || '—')}</div>
+                <span class="status-badge ${statusClass(c.allocated_label || '')}">${esc(c.allocated_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderSupplierInvoiceCard(data) {
+      if (!data.supplierInvoice || data.supplierInvoices || data.focusedAnswer) return '';
+      const inv = data.supplierInvoice;
+      const status = inv.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(inv.reference_no || '')}">${esc(inv.reference_no || 'Supplier invoice')}</div>
+              <div class="sub">Supplier Invoice${inv.supplier_name ? ' · ' + esc(inv.supplier_name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Reference', inv.reference_no || '—');
+      html += detail('Supplier name', inv.supplier_name || '—');
+      html += detail('Waybill', inv.waybill || '—');
+      html += detail('Sup invoice number', inv.supplier_invoice_no || '—');
+      html += detail('Inv date', inv.inv_date_label || '—');
+      html += detail('Due date', inv.due_date_label || '—');
+      html += detail('Currency', inv.currency || '—');
+      html += detail('Total', moneyLabel(inv.total, inv.currency));
+      html += detail('Amount due', moneyLabel(inv.amount_due, inv.currency));
+      html += detail('Status', status);
+      if (inv.chargeable != null) html += detail('Chargeable', inv.chargeable);
+
+      html += `<div class="section-label">Shipment / cargo</div>`;
+      html += detail('Carrier', inv.carrier || '—');
+      html += detail('Vessel', inv.vessel || '—');
+      html += detail('ETD', inv.etd_label || '—');
+      html += detail('ATD', inv.atd_label || '—');
+      html += detail('Shipment status', inv.shipment_status || '—');
+      html += detail('Origin agent', inv.origin_agent || '—');
+      html += detail('Destination agent', inv.destination_agent || '—');
+      html += detail('Freight mode', inv.freight_mode || '—');
+
+      html += `<div class="section-label">Routing details</div>`;
+      html += detail('Port of loading', inv.port_of_loading || '—');
+      html += detail('Port of discharge', inv.port_of_discharge || '—');
+      html += detail('Container', inv.container || '—');
+      html += detail('Load', inv.load_type || '—');
+      html += detail('Release type', inv.release_type || '—');
+      html += detail('Origin country', inv.origin_country || '—');
+      html += detail('Destination country', inv.destination_country || '—');
+
+      if (inv.charge_groups && inv.charge_groups.length) {
+        html += `<div class="section-label">Shipment estimate</div>`;
+        inv.charge_groups.forEach((g) => {
+          html += detail(g.category || 'Charges', moneyLabel(g.total, inv.currency));
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderSupplierInvoiceListCard(data) {
+      if (!data.supplierInvoices || data.supplierInvoice || data.focusedAnswer) return '';
+      const rows = data.supplierInvoices || [];
+      const label = data.search || data.status || 'Supplier invoices';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Supplier Invoices</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No supplier invoices found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((inv) => {
+          const meta = [
+            inv.waybill,
+            inv.inv_date_label,
+            moneyLabel(inv.total, inv.currency),
+            inv.amount_due != null ? 'Due ' + moneyLabel(inv.amount_due, inv.currency) : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(inv.reference_no || '—')} · ${esc(inv.supplier_name || '—')}</div>
+                <span class="status-badge ${statusClass(inv.status_label || '')}">${esc(inv.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${meta}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderDisputeCard(data) {
+      if (!data.dispute || data.disputes || data.focusedAnswer) return '';
+      const d = data.dispute;
+      const status = d.outcome_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(d.dispute_id || '')}">${esc(d.dispute_id || 'Dispute')}</div>
+              <div class="sub">Customer Query / Dispute${d.name ? ' · ' + esc(d.name) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Freight / Order', d.freight_no || '—');
+      html += detail('Dispute ID', d.dispute_id || '—');
+      html += detail('Name', d.name || '—');
+      html += detail('Nature of heading', d.nature_of_heading || '—');
+      html += detail('Subject', d.subject || '—');
+      html += detail('Message', d.message || '—');
+      html += detail('Outcome', status);
+      if (d.resolution) html += detail('Resolution', d.resolution);
+      if (d.date_label) html += detail('Created', d.date_label);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderDisputeListCard(data) {
+      if (!data.disputes || data.dispute || data.focusedAnswer) return '';
+      const rows = data.disputes || [];
+      const label = data.search || data.outcome || 'Disputes';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Customer Query / Dispute</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No disputes found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((d) => {
+          const meta = [
+            d.nature_of_heading,
+            d.subject,
+            d.outcome_label,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(d.dispute_id || '—')} · ${esc(d.name || '—')}</div>
+                <span class="status-badge ${statusClass(d.outcome_label || '')}">${esc(d.outcome_label || '—')}</span>
+              </div>
+              <div class="list-row-meta">
+                <span>${esc(d.freight_no || '—')}</span>
+                ${meta ? `<span>${esc(meta)}</span>` : ''}
+              </div>
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderSageInvoiceListCard(data) {
+      if (!data.sageInvoices || data.sageInvoice || data.focusedAnswer) return '';
+      const rows = data.sageInvoices || [];
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Sage invoices</div>
+              <div class="sub">${esc(data.search || 'Search')} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No Sage invoices found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((inv) => {
+          const meta = [
+            inv.customer_ref,
+            inv.date_label,
+            inv.upload_label && inv.upload_label !== '—' ? 'Upload ' + inv.upload_label : null,
+            inv.invoice_ad_label && inv.invoice_ad_label !== '—' ? 'AD ' + inv.invoice_ad_label : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(inv.document_number || '—')} · ${esc(inv.customer_name || '—')}</div>
+                <div class="list-row-amount">${esc(inv.total_label || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderInvoiceCard(data) {
+      if (data.sageInvoice || data.sageInvoices) return '';
+      if (data.freights && !data.invoices) return '';
+      if (data.orders && !data.invoices) return '';
+      if (!data.client && !data.invoices) return '';
+      if (data.freight || data.order) return '';
+      if (data.focusedAnswer) return '';
+      const name = data.client?.full_name || 'Client';
+      const list = (data.invoices || []).filter(
+        (inv) => inv.invoice_id || inv.reference_no || inv.sage_invoice_number || inv.document_number
+      );
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Invoices</div>
+              <div class="sub">${esc(name)}${data.client?.client_number ? ' · ' + esc(data.client.client_number) : ''} · ${list.length} record${list.length === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!list.length) {
+        html += `<div class="empty-note">No invoices found for this client.</div>`;
+      } else {
+        list.slice(0, 10).forEach((inv) => {
+          const num = inv.reference_no || inv.sage_invoice_number || inv.document_number || `Invoice #${inv.invoice_id}`;
+          const amount = inv.invoice_amt ?? inv.sage_total ?? inv.sumof_finalamount;
+          const currency = inv.invoice_currency || inv.final_base_currency || '';
+          const money = formatMoney(amount, currency);
+          const status = inv.invoice_status || inv.status || '';
+          const freight = inv.freight_number || '';
+          const balance = inv.balance != null && inv.balance !== '' && Number(inv.balance) !== 0
+            ? formatMoney(inv.balance, currency)
+            : '';
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(num)}</div>
+                ${money ? `<div class="list-row-amount">${esc(money)}</div>` : ''}
+              </div>
+              <div class="list-row-meta">
+                ${status ? `<span class="status-badge ${statusClass(status)}">${esc(status)}</span>` : ''}
+                ${balance ? `<span>Due ${esc(balance)}</span>` : ''}
+                ${freight ? `<span class="freight-ref">${esc(freight)}</span>` : ''}
+              </div>
+            </div>`;
+        });
+        if (list.length > 10) {
+          html += `<div class="empty-note">Showing 10 of ${list.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCollectionDeliveryCard(data) {
+      if (!data.collectionDelivery || data.collectionDeliveries || data.focusedAnswer) return '';
+      const row = data.collectionDelivery;
+      const status = row.status_label || '—';
+      const ref = [row.freight_number, row.order_number].filter(Boolean).join(' | ') || 'Collection / Delivery';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(ref)}">${esc(ref)}</div>
+              <div class="sub">${esc(row.customer_name || 'Collection / Delivery')}${row.mode_label ? ' · ' + esc(row.mode_label) : ''}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Customer', row.customer_name || '—');
+      html += detail('Freight', row.freight_number || '—');
+      html += detail('Order', row.order_number || '—');
+      html += detail('Type', row.type_label || '—');
+      html += detail('Collection', row.collection_flag || '—');
+      html += detail('Delivery', row.delivery_flag || '—');
+      html += detail('Supplier', row.supplier_name || row.collection_supplier || '—');
+      html += detail('Origin', row.origin_country || '—');
+      html += detail('Destination', row.destination_country || '—');
+      html += detail('Mode', row.mode_label || '—');
+      html += detail('Status', status);
+
+      html += `<div class="section-label">Edit Collection / Delivery Details</div>`;
+      if (!row.has_detail) {
+        html += `<div class="empty-note">No edit form saved yet for this freight (pickup/supplier/package/costs are empty in the system).</div>`;
+      } else {
+      html += detail('Customer ref', row.customer_ref || '—');
+      html += detail('Date picked up', row.date_picked_up_label || '—');
+      html += detail('Supplier name', row.supplier_name || '—');
+      html += detail('Contact person', row.supplier_contact_person || '—');
+      html += detail('Contact number', row.supplier_contact || '—');
+      html += detail('Pickup address', row.pickup_address || '—');
+
+      html += `<div class="section-label">Warehouse &amp; package</div>`;
+      html += detail('Create new warehouse order', row.create_new_warehouse_order || '—');
+      html += detail('Warehouse number', row.warehouse_number || '—');
+      html += detail('Warehouse order ID', row.warehouse_order_id != null ? row.warehouse_order_id : '—');
+      html += detail('Courier waybill ref', row.courier_waybill_ref || '—');
+      html += detail('Box marking', row.box_marking || '—');
+      html += detail('Package type', row.package_type || '—');
+      html += detail('Goods description', row.goods_description || '—');
+      html += detail('Total packages', row.total_packages != null ? row.total_packages : '—');
+      html += detail('Total CBM', row.total_cbm != null ? row.total_cbm : '—');
+      html += detail('Total weight (kg)', row.total_weight != null ? row.total_weight : '—');
+      html += detail('Package comments', row.package_comments || '—');
+
+      html += `<div class="section-label">Hazardous &amp; costing</div>`;
+      html += detail('Hazardous', row.hazardous_label || '—');
+      html += detail('Hazardous description', row.hazardous_description || '—');
+      html += detail('Costs to collect', row.costs_to_collect != null ? row.costs_to_collect : '—');
+      html += detail('Handling cost', row.handling_cost != null ? row.handling_cost : '—');
+      html += detail('Warehouse cost', row.warehouse_cost != null ? row.warehouse_cost : '—');
+      html += detail('Warehouse comment', row.warehouse_comment || '—');
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCollectionDeliveryListCard(data) {
+      if (!data.collectionDeliveries || data.collectionDelivery || data.focusedAnswer) return '';
+      const rows = data.collectionDeliveries || [];
+      const label = data.search || data.kind || data.status || 'Collection / Delivery';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Collection and Delivery</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No collection/delivery entries found.</div>`;
+      } else {
+        const showLimit = 25;
+        rows.slice(0, showLimit).forEach((row) => {
+          const ref = [row.freight_number, row.order_number].filter(Boolean).join(' | ') || '—';
+          const meta = [
+            row.type_label ? 'Type: ' + row.type_label : null,
+            row.collection_flag ? 'Collection: ' + row.collection_flag : null,
+            row.supplier_name || row.collection_supplier
+              ? 'Supplier: ' + (row.supplier_name || row.collection_supplier)
+              : null,
+            [row.origin_country, row.destination_country].filter(Boolean).join(' → ') || null,
+            row.mode_label ? '(' + row.mode_label + ')' : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(row.customer_name || '—')}<br><span style="font-weight:500">${esc(ref)}</span></div>
+                <span class="status-badge ${statusClass(row.status_label || '')}">${esc(row.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > showLimit) {
+          html += `<div class="empty-note">Showing ${showLimit} of ${rows.length}. Ask for a freight (F-…) or customer name to narrow.</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClientKpiCard(data) {
+      if (data.focusedAnswer) return '';
+      if (!data.clientKpi || data.clientKpis) return '';
+      const row = data.clientKpi;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(row.name || '')}">${esc(row.name || 'Client KPI')}</div>
+              <div class="sub">Client KPI · ID ${esc(String(row.client_id || '—'))}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Name', row.name || '—');
+      html += detail('Freight', row.freight != null ? row.freight : '—');
+      html += detail('Orders', row.orders != null ? row.orders : '—');
+      html += detail('Delivered orders', row.delivered_orders != null ? row.delivered_orders : '—');
+      html += detail('Total amount', row.total_amount_label || row.total_amount || '—');
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClientKpiListCard(data) {
+      if (!data.clientKpis || data.clientKpi || data.focusedAnswer) return '';
+      const rows = data.clientKpis || [];
+      const label = data.search || 'Client KPI';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Client KPI</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No Client KPI rows found.</div>`;
+      } else {
+        html += `<div class="list-row"><div class="list-row-meta"><span>Sr · Name · Freight · Orders · Delivered · Amount</span></div></div>`;
+        rows.slice(0, 15).forEach((row) => {
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(String(row.sr_no || '—'))}. ${esc(row.name || '—')}</div>
+                <div class="list-row-amount">${esc(String(row.total_amount_label || row.total_amount || '—'))}</div>
+              </div>
+              <div class="list-row-meta"><span>Freight ${esc(String(row.freight))} · Orders ${esc(String(row.orders))} · Delivered ${esc(String(row.delivered_orders))}</span></div>
+            </div>`;
+        });
+        if (rows.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderStaffCard(data) {
+      if (data.focusedAnswer) return '';
+      if (!data.staff || data.staffList) return '';
+      const s = data.staff;
+      const title = s.full_name || s.email || ('Staff #' + s.id);
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(title)}">${esc(title)}</div>
+              <div class="sub">Edit Staff · ID ${esc(String(s.id))}</div>
+            </div>
+            <span class="status-badge ${statusClass(s.status_label || '')}">${esc(s.status_label || '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Email address', s.email || '—');
+      html += detail('Full name', s.full_name || '—');
+      html += detail('Country code', s.country_code_label || s.country_code || '—');
+      html += detail('Phone number', s.phone_no || '—');
+      html += detail('Country', s.country_name || '—');
+      html += detail('Assign roles', s.assigned_roles_label || '—');
+      html += detail('New password', s.password_label || 'Not shown (••••••••• / leave blank to keep current)');
+      html += detail('Select country data', s.access_countries_label || '—');
+      html += detail('Staff ID', s.id);
+
+      const menus = s.permission_menus || [];
+      html += `<div class="section-label">Staff Permissions${s.permission_count ? ' · ' + s.permission_count : ''}</div>`;
+      if (!menus.length) {
+        html += `<div class="empty-note">No permissions assigned.</div>`;
+      } else {
+        menus.slice(0, 12).forEach((menu) => {
+          const routes = (menu.routes || []).slice(0, 6).join(', ');
+          const extra = (menu.routes || []).length > 6 ? ` (+${menu.routes.length - 6} more)` : '';
+          html += detail(menu.menu_name || 'Menu', (routes || '—') + extra);
+        });
+        if (menus.length > 12) {
+          html += `<div class="empty-note">Showing 12 of ${menus.length} menus</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderStaffListCard(data) {
+      if (!data.staffList || data.staff || data.focusedAnswer) return '';
+      const rows = data.staffList || [];
+      const label = data.search || 'Staff';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Manage Staff</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No staff found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((s) => {
+          const meta = [s.email, s.assigned_roles_label, s.country_name].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(s.full_name || '—')} · ID ${esc(String(s.id))}</div>
+                <span class="status-badge ${statusClass(s.status_label || '')}">${esc(s.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderTaskCard(data) {
+      if (data.focusedAnswer || !data.task || data.tasks) return '';
+      const t = data.task;
+      const title = t.display_ref || t.title || t.freight_number || t.clearance_number || ('Task #' + t.id);
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(title)}">${esc(title)}</div>
+              <div class="sub">Task Manager · ${esc(t.task_type_label || t.task_type || 'Task')} · #${esc(String(t.id))}</div>
+            </div>
+            <span class="status-badge ${statusClass(t.status_label || '')}">${esc(t.status_label || '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Name', t.name || '—');
+      if (t.task_type === 'freight') html += detail('Freight number', t.freight_number || '—');
+      else if (t.task_type === 'clearance') html += detail('Clearance number', t.clearance_number || '—');
+      else html += detail('Title', t.title || '—');
+      html += detail('Due date', t.due_date_label || '—');
+      html += detail('Notes', t.notes || '—');
+      html += detail('Status', t.status_label || '—');
+      html += detail('Action required', t.action_required_label || '—');
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderTaskListCard(data) {
+      if (!data.tasks || data.task || data.focusedAnswer) return '';
+      const rows = data.tasks || [];
+      const label = [data.taskType, data.status, data.search].filter(Boolean).join(' · ') || 'Task Manager';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Task Manager</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No tasks found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((t) => {
+          const ref =
+            t.task_type === 'freight'
+              ? t.freight_number
+              : t.task_type === 'clearance'
+                ? t.clearance_number
+                : t.title;
+          const meta = [t.name, ref, t.due_date_label, t.action_required].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">#${esc(String(t.id))} · ${esc(t.task_type_label || t.task_type || 'Task')}</div>
+                <span class="status-badge ${statusClass(t.status_label || '')}">${esc(t.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderContactEnquiryCard(data) {
+      if (data.focusedAnswer || !data.contactEnquiry || data.contactEnquiries) return '';
+      const e = data.contactEnquiry;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(e.display_title || e.subject || '')}">${esc(e.name || 'Enquiry')}</div>
+              <div class="sub">Contact Us Enquiry · #${esc(String(e.id))}</div>
+            </div>
+            <span class="status-badge">${esc(e.nature_of_enquiry || '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Name', e.name || '—');
+      html += detail('Country', e.country || '—');
+      html += detail('Email', e.email || '—');
+      html += detail('Phone No', e.phone_no || '—');
+      html += detail('Subject', e.subject || '—');
+      html += detail('Nature of Enquiry', e.nature_of_enquiry || '—');
+      html += detail('Message', e.message || '—');
+      if (e.created_label) html += detail('Created', e.created_label);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderContactEnquiryListCard(data) {
+      if (!data.contactEnquiries || data.contactEnquiry || data.focusedAnswer) return '';
+      const rows = data.contactEnquiries || [];
+      const label = [data.nature, data.search].filter(Boolean).join(' · ') || 'Contact Us Enquiries';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Contact Us Enquiries</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No enquiries found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((e) => {
+          const meta = [e.country, e.email, e.nature_of_enquiry, e.subject].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">#${esc(String(e.id))} · ${esc(e.name || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCountryOriginCard(data) {
+      if (data.focusedAnswer || !data.countryOrigin || data.countryOrigins) return '';
+      const o = data.countryOrigin;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(o.country_name || '')}">${esc(o.country_name || 'Unknown')}</div>
+              <div class="sub">Country of Origin · #${esc(String(o.id))}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Country Name', o.country_name || '—');
+      html += detail('Cities', o.cities_label || '—');
+      html += detail('Sea Ports', o.sea_ports_label || '—');
+      html += detail('Air Ports', o.air_ports_label || '—');
+      html += detail('Land Ports', o.land_ports_label || '—');
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCountryOriginListCard(data) {
+      if (!data.countryOrigins || data.countryOrigin || data.focusedAnswer) return '';
+      const rows = data.countryOrigins || [];
+      const label = data.search || 'Country of Origin';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Country of Origin</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No countries found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((o) => {
+          const meta = [
+            o.cities_label !== '—' ? `Cities: ${o.cities_label}` : null,
+            o.sea_ports_label !== '—' ? `Sea: ${o.sea_ports_label}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">#${esc(String(o.id))} · ${esc(o.country_name || 'Unknown')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderPartnerCard(data) {
+      if (data.focusedAnswer || !data.partner || data.partners) return '';
+      const p = data.partner;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(p.display_title || p.full_name || '')}">${esc(p.full_name || '—')}</div>
+              <div class="sub">${esc(p.partner_type_label || 'Partner')} · #${esc(String(p.id))}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Email', p.email || '—');
+      html += detail('Full Name', p.full_name || '—');
+      html += detail('Phone Number', p.phone || '—');
+      html += detail('Country', p.country_name || '—');
+      html += detail('Address', p.address || '—');
+      if (p.contact_person) html += detail('Contact person', p.contact_person);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderPartnerListCard(data) {
+      if (!data.partners || data.partner || data.focusedAnswer) return '';
+      const rows = data.partners || [];
+      const typeLabel = rows[0]?.partner_type_label || 'Partners';
+      const label = data.search || typeLabel;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">${esc(typeLabel)}</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No entries found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((p) => {
+          const meta = [p.email, p.phone, p.country_name].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">#${esc(String(p.id))} · ${esc(p.full_name || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCompanyAddressCard(data) {
+      if (data.focusedAnswer || !data.companyAddress || data.companyAddresses) return '';
+      const a = data.companyAddress;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(a.company_name || '')}">${esc(a.company_name || '—')}</div>
+              <div class="sub">Company Address · #${esc(String(a.id))}${a.country ? ' · ' + esc(a.country) : ''}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Company Name', a.company_name || '—');
+      html += detail('Email', a.email || '—');
+      html += detail('Country', a.country || '—');
+      html += detail('Telephone', a.telephone || '—');
+      html += detail('Registration No / Tax No', a.registration_tax_label || '—');
+      html += detail('Address', a.address || '—');
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCompanyAddressListCard(data) {
+      if (!data.companyAddresses || data.companyAddress || data.focusedAnswer) return '';
+      const rows = data.companyAddresses || [];
+      const label = data.search || 'Company Addresses';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Company Addresses</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No company addresses found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((a) => {
+          const meta = [a.country, a.email, a.telephone].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(String(a.sr_no || a.id))}. ${esc(a.company_name || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+              <div class="list-row-meta"><span>${esc(a.registration_tax_label || '—')}</span></div>
+              <div class="list-row-meta"><span>${esc(a.address || '—')}</span></div>
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderSupplierCard(data) {
+      if (data.focusedAnswer) return '';
+      // Full Edit Supplier profile (single match)
+      if (data.supplier && (!data.suppliers || data.suppliers.length <= 1)) {
+        const s = data.supplier;
+        const title = s.company_name || s.display_name || s.name || ('Supplier #' + s.id);
+        let html = `
+          <div class="result-card">
+            <div class="result-card-head">
+              <div class="head-main">
+                <div class="ref" title="${esc(title)}">${esc(title)}</div>
+                <div class="sub">Edit Supplier · ID ${esc(String(s.id))}${s.service_type ? ' · ' + esc(s.service_type) : ''}</div>
+              </div>
+            </div>
+            <div class="result-card-body">`;
+        html += `<div class="section-label">Company Details</div>`;
+        html += detail('Company name', s.company_name || '—');
+        html += detail('Type of service', s.service_type || '—');
+        html += detail('Address', s.address || '—');
+        html += detail('Country based', s.country_based || '—');
+        html += detail('Country of origin', s.country_of_origin || '—');
+        html += `<div class="section-label">Account Details</div>`;
+        html += detail('Email', s.email || '—');
+        html += detail('Full name', s.full_name || '—');
+        html += detail('Country code', s.country_code_label || s.country_code || '—');
+        html += detail('Phone number', s.phone_no || '—');
+        if (s.profile_url) {
+          html += `<div class="detail-row"><span class="k">Profile image</span><span class="v"><img src="${esc(s.profile_url)}" alt="Supplier" style="max-width:72px;max-height:72px;border-radius:8px;object-fit:cover;vertical-align:middle" onerror="this.parentNode.textContent='No file chosen'"/></span></div>`;
+        } else {
+          html += detail('Profile image', s.profile_label || 'No file chosen');
+        }
+        html += detail('Password', s.password_label || 'Not shown (leave blank to keep current)');
+        html += detail('Supplier ID', s.id);
+        html += `</div></div>`;
+        return html;
+      }
+
+      if (!data.suppliers?.length) return '';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Suppliers</div>
+              <div class="sub">${data.suppliers.length} match${data.suppliers.length > 1 ? 'es' : ''}</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      data.suppliers.slice(0, 10).forEach((s) => {
+        const label = s.company_name || s.name || '—';
+        const meta = [
+          s.id != null ? 'ID ' + s.id : null,
+          s.service_type,
+          s.country_based || s.country_name,
+          s.email,
+        ].filter(Boolean).join(' · ');
+        html += `
+          <div class="list-row">
+            <div class="list-row-top">
+              <div class="list-row-id">${esc(label)}</div>
+            </div>
+            ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+          </div>`;
+      });
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClientCard(data) {
+      if (!data.client || data.invoices || data.freights || data.orders || data.warehouseOrders ||
+          data.batches || data.shipments || data.clearances || data.clearanceOrders || data.count ||
+          data.focusedAnswer) {
+        return '';
+      }
+      const c = data.client;
+      const status = c.status_label || '—';
+      const title = c.display_name || c.full_name || c.email || c.customer_id || String(c.id);
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(title)}">${esc(title)}</div>
+              <div class="sub">Customer Profile · ${esc(c.customer_id || c.client_number || c.id)}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      if (c.profile_url) {
+        html += `<div class="detail-row"><span class="k">Customer image</span><span class="v"><img src="${esc(c.profile_url)}" alt="Customer" style="max-width:72px;max-height:72px;border-radius:8px;object-fit:cover;vertical-align:middle" onerror="this.style.display='none'"/></span></div>`;
+      } else {
+        html += detail('Customer image', '—');
+      }
+      html += detail('Name', c.full_name || '—');
+      html += detail('Email', c.email || '—');
+      html += detail('Address 1', c.address_1 || '—');
+      html += detail('Address 2', c.address_2 || '—');
+      html += detail('Cellphone', c.cellphone || '—');
+      html += detail('Telephone', c.telephone || '—');
+      html += detail('City', c.city || '—');
+      html += detail('Code', c.code || '—');
+      html += detail('Company ID', c.company_id || '—');
+      html += detail('Contact person', c.contact_person || '—');
+      html += detail('Country', c.country_name || '—');
+      html += detail('Importer reference', c.importers_ref || '—');
+      html += detail('Province', c.province || '—');
+      html += detail('Tax reference', c.tax_ref || '—');
+      html += detail('Client ref', c.client_ref || '—');
+      html += detail('Customer ID', c.customer_id || c.client_number || c.id);
+      html += detail('Date of reg', c.date_of_reg || '—');
+      html += detail('Status', status);
+
+      const freights = c.related_freights || [];
+      html += `<div class="section-label">Related Freight${freights.length ? ' · ' + freights.length : ''}</div>`;
+      if (!freights.length) {
+        html += `<div class="empty-note">No related freights.</div>`;
+      } else {
+        freights.slice(0, 15).forEach((f) => {
+          const meta = [
+            f.client_reference,
+            f.country,
+            f.dimension != null ? 'Dim ' + f.dimension : null,
+            f.freight,
+            f.incoterm,
+            f.province,
+            f.freight_number,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(String(f.sr_no || '—'))}. ${esc(f.client_name || title)}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (freights.length > 15) {
+          html += `<div class="empty-note">Showing 15 of ${freights.length}</div>`;
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderWarehouseCard(data) {
+      if (!data.warehouseOrder || data.warehouseOrders) return '';
+      const w = data.warehouseOrder;
+      const status = w.status_label || '—';
+      const title = w.source === 'supplier_warehouse' && w.warehouse_name
+        ? w.warehouse_name
+        : (w.client_name || ('Warehouse #' + w.id));
+      const subtitle = w.refs_label || w.order_number || ('Warehouse #' + w.id);
+      const pkgs = data.warehousePackages || w.packages_detail || [];
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(title)}">${esc(title)}</div>
+              <div class="sub">${esc(subtitle)}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      if (w.move_status_label) html += detail('Move status', w.move_status_label);
+      html += detail('Client', w.client_name || '—');
+      if (w.date_received_label) html += detail('Date', w.date_received_label);
+      if (w.goods_label) html += detail('Goods', w.goods_label);
+      html += detail('Days in warehouse', w.days_in_warehouse != null ? w.days_in_warehouse : 0);
+      html += detail('Origin', w.collection_from_name || '—');
+      html += detail('Destination', w.destination_label || w.delivery_to_name || '—');
+      html += detail('Status', status);
+      html += detail('Weight', w.weight != null ? w.weight : 0);
+      html += detail('Dimension', w.dimensions != null ? w.dimensions : 0);
+      html += detail('Packages', w.packages != null ? w.packages : 0);
+      html += detail('Batch', w.batch_action_label || (w.batch_assigned ? 'Batch Assigned' : 'Select Batch'));
+      if (w.groupage || w.batch_number) html += detail('Groupage', w.groupage || w.batch_number);
+      if (w.freight_number) html += detail('Freight number', w.freight_number);
+      if (w.freight_mode) html += detail('Freight', w.freight_mode);
+      if (w.customer_ref) html += detail('Client ref', w.customer_ref);
+      if (w.box_marking) html += detail('Box marking', w.box_marking);
+      if (w.packing_type) html += detail('Packing type', w.packing_type);
+      if (w.hazardous_label) html += detail('Hazardous', w.hazardous_label);
+      if (w.courier_waybill_ref) html += detail('Courier waybill', w.courier_waybill_ref);
+      if (w.tracking_number) html += detail('Tracking', w.tracking_number);
+      if (w.supplier_company || w.supplier_person) {
+        html += detail('Supplier', [w.supplier_company, w.supplier_person].filter(Boolean).join(' / '));
+      }
+      if (w.supplier_address) html += detail('Supplier address', w.supplier_address);
+      if (w.warehouse_name && w.source !== 'supplier_warehouse') {
+        html += detail('Location', `${w.warehouse_name || ''}${w.warehouse_number ? ' (' + w.warehouse_number + ')' : ''}`.trim());
+      }
+      if (pkgs.length) {
+        html += `<div class="section-label">Packages detail (${pkgs.length})</div>`;
+        pkgs.slice(0, 12).forEach((p, i) => {
+          const meta = [
+            p.date_received_label,
+            p.package_type,
+            p.packages != null ? p.packages + ' pkg' : null,
+            p.dimension != null ? 'Dim ' + p.dimension : null,
+            p.weight != null ? 'Wt ' + p.weight : null,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${i + 1}. ${esc(p.product_description || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderWarehouseListCard(data) {
+      if (!data.warehouseOrders || data.warehouseOrder || data.focusedAnswer) return '';
+      const name = data.client?.full_name || data.freightNumber || data.orderNumber || data.batchNumber || 'Warehouse';
+      const rows = data.warehouseOrders;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Warehouse orders</div>
+              <div class="sub">${esc(name)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No warehouse orders found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((r) => {
+          const meta = [
+            r.date_received_label,
+            r.goods_label,
+            'Days ' + (r.days_in_warehouse != null ? r.days_in_warehouse : 0),
+            r.collection_from_name,
+            r.destination_label || r.delivery_to_name,
+            'Wt ' + (r.weight != null ? r.weight : 0),
+            'Dim ' + (r.dimensions != null ? r.dimensions : 0),
+            'Pkg ' + (r.packages != null ? r.packages : 0),
+            r.batch_action_label,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(r.client_name || ('#' + r.id))}${r.refs_label ? ' · ' + esc(r.refs_label) : ''}</div>
+                <span class="status-badge ${statusClass(r.status_label)}">${esc(r.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderBatchCard(data) {
+      if (!data.batch || data.batches) return '';
+      const b = data.batch;
+      const status = b.status_label || '—';
+      const batchName = String(b.batch_name || '').trim();
+      const showName =
+        batchName &&
+        !/^name\s*batch$/i.test(batchName) &&
+        batchName.toUpperCase() !== String(b.batch_number || '').toUpperCase();
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(b.batch_number)}">${esc(b.batch_number)}</div>
+              ${showName ? `<div class="sub">${esc(batchName)}</div>` : `<div class="sub">Batch</div>`}
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      if (b.freight) {
+        html += detail(
+          'Freight',
+          `${b.freight}${b.freight_option ? ' · ' + b.freight_option : ''}${b.freight_speed ? ' · ' + b.freight_speed : ''}`
+        );
+      }
+      html += detail('Origin', b.origin_country_name || '—');
+      html += detail('Destination', b.destination_country_name || '—');
+      html += detail('Dim.', b.dimensions != null ? b.dimensions : 0);
+      html += detail('Weight', b.weight != null ? b.weight : 0);
+      html += detail('Packages', b.packages != null ? b.packages : 0);
+      html += detail('Forwarding agent', b.forwarding_agent_label || '—');
+      html += detail('Total freight', b.total_freight != null ? b.total_freight : 0);
+      if (b.vessel) html += detail('Vessel', b.vessel);
+      if (b.carrier) html += detail('Carrier', b.carrier);
+      if (b.master_waybill || b.waybill) html += detail('Waybill', b.master_waybill || b.waybill);
+      if (b.warehouse_name) html += detail('Warehouse', b.warehouse_name);
+      if (data.batchContents?.length) {
+        const linked = data.batchContents.filter((c) => c.freight_number || c.order_number);
+        if (linked.length) {
+          html += `<div class="section-label">Linked items (${linked.length})</div>`;
+          linked.slice(0, 10).forEach((c) => {
+            const ref = [c.freight_number, c.order_number].filter(Boolean).join(' / ');
+            html += `<div class="section-item"><strong>${esc(ref || '—')}</strong>${c.client_name ? ' · ' + esc(String(c.client_name).replace(/\s+/g, ' ').trim()) : ''}</div>`;
+          });
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderBatchListCard(data) {
+      if (!data.batches || data.batch || data.focusedAnswer) return '';
+      const name = data.client?.full_name || 'Batches';
+      const rows = data.batches;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Batches</div>
+              <div class="sub">${esc(name)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No batches found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((b) => {
+          const route = (b.origin_country_name || b.destination_country_name)
+            ? `${b.origin_country_name || '?'} → ${b.destination_country_name || '?'}`
+            : '';
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(b.batch_number)}</div>
+                <span class="status-badge ${statusClass(b.status_label)}">${esc(b.status_label || '—')}</span>
+              </div>
+              ${route ? `<div class="list-row-meta"><span>${esc(route)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderShipmentCard(data) {
+      if (!data.shipment || data.shipments) return '';
+      const s = data.shipment;
+      const status = s.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(s.waybill || ('#' + s.id))}">${esc(s.waybill || ('#' + s.id))}</div>
+              <div class="sub">Shipment details</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Waybill', s.waybill || '—');
+      html += detail('Freight', s.freight || '—');
+      html += detail('Vessel', s.vessel || '—');
+      html += detail('Carrier', s.carrier || '—');
+      html += detail('Date of dispatch', s.date_of_dispatch_label || '—');
+      html += detail('ETD', s.etd_label || '—');
+      html += detail('ETA', s.eta_label || '—');
+      html += detail('Origin agent', s.origin_agent || '—');
+      html += detail('Seal number', s.seal || '—');
+      html += detail('Port of loading', s.port_of_loading || '—');
+      html += detail('Port of discharge', s.port_of_discharge || '—');
+      html += detail('Destination agent', s.destination_agent || '—');
+      html += detail('Load', s.load || s.waybill || '—');
+      html += detail('Release type', s.release_type || '—');
+      html += detail('Container number', s.container || '—');
+      html += detail('Status', status);
+      html += detail('Destination country', s.des_country_name || '—');
+      html += detail('Country of origin', s.origin_country_name || '—');
+
+      const assigned = (data.shipmentLinks || []).filter((l) => l.order_id);
+      if (assigned.length) {
+        html += `<div class="section-label">Assign shipment (${assigned.length})</div>`;
+        assigned.slice(0, 12).forEach((l, i) => {
+          const top = l.freight_order_label || [l.freight_number, l.order_number].filter(Boolean).join(' / ') || '—';
+          const meta = [
+            l.client_name,
+            l.hawb_tracking ? 'HAWB ' + l.hawb_tracking : null,
+            l.weight_label != null ? 'Wt ' + l.weight_label : null,
+            l.cbm_label != null ? 'CBM ' + l.cbm_label : null,
+            l.nature_of_goods,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${i + 1}. ${esc(top)}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+
+      const clearances = data.shipmentClearances || [];
+      if (clearances.length) {
+        html += `<div class="section-label">Clearance order (${clearances.length})</div>`;
+        clearances.slice(0, 12).forEach((c, i) => {
+          const meta = [
+            c.client_name,
+            c.clearing_status_label,
+            c.weight_label != null ? 'Wt ' + c.weight_label : null,
+            c.dimension_label != null ? 'Dim ' + c.dimension_label : null,
+            c.nature_of_goods,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${i + 1}. ${esc(c.clearance_number || '—')}</div>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderShipmentListCard(data) {
+      if (!data.shipments || data.shipment || data.freight || data.focusedAnswer) return '';
+      const name = data.client?.full_name || data.freightNumber || 'Shipments';
+      const rows = data.shipments;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Shipments</div>
+              <div class="sub">${esc(name)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No shipments found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((s) => {
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(s.waybill || ('#' + s.id))}</div>
+                <span class="status-badge ${statusClass(s.status_label)}">${esc(s.status_label || '—')}</span>
+              </div>
+              ${s.route_label ? `<div class="list-row-meta"><span>${esc(s.route_label)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClearanceCard(data) {
+      if (!data.clearance || data.clearances || data.clearanceOrders) return '';
+      if (Array.isArray(data.clearance)) return '';
+      const c = data.clearance;
+      const status = c.clearing_status_label || c.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(c.clearance_number)}">${esc(c.clearance_number)}</div>
+              <div class="sub">${esc(c.client_name || 'Custom clearance')}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Mode of freight', c.mode_label || c.freight || '—');
+      html += detail('Client', c.client_name || '—');
+      html += detail('Are you', c.party_role_label || '—');
+      html += detail('Is this', c.import_export_label || '—');
+      html += detail('Shipment reference', c.customer_ref || '—');
+      html += detail('Sales representative', c.sales_name || '—');
+      html += detail('Port of loading country', c.loading_country_name || '—');
+      html += detail('Port of exit country', c.discharge_country_name || '—');
+      html += detail('Port of loading', c.port_of_loading || '—');
+      html += detail('Port of discharge', c.port_of_discharge || '—');
+      html += detail('Product description', c.goods_desc || '—');
+      html += detail('Nature of goods', c.nature_of_goods_label || '—');
+      html += detail('Type of packing', c.packing_type || '—');
+      if (c.comment_on_goods) html += detail('Comment on goods', c.comment_on_goods);
+      html += detail('Comment on docs', c.comment_on_docs || '—');
+      html += detail('No of package', c.packages_label != null ? c.packages_label : '—');
+      html += detail('Total dimension', c.dimension_display || c.dimension_label || '—');
+      html += detail('Weight', c.weight_display || c.weight_label || '—');
+      html += detail('Inquiry', c.inquiry_status_label || '—');
+      html += detail('Quotation', c.quotation_status_label || '—');
+      if (c.freight_number) html += detail('Linked freight', c.freight_number);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClearanceListCard(data) {
+      if (!data.clearances || data.clearance || data.freight || data.focusedAnswer) return '';
+      const name = data.client?.full_name || data.freightNumber || 'Clearances';
+      const rows = data.clearances;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Clearances</div>
+              <div class="sub">${esc(name)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No clearances found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((c) => {
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(c.clearance_number)}</div>
+                <span class="status-badge ${statusClass(c.status_label)}">${esc(c.status_label || '—')}</span>
+              </div>
+              ${c.freight_number ? `<div class="list-row-meta"><span class="freight-ref">${esc(c.freight_number)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClearanceOrderCard(data) {
+      if (!data.clearanceOrder || (data.clearanceOrders && data.clearanceOrders.length > 1 && !data.clearanceOrder)) {
+        return '';
+      }
+      if (!data.clearanceOrder) return '';
+      // Prefer single card when one row; list card handles multi
+      if (data.clearanceOrders?.length > 1) return '';
+      const c = data.clearanceOrder;
+      const status = c.action_label || c.status_label || '—';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(c.clearance_number || ('#' + c.id))}">${esc(c.clearance_number || ('#' + c.id))}</div>
+              <div class="sub">${esc(c.client_name || 'Order Clearance')}</div>
+            </div>
+            <span class="status-badge ${statusClass(status)}">${esc(status)}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Client', c.client_name || '—');
+      html += detail('Clearance number', c.clearance_number || '—');
+      html += detail('Date', c.date_label || '—');
+      html += detail('Goods', c.goods_desc || '—');
+      html += detail('Origin', c.origin_country_name || '—');
+      html += detail('Destination', c.destination_country_name || '—');
+      if (c.freight_mode) html += detail('Freight', c.freight_mode);
+      html += detail('Action', status);
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderClearanceOrderListCard(data) {
+      if (!data.clearanceOrders || data.focusedAnswer) return '';
+      if (data.clearanceOrder && data.clearanceOrders.length <= 1) return '';
+      const name = data.client?.full_name || data.search || 'Order Clearance';
+      const rows = data.clearanceOrders;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Order Clearance</div>
+              <div class="sub">${esc(name)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No clearance orders found.</div>`;
+      } else {
+        rows.slice(0, 15).forEach((c) => {
+          const route =
+            (c.origin_country_name || c.destination_country_name)
+              ? `${c.origin_country_name || '?'} → ${c.destination_country_name || '?'}`
+              : '';
+          const meta = [
+            c.date_label,
+            c.goods_desc,
+            route,
+            c.freight_mode,
+          ].filter(Boolean).join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">${esc(c.client_name || '—')} · ${esc(c.clearance_number || '—')}</div>
+                <span class="status-badge ${statusClass(c.action_label || c.status_label)}">${esc(c.action_label || c.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+            </div>`;
+        });
+        if (rows.length > 15) html += `<div class="empty-note">Showing 15 of ${rows.length}</div>`;
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderCandidates(data) {
+      if (!data.candidates?.length) return '';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Select a client</div>
+              <div class="sub">${data.candidates.length} matches found</div>
+            </div>
+          </div>
+          <div class="result-card-body" style="padding-top:10px;padding-bottom:6px;">`;
+      data.candidates.forEach((c, i) => {
+        const label = c.display_name || c.full_name || c.email || ('Client ' + c.id);
+        html += `<button type="button" class="candidate-btn" data-client-id="${esc(c.id)}" data-client-name="${esc(label)}" data-intent="${esc(data.pendingIntent || 'invoices')}">${i + 1}. ${esc(label)}${c.client_number ? ' (' + esc(c.client_number) + ')' : ''}</button>`;
+      });
+      html += `</div></div>`;
+      return html;
+    }
+
+    function hasStructuredCard(data) {
+      if (!data) return false;
+      return Boolean(
+        data.focusedAnswer ||
+        data.count ||
+        data.freight ||
+        data.freights ||
+        data.order ||
+        data.orders ||
+        data.warehouseOrder ||
+        data.warehouseOrders ||
+        data.batch ||
+        data.batches ||
+        data.shipment ||
+        (data.shipments && !data.freight) ||
+        (data.clearance && !Array.isArray(data.clearance)) ||
+        (data.clearances && !data.freight) ||
+        data.clearanceOrders ||
+        data.clearanceOrder ||
+        data.sageInvoice ||
+        data.sageInvoices ||
+        data.dispute ||
+        data.disputes ||
+        data.release ||
+        data.releases ||
+        data.candidates?.length ||
+        data.suppliers?.length ||
+        (data.invoices && !data.freight && !data.order) ||
+        (data.client && data.invoices) ||
+        (data.client && !data.invoices && !data.freights && !data.orders && !data.warehouseOrders &&
+          !data.batches && !data.shipments && !data.clearances && !data.clearanceOrders)
+      );
+    }
+
+    function botIconHtml() {
+      return `<div class="bot-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5 2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5 2.5 2.5 0 0 0-2.5-2.5Z"/></svg></div>`;
+    }
+
+    function wrapBotMessage(contentEl, rowId) {
+      const row = document.createElement('div');
+      row.className = 'msg-row';
+      if (rowId) row.id = rowId;
+      row.innerHTML = botIconHtml();
+      const body = document.createElement('div');
+      body.className = 'msg-body';
+      body.appendChild(contentEl);
+      row.appendChild(body);
+      return row;
+    }
+
+    function addBubble(role, text, data) {
+      if (role === 'user' || role === 'system') {
+        const div = document.createElement('div');
+        div.className = `bubble ${role}`;
+        div.textContent = text;
+        messages.appendChild(div);
+      } else if (role === 'typing') {
+        const div = document.createElement('div');
+        div.className = 'bubble typing';
+        div.textContent = text || '…';
+        messages.appendChild(wrapBotMessage(div, 'typingBubble'));
+      } else {
+        const cardsHtml = data
+          ? renderFocusedAnswer(data) +
+          renderCountCard(data) +
+          renderFreightCard(data) +
+          renderFreightListCard(data) +
+          renderOrderCard(data) +
+          renderOrderListCard(data) +
+          renderWarehouseCard(data) +
+          renderWarehouseListCard(data) +
+          renderBatchCard(data) +
+          renderBatchListCard(data) +
+          renderShipmentCard(data) +
+          renderShipmentListCard(data) +
+          renderClearanceCard(data) +
+          renderClearanceListCard(data) +
+          renderClearanceOrderCard(data) +
+          renderClearanceOrderListCard(data) +
+          renderSageInvoiceCard(data) +
+          renderSageInvoiceListCard(data) +
+          renderDisputeCard(data) +
+          renderDisputeListCard(data) +
+          renderReleaseCard(data) +
+          renderReleaseListCard(data) +
+          renderQuoteCard(data) +
+          renderQuoteListCard(data) +
+          renderFreightInvoiceCard(data) +
+          renderFreightInvoiceListCard(data) +
+          renderCashbookCard(data) +
+          renderCashbookListCard(data) +
+          renderSupplierInvoiceCard(data) +
+          renderSupplierInvoiceListCard(data) +
+          renderCollectionDeliveryCard(data) +
+          renderCollectionDeliveryListCard(data) +
+          renderStaffCard(data) +
+          renderStaffListCard(data) +
+          renderTaskCard(data) +
+          renderTaskListCard(data) +
+          renderContactEnquiryCard(data) +
+          renderContactEnquiryListCard(data) +
+          renderCountryOriginCard(data) +
+          renderCountryOriginListCard(data) +
+          renderPartnerCard(data) +
+          renderPartnerListCard(data) +
+          renderCompanyAddressCard(data) +
+          renderCompanyAddressListCard(data) +
+          renderClientKpiCard(data) +
+          renderClientKpiListCard(data) +
+          renderInvoiceCard(data) +
+          renderClientCard(data) +
+          renderSupplierCard(data) +
+          renderCandidates(data)
+          : '';
+        const showCard = cardsHtml.trim().length > 0;
+
+        const row = document.createElement('div');
+        row.className = 'msg-row';
+        row.innerHTML = botIconHtml();
+        const body = document.createElement('div');
+        body.className = 'msg-body';
+
+        if (showCard) {
+          // Card already shows the answer — don't also dump the text reply
+          const cardCoversReply = Boolean(
+            data?.focusedAnswer ||
+            data?.count ||
+            data?.freight ||
+            data?.freights ||
+            data?.order ||
+            data?.orders ||
+            data?.warehouseOrder ||
+            data?.warehouseOrders ||
+            data?.batch ||
+            data?.batches ||
+            data?.shipment ||
+            (data?.shipments && !data?.freight) ||
+            (data?.clearance && !Array.isArray(data.clearance)) ||
+            (data?.clearances && !data?.freight) ||
+            data?.clearanceOrder ||
+            data?.clearanceOrders ||
+            data?.sageInvoice ||
+            data?.sageInvoices ||
+            data?.dispute ||
+            data?.disputes ||
+            data?.release ||
+            data?.releases ||
+            data?.quote ||
+            data?.quotes ||
+            data?.freightInvoice ||
+            data?.freightInvoices ||
+            data?.cashbook ||
+            data?.cashbookEntries ||
+            data?.supplierInvoice ||
+            data?.supplierInvoices ||
+            data?.collectionDelivery ||
+            data?.collectionDeliveries ||
+            data?.supplier ||
+            data?.suppliers?.length ||
+            data?.staff ||
+            data?.staffList ||
+            data?.task ||
+            data?.tasks ||
+            data?.contactEnquiry ||
+            data?.contactEnquiries ||
+            data?.countryOrigin ||
+            data?.countryOrigins ||
+            data?.partner ||
+            data?.partners ||
+            data?.companyAddress ||
+            data?.companyAddresses ||
+            data?.clientKpi ||
+            data?.clientKpis ||
+            (data?.invoices && !data?.freight && !data?.order) ||
+            (data?.client && !data?.invoices && !data?.freights && !data?.orders && !data?.warehouseOrders &&
+              !data?.batches && !data?.shipments && !data?.clearances && !data?.clearanceOrders) ||
+            data?.candidates?.length
+          );
+          if (!cardCoversReply && text) {
+            const intro = document.createElement('div');
+            intro.className = 'bubble assistant';
+            intro.textContent = text;
+            body.appendChild(intro);
+          }
+          const wrap = document.createElement('div');
+          wrap.className = 'bubble assistant card-only';
+          const holder = document.createElement('div');
+          holder.innerHTML = cardsHtml;
+          wrap.appendChild(holder);
+          body.appendChild(wrap);
+          holder.querySelectorAll('.candidate-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const id = btn.getAttribute('data-client-id');
+              const name = btn.getAttribute('data-client-name') || 'client';
+              const intent = btn.getAttribute('data-intent') || 'invoices';
+              const intentMessages = {
+                client: `Client details for Client ID ${id}`,
+                freights: `Show freights for Client ID ${id}`,
+                orders: `Show orders for Client ID ${id}`,
+                invoices: `Show invoices for Client ID ${id}`,
+                warehouse_orders: `Show warehouse orders for Client ID ${id}`,
+                batches: `Show batches for Client ID ${id}`,
+                shipments: `Show shipments for Client ID ${id}`,
+                clearances: `Show clearances for Client ID ${id}`,
+                clearance_orders: `Show clearance orders for Client ID ${id}`,
+                count_freights: `Count freights for Client ID ${id}`,
+                count_orders: `Count orders for Client ID ${id}`,
+                count_warehouse_orders: `Count warehouse orders for Client ID ${id}`,
+                count_batches: `Count batches for Client ID ${id}`,
+                count_shipments: `Count shipments for Client ID ${id}`,
+                count_clearances: `Count clearances for Client ID ${id}`,
+                count_clearance_orders: `Count clearance orders for Client ID ${id}`,
+              };
+              const msg = intentMessages[intent] || `Show invoices for Client ID ${id}`;
+              sendMessage(msg, `Selected: ${name}`);
+            });
+          });
+        } else {
+          const wrap = document.createElement('div');
+          wrap.className = 'bubble assistant';
+          wrap.textContent = text || '';
+          body.appendChild(wrap);
+        }
+
+        row.appendChild(body);
+        messages.appendChild(row);
+      }
+      scrollMessagesToBottom();
+    }
+
+    function scrollMessagesToBottom() {
+      requestAnimationFrame(() => {
+        messages.scrollTop = messages.scrollHeight;
+        const last = messages.lastElementChild;
+        if (last && typeof last.scrollIntoView === 'function') {
+          last.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        }
+      });
+    }
+
+    function removeTyping() {
+      const t = document.getElementById('typingBubble');
+      if (t) t.remove();
+    }
+
+    function ask(text) {
+      if (!open) setOpen(true);
+      sendMessage(text);
+    }
+
+    function buildMessageFromPending(raw) {
+      const value = raw.trim();
+      if (!pendingPrompt) return value;
+
+      const topic = pendingPrompt;
+      pendingPrompt = null;
+      input.placeholder = 'How can Workspace AI help you today?';
+
+      if (topic === 'freight') {
+        return `What is the status of ${value}?`;
+      }
+      if (topic === 'order') {
+        return `What is ${value}?`;
+      }
+      if (topic === 'warehouse' || topic === 'warehouse_client') {
+        if (/^\d+$/.test(value)) return `Show warehouse order ${value}`;
+        if (/^F-?\d/i.test(value) || /^OR0/i.test(value)) return `Warehouse status of ${value}`;
+        return `Show warehouse orders for ${value}`;
+      }
+      if (topic === 'batch') {
+        return `Status of batch ${value}`;
+      }
+      if (topic === 'shipment') {
+        return `Shipment details ${value}`;
+      }
+      if (topic === 'clearance') {
+        return `Clearance details ${value}`;
+      }
+      if (topic === 'clearance_orders_client') {
+        if (/^C-\d/i.test(value)) return `Clearance order ${value}`;
+        if (/^\d+$/.test(value)) return `Show clearance orders for Client ID ${value}`;
+        return `Order clearance for ${value}`;
+      }
+      if (topic === 'quotation') {
+        if (/^ADQO\d+/i.test(value)) return `Quote ${value}`;
+        if (/^F-?\d/i.test(value)) return `Quote of ${value}`;
+        return `Quotes for ${value}`;
+      }
+      if (topic === 'freight_invoice') {
+        if (/^ADINV\d+/i.test(value)) return `Freight invoice ${value}`;
+        if (/^F-?\d/i.test(value)) return `Freight invoice of ${value}`;
+        return `Freight invoices for ${value}`;
+      }
+      if (topic === 'cashbook') {
+        if (/^20\d{8,11}$/.test(value)) return `Cashbook ${value}`;
+        if (/^OR0*\d+/i.test(value)) return `Cashbook of ${value}`;
+        if (/^F-?\d/i.test(value)) return `Cashbook of ${value}`;
+        return `Cashbook for ${value}`;
+      }
+      if (topic === 'supplier_invoice') {
+        if (/^SUPINV\d+/i.test(value)) return `Supplier invoice ${value}`;
+        return `Supplier invoices for ${value}`;
+      }
+      if (topic === 'collection_delivery') {
+        if (/^F-?\d/i.test(value)) return `Collection of ${value}`;
+        if (/^OR0*\d+/i.test(value)) return `Collection details ${value}`;
+        if (/^pending$/i.test(value)) return `Pending collections`;
+        return `Collections for ${value}`;
+      }
+      if (topic === 'task_manager') {
+        if (/^freight/i.test(value)) return `Freight tasks`;
+        if (/^clearance/i.test(value)) return `Clearance tasks`;
+        if (/^custom/i.test(value)) return `Custom tasks`;
+        if (/^pending$/i.test(value)) return `Pending tasks`;
+        if (/^F-/i.test(value)) return `Task manager ${value}`;
+        if (/^C-/i.test(value)) return `Clearance tasks for ${value}`;
+        return `Tasks for ${value}`;
+      }
+      if (topic === 'contact_enquiries') {
+        if (/^all$/i.test(value)) return `Contact us enquiries`;
+        if (/^sales$/i.test(value)) return `Nature of enquiry Sales`;
+        if (/@/.test(value)) return `Enquiry ${value}`;
+        return `Contact us ${value}`;
+      }
+      if (topic === 'country_origin') {
+        if (/^all$/i.test(value)) return `Show country of origin`;
+        return `Country of origin ${value}`;
+      }
+      if (topic === 'customs_agent') {
+        if (/^all$/i.test(value)) return `Custom agents`;
+        return `Custom agent ${value}`;
+      }
+      if (topic === 'freight_forwarder') {
+        if (/^all$/i.test(value)) return `Freight forwarders`;
+        return `Freight forwarder ${value}`;
+      }
+      if (topic === 'groupage_warehouse') {
+        if (/^all$/i.test(value)) return `Groupage warehouses`;
+        return `Groupage warehouse ${value}`;
+      }
+      if (topic === 'transporter') {
+        if (/^all$/i.test(value)) return `Transporters`;
+        return `Transporter ${value}`;
+      }
+      if (topic === 'company_addresses') {
+        if (/^all$/i.test(value)) return `Company addresses`;
+        return `Company address ${value}`;
+      }
+      if (topic === 'supplier') {
+        if (/^\d+$/.test(value)) return `Supplier ${value}`;
+        if (/@/.test(value)) return `Supplier ${value}`;
+        return `Supplier ${value}`;
+      }
+      if (topic === 'staff') {
+        if (/^\d+$/.test(value)) return `Staff ${value}`;
+        if (/@/.test(value)) return `Edit staff ${value}`;
+        return `Staff ${value}`;
+      }
+      if (topic === 'client_kpi') {
+        if (/^all$/i.test(value) || !value) return `Show client KPI`;
+        return `Client KPI for ${value}`;
+      }
+      if (topic === 'orders_client') {
+        if (/^\d+$/.test(value)) {
+          return `Show orders for Client ID ${value}`;
+        }
+        return `Show orders for ${value}`;
+      }
+      if (topic === 'sage_invoice') {
+        if (/^[A-Z]{2,}INV\d{3,}$/i.test(value)) return `Sage invoice ${value}`;
+        return `Find sage invoice ${value}`;
+      }
+      if (topic === 'disputes') {
+        if (/^D-\d{4,}$/i.test(value)) return `Dispute ${value}`;
+        if (/^F-\d/i.test(value) || /^OR0/i.test(value)) return `Disputes of ${value}`;
+        return `Disputes for ${value}`;
+      }
+      if (topic === 'release_dashboard') {
+        if (/^OR0*\d+/i.test(value)) return `Release dashboard ${value}`;
+        return `Release dashboard for ${value}`;
+      }
+      if (topic === 'client_search') {
+        if (/^[A-Z]{0,4}\d{3,}$/i.test(value)) return `Customer ${value}`;
+        if (/@/.test(value)) return `Client profile for ${value}`;
+        return `Find client ${value}`;
+      }
+      if (topic === 'invoices_client') {
+        if (/^\d+$/.test(value)) {
+          return `Show invoices for Client ID ${value}`;
+        }
+        return `Show invoices for ${value}`;
+      }
+      return value;
+    }
+
+    async function send() {
+      const raw = input.value.trim();
+      if (!raw) return;
+      const message = buildMessageFromPending(raw);
+      input.value = '';
+      await sendMessage(message, raw);
+    }
+
+    async function sendMessage(message, displayText) {
+      const userId = document.getElementById('userId').value;
+      if (!userId) {
+        alert('Please enter a User ID');
+        return;
+      }
+
+      const sid = await ensureSession();
+
+      // First real question — hide welcome + chip strip so results have room
+      if (messages.querySelector('.welcome-card')) {
+        messages.innerHTML = '';
+      }
+      setQuickRepliesVisible(false);
+      closeShortcutsSheet();
+
+      addBubble('user', displayText || message);
+      sendBtn.disabled = true;
+      addBubble('typing', '…');
+
+      try {
+        const body = {
+          message,
+          user_id: Number(userId),
+          session_id: sid,
+        };
+
+        const res = await fetch('/api/ai-chat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await res.json();
+        removeTyping();
+
+        if (!data.success) {
+          addBubble('system', data.message || 'Request failed');
+          return;
+        }
+
+        if (data.sessionId) storeSession(userId, data.sessionId);
+        addBubble('assistant', data.reply, data.data);
+        scrollMessagesToBottom();
+      } catch (err) {
+        removeTyping();
+        addBubble('system', 'Error: ' + err.message);
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    checkStatus();
+  </script>
+</body>
+
+</html>

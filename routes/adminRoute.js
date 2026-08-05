@@ -26,7 +26,13 @@ const storage = multer.diskStorage({
             "Warehouse Entry Docs",
             "Invoice (AD)",
             "POP (AD)",
-            "Delivery note"
+            "Delivery note",
+
+            // Collection & Delivery
+            "box_marking_attachment",
+            "goods_description_attachment",
+            "product_pictures",
+            "other_attachments"
 
         ];
 
@@ -64,8 +70,21 @@ admin_route.post('/add-freight', upload.fields([{ name: 'Customs Documents', max
 { name: 'Product Literature', maxCount: 5 }, { name: 'Letters of authority', maxCount: 5 }, { name: 'AD_Quotations', maxCount: 5 }, { name: 'Supplier Invoices', maxCount: 5 }, { name: 'Invoice (AD)', maxCount: 5 },
 { name: 'POP (AD)', maxCount: 5 }, { name: 'Delivery note', maxCount: 5 }]), adminController.Addfreight);
 admin_route.post('/freight-list', adminController.GetFreightAdmin);
-admin_route.post("/GetReadyFreightAdmin", adminController.GetReadyFreightAdmin)
-admin_route.post("/ManageFreightStatus", adminController.ManageFreightStatus)
+admin_route.post("/GetReadyFreightAdmin", adminController.GetReadyFreightAdmin);
+
+admin_route.post("/confirmCollectionCompletion", adminController.confirmCollectionCompletion);
+admin_route.post(
+    "/addUpdateCollectionDelivery",
+    upload.fields([
+        { name: "box_marking_attachment", maxCount: 10 },
+        { name: "goods_description_attachment", maxCount: 10 },
+        { name: "product_pictures", maxCount: 10 },
+        { name: "other_attachments", maxCount: 10 }
+    ]),
+    adminController.addUpdateCollectionDelivery
+);
+
+admin_route.post("/ManageFreightStatus", adminController.ManageFreightStatus);
 admin_route.post('/freight-list-byId', adminController.GetFreightAdminById);
 admin_route.post('/new-freight-list', adminController.GetFreightCustomer);
 admin_route.post('/edit-freight', upload.fields([{ name: 'Customs Documents', maxCount: 5 }, { name: 'Waybills', maxCount: 5 }, { name: 'Supporting Documents', maxCount: 5 }, { name: 'Invoice, Packing List', maxCount: 5 },
@@ -104,6 +123,7 @@ admin_route.get('/clientlist', adminController.clientListAddFreight);
 admin_route.get('/countrylist', adminController.CountryListAddFreight);
 
 admin_route.post('/addEstimateShippingQuote', adminController.addEstimateShippingQuote);
+admin_route.post('/deleteEstimateShippingQuote', adminController.deleteEstimateShippingQuote);
 admin_route.post('/GetQuoteShipEstimateById', adminController.GetQuoteShipEstimateById);
 admin_route.post('/GetQuoteShipEstimateBySupplier', adminController.GetQuoteShipEstimateBySupplier);
 admin_route.get('/getAllFreightQuoteList', adminController.getAllFreightQuoteList);
@@ -213,5 +233,45 @@ admin_route.post("/deleteSupplierInvoice/:id", adminController.deleteSupplierInv
 admin_route.get("/getWaybillDropdown", adminController.getWaybillDropdown)
 admin_route.get("/getSupplierInvoiceById/:id", adminController.getSupplierInvoiceById)
 admin_route.post("/copySupplierInvoice", adminController.copySupplierInvoice);
+admin_route.post("/addFreightQuoteInvoice", adminController.addFreightQuoteInvoice);
+admin_route.post("/deleteFreightQuoteInvoice", adminController.deleteFreightQuoteInvoice);
+admin_route.post("/GetFreightQuoteInvoiceById", adminController.GetFreightQuoteInvoiceById);
+admin_route.post("/GetFreightQuoteInvoiceBySupplier", adminController.GetFreightQuoteInvoiceBySupplier);
+admin_route.get("/getAllFreightQuoteInvoiceList", adminController.getAllFreightQuoteInvoiceList);
+admin_route.get("/getAdminFrieghtComponentList", adminController.getAdminFrieghtComponentList);
+admin_route.post("/add-freight-quotes-estimate", adminController.addUpdateFreightQuotes);
+admin_route.post("/GetFreightQuoteEstimateById", adminController.GetFreightQuoteEstimateById);
+admin_route.post("/deleteFreightQuoteEstimate", adminController.deleteFreightQuoteEstimateById);
+admin_route.get("/GetFreightQuoteEstimateList", adminController.GetFreightQuoteEstimateList);
+admin_route.post("/approveRejectFreightQuote", adminController.approveRejectFreightQuote);
+admin_route.post("/getFreightQuoteEstimateBySupplier", adminController.getFreightQuoteEstimateBySupplier);
+admin_route.post("/addUpdateSupplierShipmentInvoice", adminController.addUpdateSupplierShipmentInvoice);
+admin_route.post("/GetSupplierShipmentInvoiceById", adminController.GetSupplierShipmentInvoiceById);
+admin_route.get("/getAllSupplierShipmentInvoices", adminController.getAllSupplierShipmentInvoices);
+admin_route.post("/deleteSupplierShipmentInvoice", adminController.deleteSupplierShipmentInvoiceById);
+// admin_route.get("/company-addresses", adminController.getCompanyAddresses);
+admin_route.get("/company-addresses", adminController.getCompanyAddressWithBankDetails);
+admin_route.get("/company-address/:id", adminController.getCompanyAddressById);
+admin_route.post("/addOrUpdate-company-address", adminController.addUpdateCountryAddresses);
+admin_route.post("/deleteCountryAddress/:id", adminController.deleteCountryAddress);
+admin_route.post("/addUpdateNewFreightQuoteInvoice", adminController.addUpdateNewFreightQuoteInvoice);
+admin_route.post("/GetNewFreightQuoteInvoiceById", adminController.GetNewFreightQuoteInvoiceById);
+admin_route.get("/getAllNewFreightQuoteInvoices", adminController.getAllNewFreightQuoteInvoices);
+admin_route.post("/deleteNewFreightQuoteInvoice/:quote_invoice_id", adminController.deleteNewFreightQuoteInvoiceById);
+
+admin_route.post("/createQuoteInvoice", adminController.createQuoteInvoice);
+admin_route.get("/getFreightOrderList", adminController.getFreightOrderList);
+admin_route.post("/getCustomerQuotesReport", adminController.getCustomerQuotesReport);
+admin_route.post("/getCustomerInvoicesReport", adminController.getCustomerInvoicesReport);
+admin_route.post("/getCustomerBalancesOutstandingReport", adminController.getCustomerBalancesOutstandingReport);
+admin_route.post("/getCustomerUnallocatedReceiptsReport", adminController.getCustomerUnallocatedReceiptsReport);
+admin_route.post("/GetCustomerQuoteReportById", adminController.GetCustomerQuoteReportById);
+admin_route.post("/getCustomerQuotesByItemReport", adminController.getCustomerQuotesByItemReport);
+admin_route.post("/getSalesByCustomerReport", adminController.getSalesByCustomerReport);
+admin_route.post("/getSalesByCustomerSummaryReport", adminController.getSalesByCustomerSummaryReport);
+admin_route.post("/getSalesByItemReport", adminController.GetSalesByItemReport);
+admin_route.post("/getSalesBySalesRepReport", adminController.getSalesBySalesRepReport);
+admin_route.post("/getSupplierBalancesDaysOutstandingReport", adminController.getSupplierBalancesDaysOutstandingReport);
+admin_route.post("/getSupplierInvoicesReport", adminController.getSupplierInvoicesReport);
 
 module.exports = admin_route;

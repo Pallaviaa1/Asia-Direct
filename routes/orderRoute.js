@@ -51,4 +51,13 @@ order_route.post("/GetBookingInstructionById", orderController.GetBookingInstruc
 order_route.post("/delete-sage-invoice/:id", orderController.DeleteSageInvoice);
 order_route.get("/GetSageInvoiceListByRegion", orderController.GetSageInvoiceListByRegion)
 
+order_route.post("/addUpdateCashbook", orderController.addUpdateCashbook)
+order_route.post("/getCashbookById", orderController.getCashbookById)
+order_route.post("/deleteCashbookById", orderController.deleteCashbookById)
+
+order_route.post("/addUpdateCashbookSplit", orderController.addUpdateCashbookSplit)
+order_route.post("/getCashbookSplitsByCashbookId", orderController.getCashbookSplitsByCashbookId)
+order_route.post("/deleteCashbookSplitByCashbookId", orderController.deleteCashbookSplitByCashbookId)
+order_route.post("/deleteCashbookSplitById", orderController.deleteCashbookSplitById)
+
 module.exports = order_route;

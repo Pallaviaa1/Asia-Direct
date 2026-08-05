@@ -1330,6 +1330,138 @@ const AddClearingByCustomer = async (req, res) => {
     }
 };
 
+const addNewEstimateClearance = async (req, res) => {
+    try {
+        const data = req.body;
+
+        if (!data.clearance_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide clearance_id"
+            });
+        }
+
+        if (!data.client_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide client_id"
+            });
+        }
+
+        const checkQuery = `
+            SELECT id
+            FROM estimate_clearance
+            WHERE clearance_id = ?
+            AND client_id = ?
+        `;
+
+        con.query(
+            checkQuery,
+            [data.clearance_id, data.client_id],
+            (err, result) => {
+
+                if (err) {
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                // ================= UPDATE =================
+
+                if (result.length > 0) {
+
+                    const updateFields = [
+                        'new_customs_duty',
+                        'new_customs_vat',
+                        'new_advalorem_duty',
+                        'new_customs_penalty',
+                        'new_customs_provisional_payments',
+                        'new_clearing_fee',
+                        'new_disbursement',
+                        'new_surcharge',
+                        'new_total_customs_charges'
+                    ];
+
+                    const updateQuery = `
+                        UPDATE estimate_clearance
+                        SET ${updateFields.map(f => `\`${f}\`=?`).join(', ')}
+                        WHERE id = ?
+                    `;
+
+                    const updateParams = updateFields.map(
+                        field => data[field] ?? null
+                    );
+
+                    updateParams.push(result[0].id);
+
+                    con.query(updateQuery, updateParams, (err) => {
+
+                        if (err) {
+                            return res.status(500).send({
+                                success: false,
+                                message: err.message
+                            });
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Estimate clearance updated successfully"
+                        });
+                    });
+
+                }
+
+                // ================= INSERT =================
+
+                else {
+
+                    const insertData = {
+                        clearance_id: data.clearance_id,
+                        client_id: data.client_id,
+
+                        new_customs_duty: data.new_customs_duty || 0,
+                        new_customs_vat: data.new_customs_vat || 0,
+                        new_advalorem_duty: data.new_advalorem_duty || 0,
+                        new_customs_penalty: data.new_customs_penalty || 0,
+                        new_customs_provisional_payments: data.new_customs_provisional_payments || 0,
+                        new_clearing_fee: data.new_clearing_fee || 0,
+                        new_disbursement: data.new_disbursement || 0,
+                        new_surcharge: data.new_surcharge || 0,
+                        new_total_customs_charges: data.new_total_customs_charges || 0
+                    };
+
+                    con.query(
+                        `INSERT INTO estimate_clearance SET ?`,
+                        insertData,
+                        (err, insertResult) => {
+
+                            if (err) {
+                                return res.status(500).send({
+                                    success: false,
+                                    message: err.message
+                                });
+                            }
+
+                            return res.status(200).send({
+                                success: true,
+                                message: "Estimate clearance added successfully",
+                                id: insertResult.insertId
+                            });
+                        }
+                    );
+                }
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 // const handleFile_Uploads = async (clearanceId, files, clearanceNumber) => {
 //     try {
@@ -7788,15 +7920,15 @@ const getAssignShipmentList = async (req, res) => {
         let params;
 
         if (type == 1) {
-            query = `SELECT 
-                      o.id AS order_id, 
+            query = `SELECT
+                      o.id AS order_id,
                       o.client_id,
-                      COALESCE(o.weight, f.weight) AS weight, 
-                      COALESCE(o.dimensions, f.dimension) AS dimensions, 
-                      COALESCE(f.nature_of_goods, '') AS nature_of_goods, 
-                      f.freight_number AS freight_number, 
+                      COALESCE(o.weight, f.weight) AS weight,
+                      COALESCE(o.dimensions, f.dimension) AS dimensions,
+                      COALESCE(f.nature_of_goods, '') AS nature_of_goods,
+                      f.freight_number AS freight_number,
                       CONCAT('OR000', o.id) AS order_number,
-                      CASE 
+                      CASE
                           WHEN o.client_id = 0 THEN o.client_name
                           ELSE u.full_name
                       END AS client_name
@@ -7808,49 +7940,59 @@ const getAssignShipmentList = async (req, res) => {
             params = [id, origin_country_id, des_country_id];
 
         } else if (type == 2) {
-            query = `SELECT 
-                      b.*, 
+            query = `SELECT
+                      b.id,
+                      b.freight_id,
+                      b.batch_id,
+                      b.assigned_at,
+                      COALESCE(b.order_id, o.id) AS order_id,
+                      b.is_assign_shipment,
                       bt.batch_number,
-                      o.id AS order_id, 
-                      o.client_id,
-                      COALESCE(o.weight, f.weight) AS weight, 
-                      COALESCE(o.dimensions, f.dimension) AS dimensions, 
-                      COALESCE(f.nature_of_goods, '') AS nature_of_goods, 
-                      f.freight_number AS freight_number, 
-                      CONCAT('OR000', o.id) AS order_number,
-                      CASE 
-                          WHEN o.client_id = 0 THEN o.client_name
-                          ELSE u.full_name
+                      COALESCE(o.client_id, f.client_id) AS client_id,
+                      COALESCE(o.weight, f.weight) AS weight,
+                      COALESCE(o.dimensions, f.dimension) AS dimensions,
+                      COALESCE(f.nature_of_goods, '') AS nature_of_goods,
+                      f.freight_number AS freight_number,
+                      CASE
+                          WHEN COALESCE(b.order_id, o.id) IS NULL THEN NULL
+                          ELSE CONCAT('OR000', COALESCE(b.order_id, o.id))
+                      END AS order_number,
+                      CASE
+                          WHEN COALESCE(NULLIF(o.client_id, 0), NULLIF(f.client_id, 0)) IS NOT NULL
+                              THEN COALESCE(u.full_name, NULLIF(o.client_name, ''), f.client_name)
+                          ELSE COALESCE(NULLIF(o.client_name, ''), f.client_name)
                       END AS client_name
                   FROM freight_assig_to_batch AS b
                   LEFT JOIN batches AS bt ON bt.id = b.batch_id
-                  LEFT JOIN tbl_freight AS f ON b.freight_id = f.id
-                  LEFT JOIN tbl_orders AS o ON o.freight_id = f.id
-                  LEFT JOIN tbl_users AS u ON u.id = o.client_id
+                  LEFT JOIN tbl_orders AS o
+                    ON o.id = b.order_id
+                    OR (b.order_id IS NULL AND b.freight_id IS NOT NULL AND o.freight_id = b.freight_id)
+                  LEFT JOIN tbl_freight AS f ON f.id = COALESCE(b.freight_id, o.freight_id)
+                  LEFT JOIN tbl_users AS u ON u.id = COALESCE(NULLIF(o.client_id, 0), NULLIF(f.client_id, 0))
                   WHERE b.batch_id = ?
                     AND bt.origin_country_id = ?
                     AND bt.detination_country_id = ?
-                    AND is_assign_shipment = ?
+                    AND b.is_assign_shipment = ?
                   ORDER BY b.assigned_at DESC`;
 
             params = [id, origin_country_id, des_country_id, 0];
 
         } else if (type == 3) {
-            query = `SELECT 
+            query = `SELECT
                         co.*,
                         co.id AS clearance_order_id,
-
+ 
                         c.*,
                         c.id AS clearance_id,
                         c.clearance_number,
                         c.clearing_status,
                         c.freight,
-
-                        a.name AS discharge_country, 
+ 
+                        a.name AS discharge_country,
                         b.name AS loading_country,
-
+ 
                         u.full_name AS client_name
-
+ 
                     FROM clearance_order co
                     INNER JOIN tbl_clearance c ON c.id = co.clearance_id
                     INNER JOIN tbl_users u ON u.id = co.user_id
@@ -7894,6 +8036,42 @@ const getAssignShipmentList = async (req, res) => {
         res.status(500).send({
             success: false,
             message: error.message,
+        });
+    }
+};
+
+const getFreightDropdown = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                f.id AS freight_id,
+                f.freight_number,
+                f.client_id,
+                u.client_number
+            FROM tbl_freight AS f
+            LEFT JOIN tbl_users AS u ON u.id = f.client_id
+            WHERE f.is_deleted = 0
+            ORDER BY f.id DESC
+        `;
+
+        con.query(query, (err, data) => {
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                message: "Freight list fetched successfully",
+                data: data
+            });
+        });
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
         });
     }
 };
@@ -8711,6 +8889,7 @@ cron.schedule('0 0 * * *', () => {
     notifyDisputesUnresolved7Days();
 });
 
+
 module.exports = {
     AddCustomer, GetClientList, Get_ClientList, updateClient, GetClientById, DeleteClient, GetClientFreights, AddClearing,
     EditClearing, GetClearingList, GetClearingById, Deleteclearance, customerRegister, CustomerLogin,
@@ -8718,7 +8897,7 @@ module.exports = {
     DeleteAllNotification, UpdateClientProfile, AddClearingByCustomer, GetClearingClient, AcceptQuotation,
     GetShipEstimate, RejectQuotation, orderDetails, UserforgotPassword, UserResetPassword, findHsCode, getListClearanceQuotation,
     uploadClrearanceDOC, CleranceOrderList, addQueries, getContactUs, addContactUs, updateQuery, getQueries, getQueriesByUserId, deleteQueries, addCommodity,
-    getCommodities, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
+    getCommodities, getFreightDropdown, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
     UpdateShipment, DeleteShipment, addWareProductByUser, AssignFreightToClearing, AssignToClearing, CopyShipment, DeleteShipmentDetails, GetShipmentDetails, getShipmentbyid, AssignBatchOrdersToClearing,
-    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus
+    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus, addNewEstimateClearance
 }

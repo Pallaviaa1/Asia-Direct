@@ -19,6 +19,7 @@ const clearance_route = require('./routes/clearanceRoute');
 const upload_route = require('./routes/uploadRoute')
 const invoice_route = require('./routes/invoiceRoute')
 const chatRoutes = require('./routes/chatRoute');
+const { router: aiChatRoute, startCleanup: startAiChatCleanup, demoHtmlPath } = require('./ai');
 
 
 var PORT = process.env.PORT || 7000
@@ -32,6 +33,11 @@ app.use(bodyparser.json());
 app.use(express.json());
 app.use(bodyparser.urlencoded({ extended: true }));
 app.use(express.static('public'));
+
+// Workspace AI demo UI (lives under ai/demo; React app will replace this later)
+app.get('/ai-chat.html', (req, res) => {
+  res.sendFile(demoHtmlPath);
+});
 
 
 // ============================
@@ -50,7 +56,7 @@ require('./socket/chat.socket')(io);
 const message = "hii"
 app.get('/check', async (req, res) => {
   try {
-    // Remove sendSms if you're not allowed to send SMS to India
+    // ⚠️ Remove sendSms if you're not allowed to send SMS to India
     // await sendSms('+918340721420', message);
 
     const whatsappResponse = await sendWhatsApp('+918341721421', message);
@@ -134,7 +140,7 @@ app.get('/', async (req, res) => {
 });
 
 
-// TEST WHATSAPP API
+// ✅ TEST WHATSAPP API
 app.get('/api/test-whatsapp', async (req, res) => {
   try {
     const testFreight = {
@@ -184,15 +190,19 @@ app.use('/api', clearance_route);
 app.use('/api', upload_route)
 app.use('/api', invoice_route)
 app.use('/api', chatRoutes);
+app.use('/api', aiChatRoute);
+
+// AI chat history: purge sessions past inactivity TTL (expires_at)
+startAiChatCleanup();
 
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err); //  log all unhandled errors
+  logger.error('Unhandled error:', err); // ✅ log all unhandled errors
   res.status(500).json({ message: 'Internal server error' });
 });
 
 // app.listen(PORT, (err) => {
 //   if (err) {
-//     logger.error('Server start error:', err); //  log server error
+//     logger.error('Server start error:', err); // ✅ log server error
 //     throw err;
 //   }
 //   else {

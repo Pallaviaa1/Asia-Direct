@@ -242,7 +242,7 @@ const AttachedShippingEstimate = async (req, res) => {
 
                 const clearanceNumber = result[0].clearance_number;
 
-                // Upload to Google Drive → Quotations → AD_Quotations (for clearance)
+                // 🔽 Upload to Google Drive → Quotations → AD_Quotations (for clearance)
                 /*  const quotationsFolderId = await findOrCreateFolder("Quotations", clearanceNumber);
                  const adQuotationsFolderId = await findOrCreateFolder("AD_Quotations", quotationsFolderId);
  

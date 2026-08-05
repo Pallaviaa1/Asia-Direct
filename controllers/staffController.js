@@ -3,7 +3,6 @@ const { validationResult, Result } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const sendMail = require('../helpers/sendMail')
 const rendomString = require('randomstring');
-const e = require('express');
 
 async function hashPassword(password) {
     return await bcrypt.hash(password, 10);
@@ -1275,7 +1274,7 @@ const assignFreightToStaff = async (req, res) => {
 
         // CHECK STAFF
         con.query(
-            `SELECT id
+            `SELECT id , full_name, email
              FROM tbl_users
              WHERE id = ?
              AND user_type = 2
@@ -1296,6 +1295,8 @@ const assignFreightToStaff = async (req, res) => {
                         message: "Staff not found or inactive"
                     });
                 }
+
+                const staff = staffResult[0];
 
                 //  GET FREIGHT WITH PRIORITY
                 con.query(
@@ -1324,10 +1325,17 @@ const assignFreightToStaff = async (req, res) => {
                         //  UPDATE FREIGHT ASSIGNMENT
                         con.query(
                             `UPDATE tbl_freight
-                             SET sales_representative = ?,
-                                 updated_at = NOW()
-                             WHERE id = ?`,
-                            [staff_id, freight_id],
+                            SET sales_representative = ?,
+                                sales_representative_name = ?,
+                                sales_representative_email = ?,
+                                updated_at = NOW()
+                            WHERE id = ?`,
+                            [
+                                staff.id,
+                                staff.full_name,
+                                staff.email,
+                                freight_id
+                            ],
                             (err) => {
 
                                 if (err) {
@@ -2589,6 +2597,7 @@ const ClientKPIModule = async (req, res) => {
         });
     }
 };
+
 module.exports = {
     AddStaff, DeleteStaff, GetStaffList, ChangeStatus, updateStaff, GetAllPermissions, updateStaffPermission,
     getStaffPermissionsById, CheckPermission, NewStaffList, getStaffNewFreight, getStaffConfirmedOrders,
@@ -2596,28 +2605,3 @@ module.exports = {
     getAllAssignedFreightsSatff, assignClearanceToStaff, createCustomTask, getAllAssignedClearanceSatff, getAllCustomTasks, updateTaskStatus,
     getTasksByStaffId, addTaskComment, getTaskComments, ClientKPIModule
 }
-
-/* employees
----------
-id
-name
-department_id
-salary
-joining_date */
-
-
-// select * from ( select * ROW_NUMBER() OVER(PARTITION BY departemnt_id ORDER BY salary DESC) as high_salary  from employees) as e where e.high_salary =1
-
-// Q12 Get the highest-paid employee from each department using ROW_NUMBER().
-// Q12 Rank employees by salary.
-// Q14 Rank employees within each department.
-// Q15 Find the top 3 salaries in the company using RANK().
-// Q16 Find the 2nd highest salary in the company.
-
-// Q17 Find the 3rd highest salary in the company.
-
-// Q18 Find employees having the highest salary in each department.
-
-// Q19 Find employees having the 2nd highest salary in each department.
-
-// Q20 Find the top 3 highest-paid employees in each department.

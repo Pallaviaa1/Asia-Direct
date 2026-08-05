@@ -2755,6 +2755,721 @@ const GetCashbookList = async (req, res) => {
     }
 };
 
+const addUpdateCashbook = async (req, res) => {
+    try {
+
+        const {
+            cashbook_id,
+            date,
+            bank_ref,
+            description_on_receipt,
+            receipt
+        } = req.body;
+
+        // Required validations
+        if (!date) {
+            return res.status(400).json({
+                success: false,
+                message: "Date is required."
+            });
+        }
+
+        if (!bank_ref) {
+            return res.status(400).json({
+                success: false,
+                message: "Bank Reference is required."
+            });
+        }
+
+        if (!description_on_receipt) {
+            return res.status(400).json({
+                success: false,
+                message: "Description of Receipt is required."
+            });
+        }
+
+        if (receipt === undefined || receipt === null || receipt === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Receipt amount is required."
+            });
+        }
+
+        if (isNaN(receipt) || Number(receipt) <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Receipt amount must be greater than zero."
+            });
+        }
+
+        // Check duplicate Bank Reference
+        const duplicateQuery = `
+            SELECT id
+            FROM tbl_cashbook
+            WHERE bank_ref = ?
+            ${cashbook_id ? "AND id != ?" : ""}
+            LIMIT 1
+        `;
+
+        const duplicateParams = cashbook_id
+            ? [bank_ref.trim(), cashbook_id]
+            : [bank_ref.trim()];
+
+        con.query(duplicateQuery, duplicateParams, (duplicateErr, duplicateResult) => {
+
+            if (duplicateErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: duplicateErr.message
+                });
+            }
+
+            if (duplicateResult.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Bank Reference already exists."
+                });
+            }
+
+            // UPDATE
+            if (cashbook_id) {
+
+                const updateQuery = `
+                    UPDATE tbl_cashbook
+                    SET
+                        date = ?,
+                        bank_ref = ?,
+                        description_on_receipt = ?,
+                        receipt = ?
+                    WHERE id = ?
+                `;
+
+                con.query(
+                    updateQuery,
+                    [
+                        date,
+                        bank_ref.trim(),
+                        description_on_receipt.trim(),
+                        receipt,
+                        cashbook_id
+                    ],
+                    (updateErr, updateResult) => {
+
+                        if (updateErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: updateErr.message
+                            });
+                        }
+
+                        if (updateResult.affectedRows === 0) {
+                            return res.status(404).json({
+                                success: false,
+                                message: "Cashbook record not found."
+                            });
+                        }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Cashbook updated successfully."
+                        });
+
+                    }
+                );
+
+            } else {
+
+                // INSERT
+                const insertQuery = `
+                    INSERT INTO tbl_cashbook
+                    (
+                        date,
+                        bank_ref,
+                        description_on_receipt,
+                        receipt
+                    )
+                    VALUES
+                    (?, ?, ?, ?)
+                `;
+
+                con.query(
+                    insertQuery,
+                    [
+                        date,
+                        bank_ref.trim(),
+                        description_on_receipt.trim(),
+                        receipt
+                    ],
+                    (insertErr, insertResult) => {
+
+                        if (insertErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: insertErr.message
+                            });
+                        }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Cashbook added successfully.",
+                            cashbook_id: insertResult.insertId
+                        });
+
+                    }
+                );
+
+            }
+
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getCashbookById = async (req, res) => {
+    try {
+
+        const { cashbook_id } = req.body;
+
+        if (!cashbook_id) {
+            return res.status(400).json({
+                success: false,
+                message: "cashbook_id is required."
+            });
+        }
+
+        const query = `
+            SELECT
+                id as cashbook_id,
+                date,
+                bank_ref,
+                description_on_receipt,
+                receipt,
+                payment,
+                customer_id,
+                order_id,
+                allocated,
+                created_at
+            FROM tbl_cashbook
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(query, [cashbook_id], (err, result) => {
+
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            if (result.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cashbook record not found."
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Cashbook details fetched successfully.",
+                data: result[0]
+            });
+
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const deleteCashbookById = async (req, res) => {
+    try {
+
+        const { cashbook_id } = req.body;
+
+        if (!cashbook_id) {
+            return res.status(400).json({
+                success: false,
+                message: "cashbook_id is required."
+            });
+        }
+
+        // Check if record exists
+        const checkQuery = `
+            SELECT id
+            FROM tbl_cashbook
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(checkQuery, [cashbook_id], (checkErr, checkResult) => {
+
+            if (checkErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cashbook record not found."
+                });
+            }
+
+            // Delete record
+            const deleteQuery = `
+                DELETE FROM tbl_cashbook
+                WHERE id = ?
+            `;
+
+            con.query(deleteQuery, [cashbook_id], (deleteErr, deleteResult) => {
+
+                if (deleteErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: deleteErr.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Cashbook deleted successfully."
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const addUpdateCashbookSplit = async (req, res) => {
+    try {
+
+        const { cashbook_id, splits } = req.body;
+
+        if (!cashbook_id) {
+            return res.status(400).json({
+                success: false,
+                message: "cashbook_id is required."
+            });
+        }
+
+        if (!Array.isArray(splits) || splits.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "At least one split is required."
+            });
+        }
+
+        // Check duplicate order_id
+        const orderIds = splits.map(item => item.order_id);
+        const uniqueOrderIds = [...new Set(orderIds)];
+
+        if (orderIds.length !== uniqueOrderIds.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Duplicate order selected."
+            });
+        }
+
+        // Validate split rows
+        for (const item of splits) {
+
+            if (!item.order_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: "order_id is required."
+                });
+            }
+
+            if (
+                item.allocated_amount === undefined ||
+                item.allocated_amount === null ||
+                Number(item.allocated_amount) <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Valid allocated_amount is required."
+                });
+            }
+        }
+
+        // Get Cashbook Details
+        const cashbookQuery = `
+            SELECT
+                receipt,
+                customer_id,
+                order_id
+            FROM tbl_cashbook
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(cashbookQuery, [cashbook_id], (cashbookErr, cashbookResult) => {
+
+            if (cashbookErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: cashbookErr.message
+                });
+            }
+
+            if (cashbookResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cashbook record not found."
+                });
+            }
+
+            // Customer & Order validation
+            if (
+                !cashbookResult[0].customer_id ||
+                !cashbookResult[0].order_id
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Please select a customer and an order first from cashbook."
+                });
+            }
+
+            const receiptAmount = Number(cashbookResult[0].receipt);
+
+            const totalAllocated = splits.reduce(
+                (sum, item) => sum + Number(item.allocated_amount),
+                0
+            );
+
+            if (totalAllocated > receiptAmount) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Allocated amount cannot exceed receipt amount."
+                });
+            }
+
+            // Delete existing splits
+            const deleteQuery = `
+                DELETE FROM tbl_cashbook_splits
+                WHERE cashbook_id = ?
+            `;
+
+            con.query(deleteQuery, [cashbook_id], (deleteErr) => {
+
+                if (deleteErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: deleteErr.message
+                    });
+                }
+
+                const values = splits.map(item => [
+                    cashbook_id,
+                    item.order_id,
+                    item.allocated_amount
+                ]);
+
+                const insertQuery = `
+                    INSERT INTO tbl_cashbook_splits
+                    (
+                        cashbook_id,
+                        order_id,
+                        allocated_amount
+                    )
+                    VALUES ?
+                `;
+
+                con.query(insertQuery, [values], (insertErr) => {
+
+                    if (insertErr) {
+                        return res.status(500).json({
+                            success: false,
+                            message: insertErr.message
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        message: "Cashbook split saved successfully."
+                    });
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const getCashbookSplitsByCashbookId = async (req, res) => {
+    try {
+
+        const { cashbook_id } = req.body;
+
+        if (!cashbook_id) {
+            return res.status(400).json({
+                success: false,
+                message: "cashbook_id is required."
+            });
+        }
+
+        // Check Cashbook Exists
+        const checkQuery = `
+            SELECT id
+            FROM tbl_cashbook
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(checkQuery, [cashbook_id], (checkErr, checkResult) => {
+
+            if (checkErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cashbook record not found."
+                });
+            }
+
+            const query = `
+                SELECT
+                    cs.id as split_id,
+                    cs.cashbook_id,
+                    cs.order_id,
+                    o.order_number,
+                    cs.allocated_amount,
+                    cs.created_at,
+                    cs.updated_at
+                FROM tbl_cashbook_splits cs
+                LEFT JOIN tbl_orders o
+                    ON o.id = cs.order_id
+                WHERE cs.cashbook_id = ?
+                ORDER BY cs.id ASC
+            `;
+
+            con.query(query, [cashbook_id], (err, result) => {
+
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Cashbook split details fetched successfully.",
+                    data: result
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const deleteCashbookSplitByCashbookId = async (req, res) => {
+    try {
+
+        const { cashbook_id } = req.body;
+
+        if (!cashbook_id) {
+            return res.status(400).json({
+                success: false,
+                message: "cashbook_id is required."
+            });
+        }
+
+        // Check Cashbook Exists
+        const checkCashbookQuery = `
+            SELECT id
+            FROM tbl_cashbook
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(checkCashbookQuery, [cashbook_id], (checkErr, checkResult) => {
+
+            if (checkErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cashbook record not found."
+                });
+            }
+
+            // Check Split Exists
+            const checkSplitQuery = `
+                SELECT id
+                FROM tbl_cashbook_splits
+                WHERE cashbook_id = ?
+            `;
+
+            con.query(checkSplitQuery, [cashbook_id], (splitErr, splitResult) => {
+
+                if (splitErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: splitErr.message
+                    });
+                }
+
+                if (splitResult.length === 0) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "No split records found."
+                    });
+                }
+
+                // Delete Splits
+                const deleteQuery = `
+                    DELETE FROM tbl_cashbook_splits
+                    WHERE cashbook_id = ?
+                `;
+
+                con.query(deleteQuery, [cashbook_id], (deleteErr) => {
+
+                    if (deleteErr) {
+                        return res.status(500).json({
+                            success: false,
+                            message: deleteErr.message
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        message: "Cashbook split deleted successfully."
+                    });
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const deleteCashbookSplitById = async (req, res) => {
+    try {
+
+        const { split_id } = req.body;
+
+        if (!split_id) {
+            return res.status(400).json({
+                success: false,
+                message: "split_id is required."
+            });
+        }
+
+        // Check Split Exists
+        const checkQuery = `
+            SELECT id
+            FROM tbl_cashbook_splits
+            WHERE id = ?
+            LIMIT 1
+        `;
+
+        con.query(checkQuery, [split_id], (checkErr, checkResult) => {
+
+            if (checkErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Split record not found."
+                });
+            }
+
+            // Delete Split
+            const deleteQuery = `
+                DELETE FROM tbl_cashbook_splits
+                WHERE id = ?
+            `;
+
+            con.query(deleteQuery, [split_id], (deleteErr) => {
+
+                if (deleteErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: deleteErr.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Split deleted successfully."
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
 const GetSageInvoiceDetails = async (req, res) => {
     try {
         const { sage_invoice_id } = req.body;
@@ -3192,5 +3907,6 @@ module.exports = {
     GetDeliveryDetails, UploadExcelShipment, UploadExcelShipmentOrder, UploadExcelFullOrderDetails,
     UploadExcelBatch, UploadExcelWarehouse, editBatch, deleteBatche, UploadSageInvoiceLlist, GetSageInvoiceList, UploadCashbookList,
     GetCashbookList, GetSageInvoiceDetails, checkNumber, TransactionAllocation, AddOrUpdateBookingInstruction, GetBookingInstructionById,
-    DeleteSageInvoice, GetSageInvoiceListByRegion, GetSageInvoiceDropdown
+    DeleteSageInvoice, GetSageInvoiceListByRegion, GetSageInvoiceDropdown, addUpdateCashbook, getCashbookById, deleteCashbookById,
+    addUpdateCashbookSplit, getCashbookSplitsByCashbookId, deleteCashbookSplitByCashbookId, deleteCashbookSplitById
 }

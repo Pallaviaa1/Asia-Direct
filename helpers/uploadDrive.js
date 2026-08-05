@@ -111,8 +111,7 @@ const nestedFolderStructure = {
     "Freight documents": [
         "Waybills",
         "Warehouse Entry Docs",
-        "Supplier Invoices",
-        "Delivery note"
+        "Supplier Invoices"
     ],
     "Supplier Invoices": [
         "Invoice, Packing List",
@@ -121,9 +120,7 @@ const nestedFolderStructure = {
     ],
     "Quotations": [
         "AD_Invoice",
-        "AD_Quotations",
-        "Invoice (AD)",
-        "POP (AD)"
+        "AD_Quotations"
     ],
     "Proof of Delivery": [
         "Delivery note",
@@ -146,7 +143,7 @@ const findOrCreateFolder = async (freightNumber) => {
             // console.log(` Created: ${freightNumber}/${mainFolder}/${sub}`);
         }
     }
-    return freightFolderId;
+    return freightFolderId; 
     // console.log(" Entire folder structure created.");
 };
 
@@ -250,7 +247,7 @@ const uploadToSpecificPath = async (freightNumber, mainFolder, subFolder, file) 
 
 const findFolderId = async (folderName, parentId = null) => {
     try {
-        const drive = await authenticateGoogleDrive(); // get the authenticated client
+        const drive = await authenticateGoogleDrive(); // ✅ get the authenticated client
 
         const res = await drive.files.list({
             q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}'` +
@@ -272,17 +269,17 @@ const findFolderId = async (folderName, parentId = null) => {
 const deleteFolderByName = async (folderName, parentId = null) => {
     try {
         const drive = await authenticateGoogleDrive();
-
+        
         // Step 1: Find folder ID
         const folderId = await findFolderId(folderName, parentId);
         if (!folderId) {
-            console.log(`Folder "${folderName}" not found in Google Drive`);
+            console.log(`❌ Folder "${folderName}" not found in Google Drive`);
             return false;
         }
 
         // Step 2: Permanently delete folder
         await drive.files.delete({ fileId: folderId });
-        console.log(`Folder "${folderName}" (ID: ${folderId}) deleted from Google Drive`);
+        console.log(`✅ Folder "${folderName}" (ID: ${folderId}) deleted from Google Drive`);
         return true;
     } catch (err) {
         console.error("Error deleting folder:", err.message);

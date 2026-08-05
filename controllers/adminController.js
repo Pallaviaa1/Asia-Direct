@@ -831,237 +831,6 @@ const GetTerms = async (req, res) => {
 }
 
 
-// const GetFreightAdmin = async (req, res) => {
-//     const { status, priority, origin, destination, startDate, endDate, freightType, freightSpeed, user_id, user_type, search, page = 1, limit = 10 } = req.body;
-
-//     try {
-//         let userCountry = null;
-
-//         if (user_id) {
-//             const userQuery = `
-//                 SELECT country 
-//                 FROM tbl_users 
-//                 WHERE id = ? AND is_deleted = 0
-//             `;
-
-//             const userData = await new Promise((resolve, reject) => {
-//                 con.query(userQuery, [user_id], (err, rows) => {
-//                     if (err) return reject(err);
-//                     resolve(rows);
-//                 });
-//             });
-
-//             if (!userData.length) {
-//                 return res.status(404).send({
-//                     success: false,
-//                     message: "User not found"
-//                 });
-//             }
-
-//             userCountry = userData[0].country;
-//         }
-
-//         /* ==================== STEP 2: BASE CONDITION ==================== */
-//         let condition = `
-//             WHERE tbl_freight.is_deleted = ?
-//             AND tbl_freight.added_by = ?
-//             AND tbl_freight.order_status = ?
-//         `;
-//         let params = [0, 1, 0];
-
-//         /* ==================== STEP 3: COUNTRY MATCH CONDITION ==================== */
-//         if (userCountry) {
-//             condition += `
-//                 AND (
-//                     tbl_freight.collection_from = ?
-//                     OR tbl_freight.delivery_to = ?
-//                 )
-//             `;
-//             params.push(userCountry, userCountry);
-//         }
-
-//         if (status) {
-//             condition += ' AND tbl_freight.status = ?';
-//             params.push(status);
-//         }
-
-//         if (priority) {
-//             condition += ' AND tbl_freight.priority = ?';
-//             params.push(priority);
-//         }
-
-//         if (origin) {
-//             condition += ' AND tbl_freight.collection_from = ?';
-//             params.push(origin);
-//         }
-
-//         if (destination) {
-//             condition += ' AND tbl_freight.delivery_to = ?';
-//             params.push(destination);
-//         }
-
-//         if (startDate && endDate) {
-//             condition += ' AND tbl_freight.date BETWEEN ? AND ?';
-//             params.push(startDate, endDate);
-//         }
-
-//         if (freightType) {
-//             condition += ' AND tbl_freight.freight = ?';
-//             params.push(freightType);
-//         }
-
-//         if (freightSpeed) {
-//             condition += ' AND tbl_freight.type = ?';
-//             params.push(freightSpeed);
-//         }
-
-//         // Add global search condition across multiple fields
-//         if (search) {
-//             condition += ` AND (
-//                 tbl_freight.freight_number LIKE ?
-//                 OR tbl_users.full_name LIKE ?
-//                 OR tbl_users.email LIKE ?
-//                 OR tbl_freight.product_desc LIKE ?
-//                 OR cm.name LIKE ?
-//                 OR tbl_freight.shipper_name LIKE ?
-//                 OR tbl_freight.shipment_details LIKE ?
-//                 OR tbl_freight.comment LIKE ?
-//                 OR ss.full_name LIKE ?
-//                 OR ts.name LIKE ?
-//                 OR c.name LIKE ?
-//                 OR co.name LIKE ?
-//             )`;
-//             const searchParam = `%${search}%`;
-//             params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
-//         }
-
-//         const All_access_USER_ID = 19855;
-
-//         if (user_type === 2 && user_id != null && user_id !== All_access_USER_ID) {
-//             condition += ' AND (tbl_freight.user_id = ? OR tbl_freight.sales_representative = ?)';
-//             params.push(user_id, user_id);
-//         }
-
-//         // Build base query for joins and conditions (without GROUP BY for count)
-//         const baseQueryWithoutGroup = `
-//             FROM tbl_freight
-//             LEFT JOIN tbl_suppliers as ts on ts.id = tbl_freight.supplier_task_assign_id
-//             LEFT JOIN estimate_shipping_quote AS esq ON esq.freight_id = tbl_freight.id
-//             LEFT JOIN tbl_users AS ss ON ss.id = tbl_freight.sales_representative
-//             LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
-//             LEFT JOIN countries AS c ON c.id = tbl_freight.delivery_to
-//             LEFT JOIN countries AS co ON co.id = tbl_freight.collection_from
-//             LEFT JOIN shipping_estimate  AS s ON s.freight_id = tbl_freight.id
-//             LEFT JOIN tbl_commodity  AS cm ON cm.id = tbl_freight.commodity
-//             ${condition}
-//         `;
-
-//         // Build base query for joins and conditions (with GROUP BY for data)
-//         const baseQuery = `${baseQueryWithoutGroup}
-//             GROUP BY tbl_freight.id
-//         `;
-
-//         // Query for total count
-//         const countQuery = `SELECT COUNT(DISTINCT tbl_freight.id) as total ${baseQueryWithoutGroup}`;
-//         const totalResult = await new Promise((resolve, reject) => {
-//             con.query(countQuery, params, (err, rows) => {
-//                 if (err) return reject(err);
-//                 resolve(rows);
-//             });
-//         });
-//         const total = totalResult[0].total;
-
-//         // Calculate offset for pagination
-//         const offset = (page - 1) * limit;
-
-//         // Full select query with pagination
-//         const selectQuery = `
-//             SELECT
-//             tbl_freight.id as freight_id, tbl_freight.attachment_Estimate, tbl_freight.isConfirmed, tbl_freight.sales_representative as sales_id, ss.full_name as sales_name,  tbl_freight.fcl_lcl, tbl_users.*, tbl_users.id as user_id, tbl_users.full_name as client_name, tbl_users.email as client_email, tbl_users.client_number AS client_number, tbl_freight.product_desc,
-//                 tbl_freight.client_id as client_ref, tbl_freight.date, tbl_freight.type, tbl_freight.freight, tbl_freight.incoterm, tbl_freight.dimension, tbl_freight.weight,
-//                 tbl_freight.quote_received, tbl_freight.client_quoted, tbl_freight.status, tbl_freight.comment, tbl_freight.no_of_packages, tbl_freight.package_type,
-//                 tbl_freight.commodity, cm.name as commodity_name, tbl_freight.shipper_name, tbl_freight.hazardous, tbl_freight.collection_from, tbl_freight.delivery_to, tbl_freight.supplier_address, tbl_freight.shipment_origin, tbl_freight.shipment_des,
-//                 tbl_freight.port_of_loading, tbl_freight.post_of_discharge, tbl_freight.place_of_delivery, tbl_freight.ready_for_collection,
-//                 tbl_freight.transit_time, tbl_freight.priority, tbl_freight.added_by, tbl_freight.freight_number, tbl_freight.shipment_details,
-//                 tbl_freight.nature_of_hazard, tbl_freight.volumetric_weight, tbl_freight.assign_for_estimate, tbl_freight.assign_to_transporter,
-//                 tbl_freight.is_active, tbl_freight.add_attachments, tbl_freight.add_attachment_file, tbl_freight.assign_warehouse, tbl_freight.order_status, tbl_freight.created_at as freight_created_at, tbl_freight.assign_to_clearing, tbl_freight.send_to_warehouse, tbl_freight.client_ref_name, tbl_freight.shipment_ref, tbl_freight.insurance, c.name as delivery_to_name, co.name as collection_from_name, 
-//                     s.origin_pick_up AS estimate_origin_pick_up, s.Supplier_Quote_Amount AS estimate_Supplier_Quote_Amount,
-//                     s.freight_currency AS estimate_freight_currency, s.freight_amount AS estimate_freight_amount,
-//                     s.origin_customs AS estimate_origin_customs, 
-//                     s.origin_customs_gp AS estimate_origin_customs_gp,
-//                     s.origin_customs AS estimate_origin_customs, 
-//                     s.origin_document AS estimate_origin_document, 
-//                     s.origin_document_gp AS estimate_origin_document_gp,
-//                     s.origin_warehouse AS estimate_origin_warehouse, 
-//                     s.origin_warehouse_gp AS estimate_origin_warehouse_gp, 
-//                     s.des_warehouse AS estimate_des_warehouse, 
-//                     s.des_warehouse_gp AS estimate_des_warehouse_gp, 
-//                     s.des_delivery AS estimate_des_delivery, 
-//                     s.des_delivery_gp AS estimate_des_delivery_gp,
-//                     s.freight_amount as estimate_freight_amount,
-//                     s.id as estimate_id,
-//     s.freight_gp as estimate_freight_gp,
-//     s.origin_port_fees as estimate_origin_port_fees,
-//     s.origin_port_fees_gp as estimate_origin_port_fees_gp,
-//     s.des_customs_gp as estimate_des_customs_gp,
-//     s.des_customs as estimate_des_customs,
-//     s.des_document as estimate_des_document,
-//     s.des_document_gp as estimate_des_document_gp,
-//     s.des_port_fees as estimate_des_port_fees,
-//     s.des_port_fees_gp as estimate_des_port_fees_gp,
-//     s.des_unpack as estimate_des_unpack,
-//     s.des_unpack_gp as estimate_des_unpack_gp,
-//     s.des_other as estimate_des_other,
-//     s.des_other_gp as estimate_des_other_gp,
-//     s.des_other as estimate_des_other,
-//     s.des_currency as estimate_des_currency,
-//     s.freigh_amount as estimate_freigh_amount,
-//     s.origin_amount as estimate_origin_amount,
-//     s.des_amount as estimate_des_amount,
-//     s.sub_amount as estimate_sub_amount,
-//     s.exchange_rate as estimate_exchange_rate,
-//     s.total_amount as estimate_total_amount,
-//     s.Supplier_Quote_Attachment as estimate_Supplier_Quote_Attachment,
-//     s.Supplier_Quote_Amount as estimate_Supplier_Quote_Amount,
-//     s.serial_number as estimate_serial_number,
-//     COUNT(s.freight_id) AS estimate_count,
-//             ts.name as assigned_supplier_name,
-//                 esq.id as quote_estimate_id,
-//                 esq.freight_id AS quote_freight_id,
-//                 esq.client_id AS quote_client_id,
-//                 esq.supplier_id AS quote_supplier_id,
-//                 esq.serial_number AS quote_serial_number,
-//                 esq.date AS quote_date,
-//                 esq.client_ref AS quote_client_ref,
-//                 esq.totalChageswithOutExchange AS quote_total_without_exchange,
-//                 esq.totalChangeRoeOrigin AS quote_total_roe_origin,
-//                 esq.sumofall AS quote_grand_total,
-//                 esq.sumofRoe AS quote_grand_total_roe,
-//                 COUNT(DISTINCT esq.id) AS quote_count
-//             ${baseQuery}
-//             ORDER BY tbl_freight.created_at DESC
-//             LIMIT ? OFFSET ?
-//         `;
-
-//         // Add limit and offset to params
-//         const dataParams = [...params, limit, offset];
-
-//         await con.query(selectQuery, dataParams, (err, data) => {
-//             if (err) {
-//                 res.status(500).send({ success: false, message: err.message });
-//                 return;
-//             }
-
-//             // Always return success with data (empty array if no records), total, page, limit
-//             res.status(200).send({ success: true, data: data, total: total, page: parseInt(page), limit: parseInt(limit) });
-//         });
-//     } catch (error) {
-//         res.status(500).send({ success: false, message: error.message });
-//     }
-// };
-
-// 2/4/2026
-
 // const GetFreightAdmin = (req, res) => {
 //     const {
 //         status, priority, origin, destination, startDate, endDate,
@@ -1195,13 +964,12 @@ const GetTerms = async (req, res) => {
 //         });
 //     };
 
-// //  s.id AS estimate_id,
 
 //     /* ==================== STEP 4: DATA QUERY ==================== */
 //     const getData = (condition, params, total) => {
 //         const dataQuery = `
 //             SELECT
-//                 tbl_freight.id AS freight_id,
+//                 DISTINCT tbl_freight.id AS freight_id,
 //                 tbl_freight.freight_number,
 //                 tbl_freight.status,
 //                 tbl_freight.priority,
@@ -1212,15 +980,26 @@ const GetTerms = async (req, res) => {
 //                 tbl_freight.product_desc,
 //                 tbl_freight.hazardous,
 //                 tbl_freight.client_id as client_ref,
-//                 tbl_freight.sales_representative as staff_id,
+//                 ss.full_name AS sales_name,
+
+//                 COALESCE(NULLIF(tbl_freight.sales_representative, ''), ss.id) AS staff_id,
+
+//                 COALESCE(NULLIF(tbl_freight.sales_representative_email, ''), ss.email) AS staff_email,
+
+//                 COALESCE(NULLIF(tbl_freight.sales_representative_name, ''), ss.full_name) AS staff_name,
+
+//                 COALESCE(NULLIF(tbl_freight.sales_representative, ''), ss.id) AS sales_id,
+
 //                 tbl_freight.nature_of_hazard,
+//                 tbl_freight.isConfirmed,
+//                 tbl_freight.confirmed_supplier_id,
 //                 tbl_freight.order_status, tbl_freight.created_at as freight_created_at, tbl_freight.assign_to_clearing, tbl_freight.send_to_warehouse,
 //                 tbl_users.full_name AS client_name,
-//                 ss.full_name AS sales_name,
-//                 tu.full_name as staff_name, 
+//                 fqe.id AS freight_quote_estimate_id,
+//                 tts.name AS confirmed_supplier_name,
+//                     s.id AS estimate_id,
 //                     esq.id AS quote_id,
 //                     esq.id as quote_estimate_id,
-//                 tbl_freight.sales_representative AS sales_id,
 //                 ts.name AS supplier_name,
 //                 ts.id AS supplier_id,
 //                 cm.name AS commodity_name,
@@ -1239,12 +1018,18 @@ const GetTerms = async (req, res) => {
 //             FROM tbl_freight
 //             LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
 //             LEFT JOIN tbl_users ss ON ss.id = tbl_freight.sales_representative
-//             LEFT JOIN tbl_users tu ON tu.id = tbl_freight.sales_representative
 //             LEFT JOIN tbl_commodity cm ON cm.id = tbl_freight.commodity
 //             LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
 //             LEFT JOIN countries co ON co.id = tbl_freight.collection_from
+//             LEFT JOIN shipping_estimate s ON s.freight_id = tbl_freight.id
+//             LEFT JOIN freight_quote_estimate fqe ON fqe.freight_id = tbl_freight.id
+//             AND fqe.is_deleted = 0
+//             LEFT JOIN estimate_shipping_quote esq 
+//             ON esq.freight_id = tbl_freight.id 
 //             LEFT JOIN tbl_suppliers ts 
 //             ON ts.id = esq.supplier_id
+//             LEFT JOIN tbl_suppliers tts 
+//             ON tts.id = tbl_freight.confirmed_supplier_id
 //             ${condition}
 //             GROUP BY tbl_freight.id
 //             ORDER BY tbl_freight.created_at DESC
@@ -1283,56 +1068,48 @@ const GetTerms = async (req, res) => {
 //     });
 // };
 
+const GetFreightAdmin = async (req, res) => {
+    try {
+        const {
+            status, priority, origin, destination, startDate, endDate,
+            freightType, freightSpeed, user_id, user_type,
+            search, page = 1, limit = 10
+        } = req.body;
 
-const GetFreightAdmin = (req, res) => {
-    const {
-        status, priority, origin, destination, startDate, endDate,
-        freightType, freightSpeed, user_id, user_type,
-        search, page = 1, limit = 10
-    } = req.body;
+        const pageNo = Number(page);
+        const pageSize = Number(limit);
+        const offset = (pageNo - 1) * pageSize;
+        const All_access_USER_ID = 19855;
+        const numericUserId = user_id ? Number(user_id) : null;
 
-    let userCountry = null;
-    const offset = (page - 1) * limit;
-    const All_access_USER_ID = 19855;
+        /* ==================== USER ACCESS COUNTRIES ==================== */
+        let accessCountries = [];
 
-    /* ==================== STEP 1: USER COUNTRY ==================== */
-    let accessCountries = [];
+        if (numericUserId && numericUserId !== All_access_USER_ID) {
+            const rows = await new Promise((resolve, reject) => {
+                con.query(
+                    `SELECT access_country FROM tbl_users WHERE id = ? AND is_deleted = 0`,
+                    [numericUserId],
+                    (err, result) => err ? reject(err) : resolve(result)
+                );
+            });
 
-    const getUserCountry = (cb) => {
-        if (!user_id) return cb();
+            if (!rows.length) {
+                return res.status(404).send({
+                    success: false,
+                    message: "User not found"
+                });
+            }
 
-        // All-access user bypass
-        if (user_id === All_access_USER_ID) {
-            accessCountries = [];
-            return cb();
+            if (rows[0].access_country) {
+                accessCountries = rows[0].access_country
+                    .split(',')
+                    .map(id => Number(id.trim()))
+                    .filter(Boolean);
+            }
         }
 
-        con.query(
-            `SELECT access_country FROM tbl_users WHERE id = ? AND is_deleted = 0`,
-            [user_id],
-            (err, rows) => {
-                if (err) return cb(err);
-
-                if (!rows.length) {
-                    return res.status(404).send({
-                        success: false,
-                        message: "User not found"
-                    });
-                }
-
-                if (rows[0].access_country) {
-                    accessCountries = rows[0].access_country
-                        .split(',')
-                        .map(id => Number(id.trim()));
-                }
-
-                cb();
-            }
-        );
-    };
-
-    /* ==================== STEP 2: BUILD CONDITIONS ==================== */
-    const buildCondition = () => {
+        /* ==================== BUILD CONDITIONS ==================== */
         let condition = `
             WHERE tbl_freight.is_deleted = 0
             AND tbl_freight.added_by = 1
@@ -1340,19 +1117,15 @@ const GetFreightAdmin = (req, res) => {
         `;
         let params = [];
 
-        if (
-            user_id !== All_access_USER_ID &&
-            accessCountries.length
-        ) {
+        if (numericUserId !== All_access_USER_ID && accessCountries.length) {
             const placeholders = accessCountries.map(() => '?').join(',');
 
             condition += `
-         AND (
-            tbl_freight.collection_from IN (${placeholders})
-            OR tbl_freight.delivery_to IN (${placeholders})
-         )
-           `;
-
+                AND (
+                    tbl_freight.collection_from IN (${placeholders})
+                    OR tbl_freight.delivery_to IN (${placeholders})
+                )
+            `;
             params.push(...accessCountries, ...accessCountries);
         }
 
@@ -1367,11 +1140,11 @@ const GetFreightAdmin = (req, res) => {
         if (freightType) { condition += ' AND tbl_freight.freight = ?'; params.push(freightType); }
         if (freightSpeed) { condition += ' AND tbl_freight.type = ?'; params.push(freightSpeed); }
 
-        if (user_type === 2 && user_id && user_id !== All_access_USER_ID) {
+        if (user_type === 2 && numericUserId && numericUserId !== All_access_USER_ID) {
             condition += ' AND (tbl_freight.user_id = ? OR tbl_freight.sales_representative = ?)';
-            params.push(user_id, user_id);
+            params.push(numericUserId, numericUserId);
         }
-        // Add global search condition across multiple fields
+
         if (search) {
             condition += ` AND (
                 tbl_freight.freight_number LIKE ?
@@ -1388,124 +1161,145 @@ const GetFreightAdmin = (req, res) => {
                 OR co.name LIKE ?
             )`;
             const searchParam = `%${search}%`;
-            params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+            params.push(
+                searchParam, searchParam, searchParam, searchParam, searchParam,
+                searchParam, searchParam, searchParam, searchParam, searchParam,
+                searchParam, searchParam
+            );
         }
 
-        return { condition, params };
-    };
+        const aggregateJoins = `
+            LEFT JOIN (
+                SELECT freight_id, COUNT(*) AS quote_count
+                FROM estimate_shipping_quote
+                GROUP BY freight_id
+            ) eq_cnt ON eq_cnt.freight_id = tbl_freight.id
+ 
+            LEFT JOIN (
+                SELECT freight_id, COUNT(*) AS estimate_count
+                FROM shipping_estimate
+                GROUP BY freight_id
+            ) se_cnt ON se_cnt.freight_id = tbl_freight.id
+ 
+            LEFT JOIN (
+                SELECT freight_id, MAX(id) AS max_id
+                FROM shipping_estimate
+                GROUP BY freight_id
+            ) se_latest ON se_latest.freight_id = tbl_freight.id
+            LEFT JOIN shipping_estimate s ON s.id = se_latest.max_id
+ 
+            LEFT JOIN (
+                SELECT freight_id, MAX(id) AS max_id
+                FROM freight_quote_estimate
+                WHERE is_deleted = 0
+                GROUP BY freight_id
+            ) fqe_latest ON fqe_latest.freight_id = tbl_freight.id
+            LEFT JOIN freight_quote_estimate fqe ON fqe.id = fqe_latest.max_id
+ 
+            LEFT JOIN (
+                SELECT freight_id, MAX(id) AS max_id
+                FROM estimate_shipping_quote
+                GROUP BY freight_id
+            ) esq_latest ON esq_latest.freight_id = tbl_freight.id
+            LEFT JOIN estimate_shipping_quote esq ON esq.id = esq_latest.max_id
+            LEFT JOIN tbl_suppliers ts ON ts.id = esq.supplier_id
+        `;
 
-    /* ==================== STEP 3: COUNT QUERY (FAST) ==================== */
-    const getCount = (condition, params, cb) => {
-
-        const countQuery = `
-        SELECT COUNT(DISTINCT tbl_freight.id) AS total
-        FROM tbl_freight
-        ${search ? `
+        const searchJoins = search ? `
             LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
             LEFT JOIN tbl_users ss ON ss.id = tbl_freight.sales_representative
             LEFT JOIN tbl_suppliers ts ON ts.id = tbl_freight.supplier_task_assign_id
             LEFT JOIN tbl_commodity cm ON cm.id = tbl_freight.commodity
             LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
             LEFT JOIN countries co ON co.id = tbl_freight.collection_from
-        ` : ''}
-        ${condition}
-    `;
+        ` : '';
 
-        con.query(countQuery, params, (err, rows) => {
-            if (err) return cb(err);
-            cb(null, rows[0].total);
-        });
-    };
+        const dataJoins = `
+            LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+            LEFT JOIN tbl_users ss ON ss.id = tbl_freight.sales_representative
+            LEFT JOIN tbl_commodity cm ON cm.id = tbl_freight.commodity
+            LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
+            LEFT JOIN countries co ON co.id = tbl_freight.collection_from
+            LEFT JOIN tbl_suppliers tts ON tts.id = tbl_freight.confirmed_supplier_id
+            ${aggregateJoins}
+        `;
 
+        const countQuery = `
+            SELECT COUNT(${search ? 'DISTINCT tbl_freight.id' : 'tbl_freight.id'}) AS total
+            FROM tbl_freight
+            ${searchJoins}
+            ${condition}
+        `;
 
-    /* ==================== STEP 4: DATA QUERY ==================== */
-    const getData = (condition, params, total) => {
         const dataQuery = `
             SELECT
-                DISTINCT tbl_freight.id AS freight_id,
+                tbl_freight.id AS freight_id,
                 tbl_freight.freight_number,
                 tbl_freight.status,
                 tbl_freight.priority,
                 tbl_freight.date,
                 tbl_freight.created_at,
                 tbl_freight.client_id AS freight_client_id,
-                tbl_freight.type, tbl_freight.freight,
+                tbl_freight.type,
+                tbl_freight.freight,
                 tbl_freight.product_desc,
                 tbl_freight.hazardous,
-                tbl_freight.client_id as client_ref,
-                tbl_freight.sales_representative as staff_id,
+                tbl_freight.client_id AS client_ref,
+                ss.full_name AS sales_name,
+                COALESCE(NULLIF(tbl_freight.sales_representative, ''), ss.id) AS staff_id,
+                COALESCE(NULLIF(tbl_freight.sales_representative_email, ''), ss.email) AS staff_email,
+                COALESCE(NULLIF(tbl_freight.sales_representative_name, ''), ss.full_name) AS staff_name,
+                COALESCE(NULLIF(tbl_freight.sales_representative, ''), ss.id) AS sales_id,
                 tbl_freight.nature_of_hazard,
                 tbl_freight.isConfirmed,
-                tbl_freight.order_status, tbl_freight.created_at as freight_created_at, tbl_freight.assign_to_clearing, tbl_freight.send_to_warehouse,
+                tbl_freight.confirmed_supplier_id,
+                tbl_freight.order_status,
+                tbl_freight.created_at AS freight_created_at,
+                tbl_freight.assign_to_clearing,
+                tbl_freight.send_to_warehouse,
                 tbl_users.full_name AS client_name,
-                ss.full_name AS sales_name,
-                ss.full_name as staff_name,
-                    s.id AS estimate_id,
-                    esq.id AS quote_id,
-                    esq.id as quote_estimate_id,
-                tbl_freight.sales_representative AS sales_id,
+                fqe.id AS freight_quote_estimate_id,
+                tts.name AS confirmed_supplier_name,
+                s.id AS estimate_id,
+                esq.id AS quote_id,
+                esq.id AS quote_estimate_id,
                 ts.name AS supplier_name,
                 ts.id AS supplier_id,
                 cm.name AS commodity_name,
                 c.name AS delivery_to_name,
                 co.name AS collection_from_name,
-                (
-    SELECT COUNT(*) 
-    FROM estimate_shipping_quote eq 
-    WHERE eq.freight_id = tbl_freight.id
-) AS quote_count,
-                (
-    SELECT COUNT(*) 
-    FROM shipping_estimate se 
-    WHERE se.freight_id = tbl_freight.id
-) AS estimate_count
+                COALESCE(eq_cnt.quote_count, 0) AS quote_count,
+                COALESCE(se_cnt.estimate_count, 0) AS estimate_count
             FROM tbl_freight
-            LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
-            LEFT JOIN tbl_users ss ON ss.id = tbl_freight.sales_representative
-            LEFT JOIN tbl_commodity cm ON cm.id = tbl_freight.commodity
-            LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
-            LEFT JOIN countries co ON co.id = tbl_freight.collection_from
-            LEFT JOIN shipping_estimate s ON s.freight_id = tbl_freight.id
-            LEFT JOIN estimate_shipping_quote esq 
-            ON esq.freight_id = tbl_freight.id 
-            LEFT JOIN tbl_suppliers ts 
-            ON ts.id = esq.supplier_id
+            ${dataJoins}
             ${condition}
-            GROUP BY tbl_freight.id
             ORDER BY tbl_freight.created_at DESC
             LIMIT ? OFFSET ?
         `;
 
-        con.query(
-            dataQuery,
-            [...params, Number(limit), Number(offset)],
-            (err, data) => {
-                if (err) {
-                    return res.status(500).send({ success: false, message: err.message });
-                }
-
-                res.status(200).send({
-                    success: true,
-                    data,
-                    total,
-                    page: Number(page),
-                    limit: Number(limit)
-                });
-            }
-        );
-    };
-
-    /* ==================== FLOW ==================== */
-    getUserCountry((err) => {
-        if (err) return res.status(500).send({ success: false, message: err.message });
-
-        const { condition, params } = buildCondition();
-
-        getCount(condition, params, (err, total) => {
-            if (err) return res.status(500).send({ success: false, message: err.message });
-            getData(condition, params, total);
+        const runQuery = (sql, queryParams) => new Promise((resolve, reject) => {
+            con.query(sql, queryParams, (err, rows) => err ? reject(err) : resolve(rows));
         });
-    });
+
+        const [countRows, data] = await Promise.all([
+            runQuery(countQuery, params),
+            runQuery(dataQuery, [...params, pageSize, offset])
+        ]);
+
+        return res.status(200).send({
+            success: true,
+            data,
+            total: countRows[0]?.total || 0,
+            page: pageNo,
+            limit: pageSize
+        });
+
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
 };
 
 const GetReadyFreightAdmin = (req, res) => {
@@ -1571,7 +1365,7 @@ const GetReadyFreightAdmin = (req, res) => {
         let condition = `
             WHERE tbl_freight.is_deleted = 0
             AND tbl_freight.added_by IN (1, 2)
-            AND tbl_freight.order_status = 0
+            AND tbl_freight.order_status = 1
         `;
 
         let params = [];
@@ -1686,6 +1480,9 @@ const GetReadyFreightAdmin = (req, res) => {
                 tbl_freight.freight,
                 tbl_freight.product_desc,
 
+                ord.id AS order_id,
+                ord.order_number,
+
                 u.full_name AS client_name,
                 cs.name AS collection_supplier_name,
                 ds.name AS delivery_supplier_name,
@@ -1694,6 +1491,7 @@ const GetReadyFreightAdmin = (req, res) => {
 
             FROM tbl_freight
 
+            LEFT JOIN tbl_orders ord ON ord.freight_id = tbl_freight.id
             LEFT JOIN tbl_users u ON u.id = tbl_freight.client_id
             LEFT JOIN tbl_suppliers s ON s.id = tbl_freight.supplier_task_assign_id
             LEFT JOIN countries c ON c.id = tbl_freight.delivery_to
@@ -1779,6 +1577,519 @@ const GetReadyFreightAdmin = (req, res) => {
             getData(condition, params, counts);
         });
     });
+};
+
+const confirmCollectionCompletion = (req, res) => {
+    const { freight_id, shipment_id, action } = req.body;
+
+    // ================= VALIDATION =================
+
+    if (!freight_id) {
+        return res.status(400).send({
+            success: false,
+            message: "freight_id is required."
+        });
+    }
+
+    if (!action) {
+        return res.status(400).send({
+            success: false,
+            message: "action is required."
+        });
+    }
+
+    if (!["shipment", "warehouse"].includes(action)) {
+        return res.status(400).send({
+            success: false,
+            message: "action must be shipment or warehouse."
+        });
+    }
+
+    if (action === "shipment" && !shipment_id) {
+        return res.status(400).send({
+            success: false,
+            message: "shipment_id is required."
+        });
+    }
+
+    // ================= FREIGHT =================
+
+    con.query(
+        `SELECT id FROM tbl_freight WHERE id=? LIMIT 1`,
+        [freight_id],
+        (err, freight) => {
+
+            if (err)
+                return res.status(500).send({ success: false, message: err.message });
+
+            if (!freight.length)
+                return res.status(404).send({
+                    success: false,
+                    message: "Freight not found."
+                });
+
+            // ================= ORDER =================
+
+            con.query(
+                `SELECT id FROM tbl_orders WHERE freight_id=? LIMIT 1`,
+                [freight_id],
+                (err, orders) => {
+
+                    if (err)
+                        return res.status(500).send({ success: false, message: err.message });
+
+                    if (!orders.length)
+                        return res.status(404).send({
+                            success: false,
+                            message: "Order not found."
+                        });
+
+                    const order_id = orders[0].id;
+
+                    if (action === "shipment") {
+
+                        // ================= DUPLICATE CHECK =================
+
+                        con.query(
+                            `SELECT id
+                             FROM shipment_details
+                             WHERE shipment_id=? AND order_id=?`,
+                            [shipment_id, order_id],
+                            (err, duplicate) => {
+
+                                if (err)
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: err.message
+                                    });
+
+                                if (duplicate.length)
+                                    return res.status(400).send({
+                                        success: false,
+                                        message: "Order is already added to this shipment."
+                                    });
+
+                                updateFreightAndInsertShipment(order_id);
+                            }
+                        );
+
+                    } else {
+
+                        // ================= WAREHOUSE DUPLICATE =================
+
+                        con.query(
+                            `SELECT id
+                             FROM warehouse_assign_order
+                             WHERE order_id=?`,
+                            [order_id],
+                            (err, duplicate) => {
+
+                                if (err)
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: err.message
+                                    });
+
+                                if (duplicate.length)
+                                    return res.status(400).send({
+                                        success: false,
+                                        message: "Order is already assigned to the warehouse."
+                                    });
+
+                                updateWarehouse(order_id);
+                            }
+                        );
+                    }
+
+                    // =====================================================
+                    // Shipment Flow
+                    // =====================================================
+
+                    function updateFreightAndInsertShipment(order_id) {
+
+                        con.query(
+                            `UPDATE tbl_freight
+                             SET
+                                order_status=1,
+                                ready_for_collection_status='Complete'
+                             WHERE id=?`,
+                            [freight_id],
+                            (err) => {
+
+                                if (err)
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: err.message
+                                    });
+
+                                con.query(
+                                    `INSERT INTO shipment_details
+                                    (
+                                        shipment_id,
+                                        order_id,
+                                        batch_id,
+                                        clearance_id
+                                    )
+                                    VALUES (?, ?, NULL, NULL)`,
+                                    [shipment_id, order_id],
+                                    (err) => {
+
+                                        if (err)
+                                            return res.status(500).send({
+                                                success: false,
+                                                message: err.message
+                                            });
+
+                                        return res.status(200).send({
+                                            success: true,
+                                            message: "Shipment order created successfully."
+                                        });
+
+                                    }
+                                );
+                            }
+                        );
+                    }
+
+                    // =====================================================
+                    // Warehouse Flow
+                    // =====================================================
+
+                    function updateWarehouse(order_id) {
+
+                        con.query(
+                            `UPDATE tbl_orders
+                             SET warehouse_status=1
+                             WHERE id=?`,
+                            [order_id],
+                            (err) => {
+
+                                if (err)
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: err.message
+                                    });
+
+                                con.query(
+                                    `UPDATE tbl_freight
+                                     SET
+                                        order_status=1,
+                                        warehouse_status=1,
+                                        ready_for_collection_status='Complete'
+                                     WHERE id=?`,
+                                    [freight_id],
+                                    (err) => {
+
+                                        if (err)
+                                            return res.status(500).send({
+                                                success: false,
+                                                message: err.message
+                                            });
+
+                                        con.query(
+                                            `INSERT INTO warehouse_assign_order
+                                            (
+                                                freight_id,
+                                                order_id,
+                                                warehouse_status
+                                            )
+                                            VALUES (?, ?, 1)`,
+                                            [freight_id, order_id],
+                                            (err) => {
+
+                                                if (err)
+                                                    return res.status(500).send({
+                                                        success: false,
+                                                        message: err.message
+                                                    });
+
+                                                return res.status(200).send({
+                                                    success: true,
+                                                    message: "Warehouse order processed successfully."
+                                                });
+
+                                            }
+                                        );
+
+                                    }
+                                );
+
+                            }
+                        );
+                    }
+
+                }
+            );
+
+        }
+    );
+};
+
+const addUpdateCollectionDelivery = (req, res) => {
+    const {
+        collection_delivery_id,
+        freight_id,
+        order_id,
+        supplier_name,
+        supplier_contact_person,
+        supplier_contact,
+        pickup_address,
+        customer_ref,
+        create_new_warehouse_order,
+        freight_number,
+        warehouse_order_id,
+        date_picked_up,
+        courier_waybill_ref,
+        box_marking,
+        goods_description,
+        package_type,
+        hazardous,
+        hazardous_description,
+        total_packages,
+        total_cbm,
+        total_weight,
+        package_comments,
+        costs_to_collect,
+        handling_cost,
+        warehouse_cost,
+        warehouse_comment
+    } = req.body;
+
+    // Attachments handling
+
+    const box_marking_attachment =
+        req.files?.box_marking_attachment?.map(file => file.filename) || [];
+
+    const goods_description_attachment =
+        req.files?.goods_description_attachment?.map(file => file.filename) || [];
+
+    const product_pictures =
+        req.files?.product_pictures?.map(file => file.filename) || [];
+
+    const other_attachments =
+        req.files?.other_attachments?.map(file => file.filename) || [];
+
+    // ===================== VALIDATION =====================
+
+    if (!freight_id)
+        return res.status(400).json({ success: false, message: "freight_id is required." });
+
+    if (!order_id)
+        return res.status(400).json({ success: false, message: "order_id is required." });
+
+    if (!supplier_name)
+        return res.status(400).json({ success: false, message: "supplier_name is required." });
+
+    if (create_new_warehouse_order && !["Yes", "No"].includes(create_new_warehouse_order))
+        return res.status(400).json({
+            success: false,
+            message: "create_new_warehouse_order must be Yes or No."
+        });
+
+    if (hazardous && !["Yes", "No"].includes(hazardous))
+        return res.status(400).json({
+            success: false,
+            message: "hazardous must be Yes or No."
+        });
+
+    // ===================== CHECK FREIGHT =====================
+
+    con.query(
+        "SELECT id FROM tbl_freight WHERE id=?",
+        [freight_id],
+        (err, freight) => {
+
+            if (err)
+                return res.status(500).json({ success: false, message: err.message });
+
+            if (!freight.length)
+                return res.status(404).json({ success: false, message: "Freight not found." });
+
+            // ===================== CHECK ORDER =====================
+
+            con.query(
+                "SELECT id FROM tbl_orders WHERE id=?",
+                [order_id],
+                (err, order) => {
+
+                    if (err)
+                        return res.status(500).json({ success: false, message: err.message });
+
+                    if (!order.length)
+                        return res.status(404).json({ success: false, message: "Order not found." });
+
+                    const values = [
+                        freight_id,
+                        order_id,
+                        supplier_name,
+                        supplier_contact_person ?? null,
+                        supplier_contact ?? null,
+                        pickup_address ?? null,
+                        customer_ref ?? null,
+                        create_new_warehouse_order ?? "No",
+                        freight_number ?? null,
+                        warehouse_order_id ?? null,
+                        date_picked_up ?? null,
+                        courier_waybill_ref ?? null,
+                        box_marking ?? null,
+                        JSON.stringify(box_marking_attachment ?? []),
+                        goods_description ?? null,
+                        JSON.stringify(goods_description_attachment ?? []),
+                        package_type ?? null,
+                        hazardous ?? "No",
+                        hazardous_description ?? null,
+                        total_packages ?? 0,
+                        total_cbm ?? 0,
+                        total_weight ?? 0,
+                        package_comments ?? null,
+                        costs_to_collect ?? 0,
+                        handling_cost ?? 0,
+                        warehouse_cost ?? 0,
+                        JSON.stringify(product_pictures ?? []),
+                        JSON.stringify(other_attachments ?? []),
+                        warehouse_comment ?? null
+                    ];
+
+                    // ===================== ADD =====================
+
+                    if (!collection_delivery_id) {
+
+                        con.query(
+                            "SELECT id FROM collection_and_delivery WHERE freight_id=?",
+                            [freight_id],
+                            (err, rows) => {
+
+                                if (err)
+                                    return res.status(500).json({ success: false, message: err.message });
+
+                                if (rows.length)
+                                    return res.status(400).json({
+                                        success: false,
+                                        message: "Collection & Delivery already exists."
+                                    });
+
+                                const sql = `
+                                INSERT INTO collection_and_delivery
+                                (
+                                    freight_id,order_id,supplier_name,supplier_contact_person,
+                                    supplier_contact,pickup_address,customer_ref,
+                                    create_new_warehouse_order,freight_number,
+                                    warehouse_order_id,date_picked_up,courier_waybill_ref,
+                                    box_marking,box_marking_attachment,
+                                    goods_description,goods_description_attachment,
+                                    package_type,hazardous,hazardous_description,
+                                    total_packages,total_cbm,total_weight,
+                                    package_comments,costs_to_collect,
+                                    handling_cost,warehouse_cost,
+                                    product_pictures,other_attachments,
+                                    warehouse_comment
+                                )
+                                VALUES (${Array(29).fill("?").join(",")})
+                                `;
+
+                                con.query(sql, values, (err, result) => {
+
+                                    if (err)
+                                        return res.status(500).json({
+                                            success: false,
+                                            message: err.message
+                                        });
+
+                                    return res.json({
+                                        success: true,
+                                        message: "Collection & Delivery added successfully.",
+                                        collection_delivery_id: result.insertId
+                                    });
+
+                                });
+
+                            }
+                        );
+
+                    }
+
+                    // ===================== UPDATE =====================
+
+                    else {
+
+                        con.query(
+                            "SELECT id FROM collection_and_delivery WHERE id=?",
+                            [collection_delivery_id],
+                            (err, rows) => {
+
+                                if (err)
+                                    return res.status(500).json({ success: false, message: err.message });
+
+                                if (!rows.length)
+                                    return res.status(404).json({
+                                        success: false,
+                                        message: "Record not found."
+                                    });
+
+                                const sql = `
+                                UPDATE collection_and_delivery
+                                SET
+                                    freight_id=?,
+                                    order_id=?,
+                                    supplier_name=?,
+                                    supplier_contact_person=?,
+                                    supplier_contact=?,
+                                    pickup_address=?,
+                                    customer_ref=?,
+                                    create_new_warehouse_order=?,
+                                    freight_number=?,
+                                    warehouse_order_id=?,
+                                    date_picked_up=?,
+                                    courier_waybill_ref=?,
+                                    box_marking=?,
+                                    box_marking_attachment=?,
+                                    goods_description=?,
+                                    goods_description_attachment=?,
+                                    package_type=?,
+                                    hazardous=?,
+                                    hazardous_description=?,
+                                    total_packages=?,
+                                    total_cbm=?,
+                                    total_weight=?,
+                                    package_comments=?,
+                                    costs_to_collect=?,
+                                    handling_cost=?,
+                                    warehouse_cost=?,
+                                    product_pictures=?,
+                                    other_attachments=?,
+                                    warehouse_comment=?
+                                WHERE id=?
+                                `;
+
+                                con.query(
+                                    sql,
+                                    [...values, collection_delivery_id],
+                                    (err) => {
+
+                                        if (err)
+                                            return res.status(500).json({
+                                                success: false,
+                                                message: err.message
+                                            });
+
+                                        return res.json({
+                                            success: true,
+                                            message: "Collection & Delivery updated successfully."
+                                        });
+
+                                    }
+                                );
+
+                            }
+                        );
+
+                    }
+
+                }
+            );
+
+        }
+    );
 };
 
 const ManageFreightStatus = (req, res) => {
@@ -2028,6 +2339,7 @@ const GetFreightAdminById = async (req, res) => {
     s.serial_number as estimate_serial_number,
     COUNT(s.freight_id) AS estimate_count,
             ts.name as assigned_supplier_name,
+            fqe.id as freight_quote_estimate_id,
                 esq.id as quote_estimate_id,
                 esq.freight_id AS quote_freight_id,
                 esq.client_id AS quote_client_id,
@@ -2041,6 +2353,8 @@ const GetFreightAdminById = async (req, res) => {
                 esq.sumofRoe AS quote_grand_total_roe,
                 COUNT(DISTINCT esq.id) AS quote_count
             FROM tbl_freight
+            LEFT JOIN freight_quote_estimate AS fqe ON fqe.freight_id = tbl_freight.id
+            AND fqe.is_deleted = 0
             LEFT JOIN tbl_suppliers as ts on ts.id = tbl_freight.supplier_task_assign_id
             LEFT JOIN estimate_shipping_quote AS esq ON esq.freight_id = tbl_freight.id
             LEFT JOIN tbl_users AS ss ON ss.id = tbl_freight.sales_representative
@@ -2699,6 +3013,10 @@ const Addfreight = async (req, res) => {
 
         console.log(req.files);
 
+        if (!date) {
+            return res.status(400).json({ success: false, message: "Please select a date" });
+        }
+
         /* ================= STATUS ================= */
 
         let ready_for_collection_status = 'Not Required';
@@ -3238,6 +3556,9 @@ const GetFreightCustomer = async (req, res) => {
             LEFT JOIN estimate_shipping_quote esq
                 ON esq.freight_id = tbl_freight.id
 
+            LEFT JOIN freight_quote_estimate fqe
+                ON fqe.freight_id = tbl_freight.id
+
             LEFT JOIN countries AS c
                 ON c.id = tbl_freight.collection_from
 
@@ -3273,6 +3594,7 @@ const GetFreightCustomer = async (req, res) => {
             SELECT DISTINCT
                 tbl_freight.id AS freight_id,
                 esq.id AS quote_estimate_id,
+                fqe.id AS freight_quote_estimate_id,
                 ts.name as assigned_supplier_name,
                 tbl_freight.freight_number,
                 tbl_freight.insurance,
@@ -3377,7 +3699,7 @@ const EditFreight = async (req, res) => {
             supplier_address, port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, require_for_delivery,
             transit_time, priority, shipment_details, nature_of_hazard, volumetric_weight, assign_for_estimate,
             assign_to_transporter, assign_warehouse, assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name,
-            product_desc, sales_representative, weight_unit, dimension_unit
+            product_desc, weight_unit, dimension_unit
         } = req.body;
 
         // Validate input data
@@ -3470,7 +3792,7 @@ const EditFreight = async (req, res) => {
 require_for_delivery_status = ?,
                 transit_time = ?, priority = ?, shipment_details = ?, nature_of_hazard = ?, volumetric_weight = ?, 
                 assign_for_estimate = ?, assign_to_transporter = ?, assign_warehouse = ?, assign_to_clearing = ?, 
-                send_to_warehouse = ?, shipment_origin = ?, shipment_des = ?, client_ref_name=?, sales_representative=?, weight_unit=?, dimension_unit=?
+                send_to_warehouse = ?, shipment_origin = ?, shipment_des = ?, client_ref_name=?, weight_unit=?, dimension_unit=?
             WHERE id = ?
         `;
 
@@ -3480,7 +3802,7 @@ require_for_delivery_status = ?,
             port_of_loading, post_of_discharge, place_of_delivery, ready_for_collection, require_for_delivery, ready_for_collection_status,
             require_for_delivery_status, transit_time, priority, shipment_details,
             nature_of_hazard, volumetric_weight, assign_for_estimate, assign_to_transporter, assign_warehouse,
-            assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, sales_representative, weight_unit || null, dimension_unit || null, id
+            assign_to_clearing, send_to_warehouse, shipment_origin, shipment_des, client_ref_name, weight_unit || null, dimension_unit || null, id
         ];
 
         const result = await con.query(updateQuery, updateParams);
@@ -3794,45 +4116,249 @@ require_for_delivery_status = ?,
     }
 };
 
+// const UploadFreightDocument = async (req, res) => {
+//     try {
+
+//         const { freight_id, order_id } = req.body;
+
+//         if (!freight_id && !order_id) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Please provide freight_id or order_id"
+//             });
+//         }
+
+//         const freightQuery = `
+//             SELECT freight_number
+//             FROM tbl_freight
+//             WHERE id = ?
+//         `;
+
+//         const freightData = await new Promise((resolve, reject) => {
+//             con.query(freightQuery, [freight_id], (err, result) => {
+//                 if (err) return reject(err);
+//                 resolve(result);
+//             });
+//         });
+
+//         if (!freightData.length) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Freight not found"
+//             });
+//         }
+
+//         const freightNumber = freightData[0].freight_number;
+
+//         let uploadedFiles = [];
+//         let isDeliveryNoteUploaded = false;
+
+//         // Create folder structure only once
+//         await findOrCreateFolder(freightNumber);
+
+//         if (req.files && Object.keys(req.files).length > 0) {
+
+//             for (const fieldName of Object.keys(req.files)) {
+
+//                 const filesArray = req.files[fieldName];
+
+//                 for (const file of filesArray) {
+
+//                     // Upload file to Google Drive
+//                     await uploadToMatchingFolder(
+//                         file,
+//                         fieldName,
+//                         freightNumber
+//                     );
+
+//                     // Save document record
+//                     const docQuery = `
+//                         INSERT INTO freight_doc
+//                         (
+//                             freight_id,
+//                             uploaded_by,
+//                             document_name,
+//                             document
+//                         )
+//                         VALUES (?, ?, ?, ?)
+//                     `;
+
+//                     await new Promise((resolve, reject) => {
+
+//                         con.query(
+//                             docQuery,
+//                             [
+//                                 freight_id,
+//                                 req.user?.id || 1,
+//                                 fieldName,
+//                                 file.filename
+//                             ],
+//                             (err) => {
+
+//                                 if (err) return reject(err);
+
+//                                 resolve();
+
+//                             }
+//                         );
+
+//                     });
+
+//                     // Check Delivery Note uploaded
+//                     if (fieldName === "Delivery note") {
+//                         isDeliveryNoteUploaded = true;
+//                     }
+
+//                     uploadedFiles.push({
+//                         document_name: fieldName,
+//                         file_name: file.filename
+//                     });
+//                 }
+//             }
+//         }
+
+//         // Update Order Status if Delivery Note uploaded
+//         if (isDeliveryNoteUploaded) {
+
+//             await new Promise((resolve, reject) => {
+
+//                 const updateOrderQuery = `
+//                     UPDATE tbl_orders
+//                     SET track_status = 'Delivered'
+//                     WHERE freight_id = ?
+//                 `;
+
+//                 con.query(
+//                     updateOrderQuery,
+//                     [freight_id],
+//                     (err, result) => {
+
+//                         if (err) return reject(err);
+
+//                         resolve(result);
+
+//                     }
+//                 );
+
+//             });
+
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Documents uploaded successfully",
+//             totalUploaded: uploadedFiles.length,
+//             orderStatusUpdated: isDeliveryNoteUploaded,
+//             data: uploadedFiles
+//         });
+
+//     } catch (error) {
+
+//         console.error("UploadFreightDocument Error:", error);
+
+//         return res.status(500).json({
+//             success: false,
+//             message: "Internal Server Error",
+//             error: error.message
+//         });
+
+//     }
+// };
+
+// Example of using con.query with promises
+
+
 const UploadFreightDocument = async (req, res) => {
     try {
 
-        const { freight_id } = req.body;
+        const { freight_id, order_id } = req.body;
 
-        if (!freight_id) {
+        if (!freight_id && !order_id) {
             return res.status(400).json({
                 success: false,
-                message: "freight_id is required"
+                message: "Please provide freight_id or order_id"
             });
         }
 
-        const freightQuery = `
-            SELECT freight_number
-            FROM tbl_freight
-            WHERE id = ?
-        `;
+        let finalFreightId = freight_id || null;
+        let freightNumber = null;
 
-        const freightData = await new Promise((resolve, reject) => {
-            con.query(freightQuery, [freight_id], (err, result) => {
-                if (err) return reject(err);
-                resolve(result);
-            });
-        });
+        // =====================================
+        // VALIDATE ORDER & GET FREIGHT ID (IF EXISTS)
+        // =====================================
 
-        if (!freightData.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Freight not found"
+        if (!finalFreightId && order_id) {
+
+            const orderData = await new Promise((resolve, reject) => {
+
+                con.query(
+                    `
+                    SELECT id, freight_id
+                    FROM tbl_orders
+                    WHERE id = ?
+                    `,
+                    [order_id],
+                    (err, result) => {
+                        if (err) return reject(err);
+                        resolve(result);
+                    }
+                );
+
             });
+
+            if (!orderData.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Order not found"
+                });
+            }
+
+            // freight_id ho to use karo, warna null rehne do
+            finalFreightId = orderData[0].freight_id || null;
         }
 
-        const freightNumber = freightData[0].freight_number;
+        // =====================================
+        // GET FREIGHT NUMBER (ONLY IF FREIGHT EXISTS)
+        // =====================================
+
+        if (finalFreightId) {
+
+            const freightData = await new Promise((resolve, reject) => {
+
+                con.query(
+                    `
+                    SELECT freight_number
+                    FROM tbl_freight
+                    WHERE id = ?
+                    `,
+                    [finalFreightId],
+                    (err, result) => {
+                        if (err) return reject(err);
+                        resolve(result);
+                    }
+                );
+
+            });
+
+            if (!freightData.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Freight not found"
+                });
+            }
+
+            freightNumber = freightData[0].freight_number;
+
+            // Create Google Drive Folder
+            await findOrCreateFolder(freightNumber);
+        }
 
         let uploadedFiles = [];
         let isDeliveryNoteUploaded = false;
 
-        // Create folder structure only once
-        await findOrCreateFolder(freightNumber);
+        // =====================================
+        // FILE UPLOAD
+        // =====================================
 
         if (req.files && Object.keys(req.files).length > 0) {
 
@@ -3842,23 +4368,35 @@ const UploadFreightDocument = async (req, res) => {
 
                 for (const file of filesArray) {
 
-                    // Upload file to Google Drive
-                    await uploadToMatchingFolder(
-                        file,
-                        fieldName,
-                        freightNumber
-                    );
+                    // =====================================
+                    // UPLOAD TO GOOGLE DRIVE
+                    // ONLY IF FREIGHT EXISTS
+                    // =====================================
 
-                    // Save document record
+                    if (freightNumber) {
+
+                        await uploadToMatchingFolder(
+                            file,
+                            fieldName,
+                            freightNumber
+                        );
+
+                    }
+
+                    // =====================================
+                    // SAVE DOCUMENT
+                    // =====================================
+
                     const docQuery = `
                         INSERT INTO freight_doc
                         (
                             freight_id,
+                            order_id,
                             uploaded_by,
                             document_name,
                             document
                         )
-                        VALUES (?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?)
                     `;
 
                     await new Promise((resolve, reject) => {
@@ -3866,7 +4404,8 @@ const UploadFreightDocument = async (req, res) => {
                         con.query(
                             docQuery,
                             [
-                                freight_id,
+                                finalFreightId,
+                                order_id || null,
                                 req.user?.id || 1,
                                 fieldName,
                                 file.filename
@@ -3882,8 +4421,14 @@ const UploadFreightDocument = async (req, res) => {
 
                     });
 
-                    // Check Delivery Note uploaded
-                    if (fieldName === "Delivery note") {
+                    // =====================================
+                    // DELIVERY NOTE CHECK
+                    // =====================================
+
+                    if (
+                        fieldName &&
+                        fieldName.trim().toLowerCase() === "delivery note"
+                    ) {
                         isDeliveryNoteUploaded = true;
                     }
 
@@ -3891,24 +4436,50 @@ const UploadFreightDocument = async (req, res) => {
                         document_name: fieldName,
                         file_name: file.filename
                     });
+
                 }
             }
         }
 
-        // Update Order Status if Delivery Note uploaded
+        // =====================================
+        // UPDATE ORDER STATUS
+        // =====================================
+
         if (isDeliveryNoteUploaded) {
 
             await new Promise((resolve, reject) => {
 
-                const updateOrderQuery = `
-                    UPDATE tbl_orders
-                    SET track_status = 'Delivered'
-                    WHERE freight_id = ?
-                `;
+                let updateQuery = "";
+                let params = [];
+
+                if (order_id) {
+
+                    updateQuery = `
+                        UPDATE tbl_orders
+                        SET track_status = 'Delivered'
+                        WHERE id = ?
+                    `;
+
+                    params = [order_id];
+
+                } else if (finalFreightId) {
+
+                    updateQuery = `
+                        UPDATE tbl_orders
+                        SET track_status = 'Delivered'
+                        WHERE freight_id = ?
+                    `;
+
+                    params = [finalFreightId];
+
+                } else {
+
+                    return resolve();
+                }
 
                 con.query(
-                    updateOrderQuery,
-                    [freight_id],
+                    updateQuery,
+                    params,
                     (err, result) => {
 
                         if (err) return reject(err);
@@ -3927,6 +4498,8 @@ const UploadFreightDocument = async (req, res) => {
             message: "Documents uploaded successfully",
             totalUploaded: uploadedFiles.length,
             orderStatusUpdated: isDeliveryNoteUploaded,
+            freight_id: finalFreightId,
+            order_id: order_id || null,
             data: uploadedFiles
         });
 
@@ -3942,8 +4515,6 @@ const UploadFreightDocument = async (req, res) => {
 
     }
 };
-
-// Example of using con.query with promises
 
 const GetFreightById = async (req, res) => {
     try {
@@ -5364,7 +5935,7 @@ const CountryListAddFreight = async (req, res) => {
 // };
 
 const buildFreightQuoteReferenceNo = (quoteId) => {
-    return `ADINV${10000 + Number(quoteId)}`.slice(0, 20);
+    return `ADQO${10000 + Number(quoteId)}`.slice(0, 20);
 };
 
 const applyFreightQuoteReferenceNo = (quoteId, callback) => {
@@ -5535,14 +6106,14 @@ const addEstimateShippingQuote = async (req, res) => {
 
         if (data.quote_estimate_id) {
             selectQuery = `
-                SELECT id as quote_estimate_id 
+                SELECT id AS quote_estimate_id
                 FROM estimate_shipping_quote 
                 WHERE id = ?
             `;
             selectParams = [data.quote_estimate_id];
         } else {
             selectQuery = `
-                SELECT id as quote_estimate_id 
+                SELECT id AS quote_estimate_id
                 FROM estimate_shipping_quote 
                 WHERE freight_id = ? AND supplier_id = ?
             `;
@@ -5558,10 +6129,15 @@ const addEstimateShippingQuote = async (req, res) => {
             }
 
             const updateFields = [...ESTIMATE_BASE_FIELDS, ...ESTIMATE_EXTRA_FIELDS];
+            const getFieldValue = (field) => {
+                if (data[field] !== undefined) return data[field];
+                if (field === 'is_approved') return 1;
+                return null;
+            };
             const buildRowPayload = (fields) => {
                 const row = {};
                 fields.forEach(field => {
-                    row[field] = data[field] !== undefined ? data[field] : null;
+                    row[field] = getFieldValue(field);
                 });
                 return row;
             };
@@ -5576,7 +6152,7 @@ const addEstimateShippingQuote = async (req, res) => {
                 `;
 
                 const updateParams = [
-                    ...updateFields.map(f => (data[f] !== undefined ? data[f] : null)),
+                    ...updateFields.map(f => getFieldValue(f)),
                     result[0].quote_estimate_id
                 ];
 
@@ -5669,6 +6245,89 @@ const addEstimateShippingQuote = async (req, res) => {
             }
         });
 
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const deleteEstimateShippingQuote = async (req, res) => {
+    try {
+        const { quote_estimate_id } = req.body;
+
+        if (!quote_estimate_id) {
+            return res.status(400).send({
+                success: false,
+                message: "quote_estimate_id is required"
+            });
+        }
+
+        const checkQuery = `
+            SELECT id, freight_id
+            FROM estimate_shipping_quote
+            WHERE id = ?
+        `;
+
+        con.query(checkQuery, [quote_estimate_id], (checkErr, checkResult) => {
+            if (checkErr) {
+                return res.status(500).send({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).send({
+                    success: false,
+                    message: "Freight quote not found"
+                });
+            }
+
+            const freightId = checkResult[0].freight_id;
+
+            const deleteQuery = `
+                DELETE FROM estimate_shipping_quote
+                WHERE id = ?
+            `;
+
+            con.query(deleteQuery, [quote_estimate_id], (deleteErr, deleteResult) => {
+                if (deleteErr) {
+                    return res.status(500).send({
+                        success: false,
+                        message: deleteErr.message
+                    });
+                }
+
+                if (deleteResult.affectedRows === 0) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Failed to delete freight quote"
+                    });
+                }
+
+                const updateFreightQuery = `
+                    UPDATE tbl_freight
+                    SET shipping_estimate_id = NULL
+                    WHERE id = ? AND shipping_estimate_id = ?
+                `;
+
+                con.query(updateFreightQuery, [freightId, quote_estimate_id], (updateErr) => {
+                    if (updateErr) {
+                        return res.status(500).send({
+                            success: false,
+                            message: updateErr.message
+                        });
+                    }
+
+                    return res.status(200).send({
+                        success: true,
+                        message: "Freight quote deleted successfully"
+                    });
+                });
+            });
+        });
     } catch (error) {
         return res.status(500).send({
             success: false,
@@ -5856,11 +6515,13 @@ const getAllFreightQuoteList = async (req, res) => {
                 esq.date AS quote_date,
                 esq.is_approved,
                 esq.final_base_currency,
+                esq.status,
                 COALESCE(esq.sumofRoe, 0) AS quote_total,
 
                 sup.name AS supplier_name,
                 sup.email AS supplier_email,
                 sup.phone_no AS supplier_phone,
+                
 
                 tbl_users.full_name AS client_name,
 
@@ -10303,7 +10964,6 @@ const restore_order_from_warehouse = async (req, res) => {
     }
 };
 
-
 // const GetWarehouseOrders = async (req, res) => {
 //     try {
 //         const {
@@ -10316,6 +10976,7 @@ const restore_order_from_warehouse = async (req, res) => {
 //             user_id,
 //             user_type,
 //             search,
+//             warehouse_item_status,
 //             page = 1,
 //             limit = 10
 //         } = req.body;
@@ -10329,33 +10990,40 @@ const restore_order_from_warehouse = async (req, res) => {
 
 //         const ALL_ACCESS_USERS = [1, 19855];
 
-//         let condition = ` WHERE warehouse_assign_order.warehouse_status  = 1`;
+//         let condition = ` WHERE warehouse_assign_order.warehouse_status = 1 `;
 //         let params = [];
 
 //         /* ===== ACCESS COUNTRY ===== */
+
 //         let accessCountries = [];
 
 //         if (!ALL_ACCESS_USERS.includes(Number(user_id))) {
+
 //             const rows = await new Promise((resolve, reject) => {
+
 //                 con.query(
-//                     `SELECT access_country FROM tbl_users WHERE id = ? AND is_deleted = 0`,
+//                     `SELECT access_country
+//                      FROM tbl_users
+//                      WHERE id = ?
+//                      AND is_deleted = 0`,
 //                     [user_id],
-//                     (err, rows) => {
-//                         if (err) return reject(err);
-//                         resolve(rows);
-//                     }
+//                     (err, rows) => err ? reject(err) : resolve(rows)
 //                 );
+
 //             });
 
 //             if (rows.length && rows[0].access_country) {
+
 //                 accessCountries = rows[0].access_country
-//                     .split(',')
+//                     .split(",")
 //                     .map(id => Number(id.trim()))
 //                     .filter(Boolean);
+
 //             }
 //         }
 
-//         /* ---------- FILTERS ---------- */
+//         /* ================= FILTERS ================= */
+
 //         if (origin) {
 //             condition += ` AND COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) = ?`;
 //             params.push(origin);
@@ -10367,40 +11035,118 @@ const restore_order_from_warehouse = async (req, res) => {
 //         }
 
 //         if (startDate && endDate) {
-//             condition += ` AND tbl_freight.created_at BETWEEN ? AND ?`;
-//             params.push(startDate, endDate);
+
+//             condition += `
+//                 AND (
+//                     tbl_freight.created_at BETWEEN ? AND ?
+//                     OR tbl_orders.created_at BETWEEN ? AND ?
+//                 )
+//             `;
+
+//             params.push(
+//                 startDate,
+//                 endDate,
+//                 startDate,
+//                 endDate
+//             );
+
 //         }
 
 //         if (freightType) {
-//             condition += ` AND tbl_freight.freight = ?`;
+//             condition += ` AND COALESCE(tbl_freight.freight, tbl_orders.freight) = ?`;
 //             params.push(freightType);
 //         }
 
 //         if (freightSpeed) {
-//             condition += ` AND tbl_freight.type = ?`;
+//             condition += ` AND (tbl_freight.type = ? OR tbl_freight.id IS NULL)`;
 //             params.push(freightSpeed);
 //         }
 
-//         /* ---------- MAIN ACCESS LOGIC (FIXED) ---------- */
-//         if (
-//             !ALL_ACCESS_USERS.includes(Number(user_id)) &&
-//             accessCountries.length
-//         ) {
-//             const placeholders = accessCountries.map(() => '?').join(',');
+//         /* ================= NEW FILTER : In Store / Out ================= */
+
+//         if (warehouse_item_status === "In Store") {
+
+//             condition += `
+//             AND (
+//                 (
+//                     SELECT MIN(ot.created_at)
+//                     FROM order_track ot
+//                     WHERE
+//                         (
+//                             warehouse_assign_order.order_id IS NOT NULL
+//                             AND warehouse_assign_order.order_id > 0
+//                             AND ot.order_id = warehouse_assign_order.order_id
+//                         )
+//                         OR (
+//                             NULLIF(warehouse_assign_order.batch_id,0) IS NOT NULL
+//                             AND ot.batch_id = warehouse_assign_order.batch_id
+//                         )
+//                 ) IS NULL
+//                 AND (
+//                     tbl_orders.track_status IS NULL
+//                     OR tbl_orders.track_status = ''
+//                 )
+//                 AND (
+//                     batches.track_status IS NULL
+//                     OR batches.track_status = ''
+//                 )
+//             )
+//             `;
+
+//         }
+
+//         if (warehouse_item_status === "Out") {
+
+//             condition += `
+//             AND (
+//                 (
+//                     SELECT MIN(ot.created_at)
+//                     FROM order_track ot
+//                     WHERE
+//                         (
+//                             warehouse_assign_order.order_id IS NOT NULL
+//                             AND warehouse_assign_order.order_id > 0
+//                             AND ot.order_id = warehouse_assign_order.order_id
+//                         )
+//                         OR (
+//                             NULLIF(warehouse_assign_order.batch_id,0) IS NOT NULL
+//                             AND ot.batch_id = warehouse_assign_order.batch_id
+//                         )
+//                 ) IS NOT NULL
+//                 OR (
+//                     tbl_orders.track_status IS NOT NULL
+//                     AND tbl_orders.track_status <> ''
+//                 )
+//                 OR (
+//                     batches.track_status IS NOT NULL
+//                     AND batches.track_status <> ''
+//                 )
+//             )
+//             `;
+
+//         }
+
+//         /* ================= ACCESS CONTROL ================= */
+
+//         if (!ALL_ACCESS_USERS.includes(Number(user_id)) && accessCountries.length) {
+
+//             const placeholders = accessCountries.map(() => "?").join(",");
 
 //             if (user_type == 2) {
-//                 const placeholders = accessCountries.map(() => '?').join(',');
 
 //                 condition += `
-//         AND (
-//             tbl_freight.user_id = ?
-//             OR tbl_freight.sales_representative = ?
-//             OR (
-//                 COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) IN (${placeholders})
-//                 OR COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) IN (${placeholders})
-//             )
-//         )
-//     `;
+//                     AND (
+//                         tbl_freight.user_id = ?
+//                         OR tbl_freight.sales_representative = ?
+//                         OR (
+//                             COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+//                             IN (${placeholders})
+//                             OR
+//                             COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+//                             IN (${placeholders})
+//                         )
+//                     )
+//                 `;
 
 //                 params.push(
 //                     user_id,
@@ -10408,138 +11154,306 @@ const restore_order_from_warehouse = async (req, res) => {
 //                     ...accessCountries,
 //                     ...accessCountries
 //                 );
+
 //             } else {
+
 //                 condition += `
 //                     AND (
-//                         tbl_freight.collection_from IN (${placeholders})
-//                         OR tbl_freight.delivery_to IN (${placeholders})
+//                         COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+//                         IN (${placeholders})
+//                         OR
+//                         COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+//                         IN (${placeholders})
 //                     )
 //                 `;
-//                 params.push(...accessCountries, ...accessCountries);
+
+//                 params.push(
+//                     ...accessCountries,
+//                     ...accessCountries
+//                 );
+
 //             }
+
 //         }
 
-//         /* ---------- SEARCH ---------- */
+//         /* ================= SEARCH ================= */
+
 //         if (search) {
-//             condition += ` AND (
-//                 CASE 
-//                     WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
-//                     ELSE tbl_users.full_name
-//                 END LIKE ?
-//                 OR tbl_freight.freight_number LIKE ?
-//                OR COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) LIKE ?
-//                 OR tbl_orders.client_name LIKE ?
-//                 OR warehouse_tbl.warehouse_name LIKE ?
-//                 OR batches.batch_number LIKE ?
-//                 OR c.name LIKE ?
-//                 OR co.name LIKE ?
-//             )`;
+
+//             condition += `
+//                 AND (
+//                     (
+//                         CASE
+//                             WHEN tbl_orders.client_id = 0
+//                             THEN tbl_orders.client_name
+//                             ELSE tbl_users.full_name
+//                         END LIKE ?
+//                     )
+//                     OR tbl_freight.freight_number LIKE ?
+//                     OR COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) LIKE ?
+//                     OR tbl_orders.client_name LIKE ?
+//                     OR warehouse_tbl.warehouse_name LIKE ?
+//                     OR batches.batch_number LIKE ?
+//                     OR c.name LIKE ?
+//                     OR co.name LIKE ?
+//                 )
+//             `;
+
 //             const s = `%${search}%`;
-//             params.push(s, s, s, s, s, s, s, s);
+
+//             params.push(
+//                 s,
+//                 s,
+//                 s,
+//                 s,
+//                 s,
+//                 s,
+//                 s,
+//                 s
+//             );
+
 //         }
 
-//         /* ---------- BASE QUERY ---------- */
-//         const baseQueryWithoutGroup = `
+//         /* ================= BASE QUERY ================= */
+
+//         const baseQuery = `
 //             FROM warehouse_assign_order
 
-//             LEFT JOIN tbl_freight 
+//             LEFT JOIN tbl_freight
 //                 ON warehouse_assign_order.freight_id = tbl_freight.id
 
-//             LEFT JOIN shipping_estimate 
-//                 ON warehouse_assign_order.freight_id = shipping_estimate.freight_id 
-//                 AND tbl_freight.is_deleted = '0'
-
-//             LEFT JOIN tbl_orders 
+//             LEFT JOIN tbl_orders
 //                 ON warehouse_assign_order.order_id = tbl_orders.id
 
-//             LEFT JOIN tbl_users 
+//             LEFT JOIN tbl_users
 //                 ON tbl_users.id = tbl_orders.client_id
 
-//             INNER JOIN tbl_users AS login_user
-//                 ON login_user.id = ?
-
-//             LEFT JOIN batches 
+//             LEFT JOIN batches
 //                 ON batches.id = warehouse_assign_order.batch_id
 
-//             LEFT JOIN warehouse_tbl 
+//             LEFT JOIN warehouse_tbl
 //                 ON warehouse_tbl.id = batches.warehouse_id
 
-//             LEFT JOIN countries AS c 
-//     ON c.id = COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+//             LEFT JOIN countries c
+//                 ON c.id = COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
 
-// LEFT JOIN countries AS co 
-//     ON co.id = COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+//             LEFT JOIN countries co
+//                 ON co.id = COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
 
 //             LEFT JOIN (
-//                 SELECT 
+//                 SELECT
 //                     warehouse_order_id,
-//                     SUM(dimension) AS wp_total_dimension,
-//                     SUM(weight) AS wp_total_weight,
-//                     SUM(packages) AS wp_total_packages
+//                     SUM(IFNULL(dimension,0)) AS wp_total_dimension,
+//                     SUM(IFNULL(weight,0)) AS wp_total_weight,
+//                     SUM(IFNULL(packages,0)) AS wp_total_packages
 //                 FROM warehouse_products
 //                 GROUP BY warehouse_order_id
-//             ) wp ON wp.warehouse_order_id = warehouse_assign_order.id
+//             ) wp
+//                 ON wp.warehouse_order_id = warehouse_assign_order.id
 
 //             ${condition}
 //         `;
 
-//         params.unshift(user_id);
+//         /* ================= COUNT ================= */
 
 //         const countQuery = `
 //             SELECT COUNT(DISTINCT warehouse_assign_order.id) AS total
-//             ${baseQueryWithoutGroup}
+//             ${baseQuery}
 //         `;
 
 //         const totalResult = await new Promise((resolve, reject) => {
-//             con.query(countQuery, params, (err, rows) => {
-//                 if (err) return reject(err);
-//                 resolve(rows);
-//             });
+
+//             con.query(
+//                 countQuery,
+//                 params,
+//                 (err, rows) => err ? reject(err) : resolve(rows)
+//             );
+
 //         });
 
 //         const total = totalResult[0]?.total || 0;
 //         const offset = (page - 1) * limit;
 
+//         // -------- PART 2 CONTINUES FROM HERE --------
+
+//         const trackingStartedAtSql = `
+//             (
+//                 SELECT MIN(ot.created_at)
+//                 FROM order_track ot
+//                 WHERE
+//                     (
+//                         warehouse_assign_order.order_id IS NOT NULL
+//                         AND warehouse_assign_order.order_id > 0
+//                         AND ot.order_id = warehouse_assign_order.order_id
+//                     )
+//                     OR (
+//                         NULLIF(warehouse_assign_order.batch_id, 0) IS NOT NULL
+//                         AND ot.batch_id = warehouse_assign_order.batch_id
+//                     )
+//             )
+//         `;
+
+//         const hasTrackingStartedSql = `
+//             (
+//                 ${trackingStartedAtSql} IS NOT NULL
+//                 OR (
+//                     tbl_orders.track_status IS NOT NULL
+//                     AND tbl_orders.track_status != ''
+//                 )
+//                 OR (
+//                     batches.track_status IS NOT NULL
+//                     AND batches.track_status != ''
+//                 )
+//             )
+//         `;
+
+//         /* ================= MAIN QUERY ================= */
+
 //         const query = `
-//             SELECT 
+//             SELECT
+
 //                 warehouse_assign_order.*,
 //                 warehouse_assign_order.id AS warehouse_assign_order_id,
-//                 warehouse_assign_order.costs_to_collect AS order_costs_to_collect,
-//                 warehouse_assign_order.warehouse_cost AS order_warehouse_cost,
 
 //                 tbl_freight.*,
-//                 tbl_freight.id AS freight_ID,
-//                 tbl_freight.freight AS Freight,
-//                 tbl_freight.delivery_to AS country_delivery_to,
-//                 tbl_freight.collection_from AS country_collection_form,
-// COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) AS product_desc,
-//                 SUM(tbl_freight.dimension + IFNULL(wp.wp_total_dimension, 0)) AS total_warehouse_dimension,
-//                 SUM(tbl_freight.weight + IFNULL(wp.wp_total_weight, 0)) AS total_warehouse_weight,
-//                 SUM(tbl_freight.no_of_packages + IFNULL(wp.wp_total_packages, 0)) AS total_warehouse_noOfPackages,
-//                 (COUNT(tbl_freight.id) + COUNT(wp.wp_total_packages)) AS total_freight,
-
 //                 tbl_orders.*,
-//                 batches.*,
-//                 warehouse_tbl.*,
-//                 shipping_estimate.id AS estimated_id,
+
+//                 COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) AS delivery_to,
+//                 COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) AS collection_from,
+
+//                 batches.batch_number,
+
+//                 COALESCE(tbl_freight.freight, tbl_orders.freight) AS Freight,
+
+//                 COALESCE(
+//                     tbl_freight.product_desc,
+//                     tbl_orders.goods_description
+//                 ) AS product_desc,
+
+//                 COALESCE(
+//                     NULLIF(tbl_freight.dimension,0),
+//                     NULLIF(CAST(tbl_orders.dimensions AS DECIMAL(10,2)),0),
+//                     NULLIF(wp.wp_total_dimension,0),
+//                     0
+//                 ) AS total_dimension,
+
+//                 COALESCE(
+//                     NULLIF(tbl_freight.weight,0),
+//                     NULLIF(CAST(tbl_orders.weight AS DECIMAL(10,2)),0),
+//                     NULLIF(wp.wp_total_weight,0),
+//                     0
+//                 ) AS total_weight,
+
+//                 COALESCE(
+//                     NULLIF(tbl_freight.no_of_packages,0),
+//                     NULLIF(CAST(tbl_orders.cartons AS UNSIGNED),0),
+//                     NULLIF(wp.wp_total_packages,0),
+//                     0
+//                 ) AS total_packages,
+
 //                 c.name AS delivery_to_name,
 //                 co.name AS collection_from_name,
 
-//                 CASE 
-//                     WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+//                 CASE
+//                     WHEN tbl_orders.client_id = 0
+//                     THEN tbl_orders.client_name
 //                     ELSE tbl_users.full_name
-//                 END AS client_name
+//                 END AS client_name,
 
-//             ${baseQueryWithoutGroup}
+//                 ${trackingStartedAtSql} AS tracking_started_at,
+
+//                 CASE
+//                     WHEN ${hasTrackingStartedSql}
+//                     THEN 'Out'
+//                     ELSE 'In Store'
+//                 END AS warehouse_item_status,
+
+//                 CASE
+
+//                     WHEN COALESCE(
+//                         warehouse_assign_order.date_received,
+//                         DATE(warehouse_assign_order.warehousing_date),
+//                         DATE(warehouse_assign_order.created_at)
+//                     ) IS NULL
+//                     THEN 0
+
+//                     WHEN ${trackingStartedAtSql} IS NOT NULL
+//                     THEN
+//                         GREATEST(
+//                             DATEDIFF(
+//                                 DATE(${trackingStartedAtSql}),
+//                                 COALESCE(
+//                                     warehouse_assign_order.date_received,
+//                                     DATE(warehouse_assign_order.warehousing_date),
+//                                     DATE(warehouse_assign_order.created_at)
+//                                 )
+//                             ),
+//                             0
+//                         )
+
+//                     WHEN (
+//                         tbl_orders.track_status IS NOT NULL
+//                         AND tbl_orders.track_status != ''
+//                     )
+//                     OR (
+//                         batches.track_status IS NOT NULL
+//                         AND batches.track_status != ''
+//                     )
+//                     THEN
+//                         GREATEST(
+//                             DATEDIFF(
+//                                 COALESCE(
+//                                     batches.date_dispatch,
+//                                     warehouse_assign_order.dispatched_date,
+//                                     CURDATE()
+//                                 ),
+//                                 COALESCE(
+//                                     warehouse_assign_order.date_received,
+//                                     DATE(warehouse_assign_order.warehousing_date),
+//                                     DATE(warehouse_assign_order.created_at)
+//                                 )
+//                             ),
+//                             0
+//                         )
+
+//                     ELSE
+//                         GREATEST(
+//                             DATEDIFF(
+//                                 CURDATE(),
+//                                 COALESCE(
+//                                     warehouse_assign_order.date_received,
+//                                     DATE(warehouse_assign_order.warehousing_date),
+//                                     DATE(warehouse_assign_order.created_at)
+//                                 )
+//                             ),
+//                             0
+//                         )
+
+//                 END AS days_in_warehouse,
+
+//                 tbl_orders.track_status AS order_track_status,
+//                 batches.track_status AS batch_track_status
+
+//             ${baseQuery}
+
 //             GROUP BY warehouse_assign_order.id
+
 //             ORDER BY warehouse_assign_order.created_at DESC
+
 //             LIMIT ? OFFSET ?
 //         `;
 
-//         const dataParams = [...params, limit, offset];
+//         const dataParams = [
+//             ...params,
+//             Number(limit),
+//             offset
+//         ];
 
 //         con.query(query, dataParams, (err, data) => {
+
 //             if (err) {
+//                 console.error("QUERY ERROR:", err);
+
 //                 return res.status(500).send({
 //                     success: false,
 //                     message: err.message
@@ -10553,13 +11467,18 @@ const restore_order_from_warehouse = async (req, res) => {
 //                 page: Number(page),
 //                 limit: Number(limit)
 //             });
+
 //         });
 
 //     } catch (error) {
+
+//         console.error(error);
+
 //         return res.status(500).send({
 //             success: false,
 //             message: error.message
 //         });
+
 //     }
 // };
 
@@ -10575,6 +11494,7 @@ const GetWarehouseOrders = async (req, res) => {
             user_id,
             user_type,
             search,
+            warehouse_item_status,
             page = 1,
             limit = 10
         } = req.body;
@@ -10587,6 +11507,9 @@ const GetWarehouseOrders = async (req, res) => {
         }
 
         const ALL_ACCESS_USERS = [1, 19855];
+        const pageNo = Number(page);
+        const pageSize = Number(limit);
+        const offset = (pageNo - 1) * pageSize;
 
         let condition = ` WHERE warehouse_assign_order.warehouse_status = 1 `;
         let params = [];
@@ -10597,7 +11520,10 @@ const GetWarehouseOrders = async (req, res) => {
         if (!ALL_ACCESS_USERS.includes(Number(user_id))) {
             const rows = await new Promise((resolve, reject) => {
                 con.query(
-                    `SELECT access_country FROM tbl_users WHERE id = ? AND is_deleted = 0`,
+                    `SELECT access_country
+                     FROM tbl_users
+                     WHERE id = ?
+                     AND is_deleted = 0`,
                     [user_id],
                     (err, rows) => err ? reject(err) : resolve(rows)
                 );
@@ -10605,14 +11531,13 @@ const GetWarehouseOrders = async (req, res) => {
 
             if (rows.length && rows[0].access_country) {
                 accessCountries = rows[0].access_country
-                    .split(',')
+                    .split(",")
                     .map(id => Number(id.trim()))
                     .filter(Boolean);
             }
         }
 
-        /* ---------- FILTERS (FIXED) ---------- */
-
+        /* ================= FILTERS ================= */
         if (origin) {
             condition += ` AND COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) = ?`;
             params.push(origin);
@@ -10623,14 +11548,13 @@ const GetWarehouseOrders = async (req, res) => {
             params.push(destination);
         }
 
-        // FIXED DATE FILTER
         if (startDate && endDate) {
             condition += `
-        AND (
-          tbl_freight.created_at BETWEEN ? AND ?
-          OR tbl_orders.created_at BETWEEN ? AND ?
-        )
-      `;
+                AND (
+                    tbl_freight.created_at BETWEEN ? AND ?
+                    OR tbl_orders.created_at BETWEEN ? AND ?
+                )
+            `;
             params.push(startDate, endDate, startDate, endDate);
         }
 
@@ -10639,176 +11563,283 @@ const GetWarehouseOrders = async (req, res) => {
             params.push(freightType);
         }
 
-        // FIXED freightSpeed
         if (freightSpeed) {
             condition += ` AND (tbl_freight.type = ? OR tbl_freight.id IS NULL)`;
             params.push(freightSpeed);
         }
 
-        /* ---------- ACCESS CONTROL (FIXED) ---------- */
-        if (!ALL_ACCESS_USERS.includes(Number(user_id)) && accessCountries.length) {
+        /* Pre-aggregated tracking (replaces per-row correlated subqueries) */
+        const trackingJoins = `
+            LEFT JOIN (
+                SELECT order_id, MIN(created_at) AS first_track_at
+                FROM order_track
+                WHERE order_id IS NOT NULL AND order_id > 0
+                GROUP BY order_id
+            ) ot_order
+                ON ot_order.order_id = warehouse_assign_order.order_id
+                AND warehouse_assign_order.order_id > 0
+ 
+            LEFT JOIN (
+                SELECT batch_id, MIN(created_at) AS first_track_at
+                FROM order_track
+                WHERE batch_id IS NOT NULL AND batch_id > 0
+                GROUP BY batch_id
+            ) ot_batch
+                ON ot_batch.batch_id = warehouse_assign_order.batch_id
+                AND NULLIF(warehouse_assign_order.batch_id, 0) IS NOT NULL
+        `;
 
-            const placeholders = accessCountries.map(() => '?').join(',');
+        const trackingStartedAtExpr = `
+            CASE
+                WHEN ot_order.first_track_at IS NULL AND ot_batch.first_track_at IS NULL THEN NULL
+                WHEN ot_order.first_track_at IS NULL THEN ot_batch.first_track_at
+                WHEN ot_batch.first_track_at IS NULL THEN ot_order.first_track_at
+                ELSE LEAST(ot_order.first_track_at, ot_batch.first_track_at)
+            END
+        `;
+
+        const hasTrackingStartedExpr = `
+            (
+                ot_order.first_track_at IS NOT NULL
+                OR ot_batch.first_track_at IS NOT NULL
+                OR (tbl_orders.track_status IS NOT NULL AND tbl_orders.track_status != '')
+                OR (batches.track_status IS NOT NULL AND batches.track_status != '')
+            )
+        `;
+
+        const arrivalDateExpr = `
+            COALESCE(
+                warehouse_assign_order.date_received,
+                DATE(warehouse_assign_order.warehousing_date),
+                DATE(warehouse_assign_order.created_at)
+            )
+        `;
+
+        if (warehouse_item_status === "In Store") {
+            condition += `
+                AND ot_order.first_track_at IS NULL
+                AND ot_batch.first_track_at IS NULL
+                AND (tbl_orders.track_status IS NULL OR tbl_orders.track_status = '')
+                AND (batches.track_status IS NULL OR batches.track_status = '')
+            `;
+        }
+
+        if (warehouse_item_status === "Out") {
+            condition += ` AND ${hasTrackingStartedExpr} `;
+        }
+
+        /* ================= ACCESS CONTROL ================= */
+        if (!ALL_ACCESS_USERS.includes(Number(user_id)) && accessCountries.length) {
+            const placeholders = accessCountries.map(() => "?").join(",");
 
             if (user_type == 2) {
                 condition += `
-          AND (
-            tbl_freight.user_id = ?
-            OR tbl_freight.sales_representative = ?
-            OR (
-              COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) IN (${placeholders})
-              OR COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) IN (${placeholders})
-            )
-          )
-        `;
-
+                    AND (
+                        tbl_freight.user_id = ?
+                        OR tbl_freight.sales_representative = ?
+                        OR (
+                            COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+                            IN (${placeholders})
+                            OR COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+                            IN (${placeholders})
+                        )
+                    )
+                `;
                 params.push(user_id, user_id, ...accessCountries, ...accessCountries);
-
             } else {
                 condition += `
-          AND (
-            COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) IN (${placeholders})
-            OR COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) IN (${placeholders})
-          )
-        `;
+                    AND (
+                        COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+                        IN (${placeholders})
+                        OR COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+                        IN (${placeholders})
+                    )
+                `;
                 params.push(...accessCountries, ...accessCountries);
             }
         }
 
-        /* ---------- SEARCH ---------- */
+        /* ================= SEARCH ================= */
         if (search) {
-            condition += ` AND (
-        (CASE 
-          WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
-          ELSE tbl_users.full_name
-        END LIKE ?)
-        OR tbl_freight.freight_number LIKE ?
-        OR COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) LIKE ?
-        OR tbl_orders.client_name LIKE ?
-        OR warehouse_tbl.warehouse_name LIKE ?
-        OR batches.batch_number LIKE ?
-        OR c.name LIKE ?
-        OR co.name LIKE ?
-      )`;
+            condition += `
+                AND (
+                    (
+                        CASE
+                            WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                            ELSE tbl_users.full_name
+                        END LIKE ?
+                    )
+                    OR tbl_freight.freight_number LIKE ?
+                    OR COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) LIKE ?
+                    OR tbl_orders.client_name LIKE ?
+                    OR warehouse_tbl.warehouse_name LIKE ?
+                    OR batches.batch_number LIKE ?
+                    OR c.name LIKE ?
+                    OR co.name LIKE ?
+                )
+            `;
 
             const s = `%${search}%`;
             params.push(s, s, s, s, s, s, s, s);
         }
 
-        /* ---------- BASE QUERY ---------- */
-
+        /* ================= BASE QUERY ================= */
         const baseQuery = `
-      FROM warehouse_assign_order
-
-      LEFT JOIN tbl_freight 
-        ON warehouse_assign_order.freight_id = tbl_freight.id
-
-      LEFT JOIN tbl_orders 
-        ON warehouse_assign_order.order_id = tbl_orders.id
-
-      LEFT JOIN tbl_users 
-        ON tbl_users.id = tbl_orders.client_id
-
-      LEFT JOIN batches 
-        ON batches.id = warehouse_assign_order.batch_id
-
-      LEFT JOIN warehouse_tbl 
-        ON warehouse_tbl.id = batches.warehouse_id
-
-      LEFT JOIN countries c
-        ON c.id = COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
-
-      LEFT JOIN countries co
-        ON co.id = COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
-
-      LEFT JOIN (
-        SELECT 
-          warehouse_order_id,
-          SUM(IFNULL(dimension,0)) AS wp_total_dimension,
-          SUM(IFNULL(weight,0)) AS wp_total_weight,
-          SUM(IFNULL(packages,0)) AS wp_total_packages
-        FROM warehouse_products
-        GROUP BY warehouse_order_id
-      ) wp ON wp.warehouse_order_id = warehouse_assign_order.id
-
-      ${condition}
-    `;
-
-        /* ---------- COUNT ---------- */
+            FROM warehouse_assign_order
+ 
+            LEFT JOIN tbl_freight
+                ON warehouse_assign_order.freight_id = tbl_freight.id
+ 
+            LEFT JOIN tbl_orders
+                ON warehouse_assign_order.order_id = tbl_orders.id
+ 
+            LEFT JOIN tbl_users
+                ON tbl_users.id = tbl_orders.client_id
+ 
+            LEFT JOIN batches
+                ON batches.id = warehouse_assign_order.batch_id
+ 
+            LEFT JOIN warehouse_tbl
+                ON warehouse_tbl.id = batches.warehouse_id
+ 
+            LEFT JOIN countries c
+                ON c.id = COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to)
+ 
+            LEFT JOIN countries co
+                ON co.id = COALESCE(tbl_freight.collection_from, tbl_orders.collection_from)
+ 
+            LEFT JOIN (
+                SELECT
+                    warehouse_order_id,
+                    SUM(IFNULL(dimension, 0)) AS wp_total_dimension,
+                    SUM(IFNULL(weight, 0)) AS wp_total_weight,
+                    SUM(IFNULL(packages, 0)) AS wp_total_packages
+                FROM warehouse_products
+                GROUP BY warehouse_order_id
+            ) wp ON wp.warehouse_order_id = warehouse_assign_order.id
+ 
+            ${trackingJoins}
+ 
+            ${condition}
+        `;
 
         const countQuery = `
-      SELECT COUNT(DISTINCT warehouse_assign_order.id) AS total
-      ${baseQuery}
-    `;
+            SELECT COUNT(warehouse_assign_order.id) AS total
+            ${baseQuery}
+        `;
 
-        const totalResult = await new Promise((resolve, reject) => {
-            con.query(countQuery, params, (err, rows) => err ? reject(err) : resolve(rows));
+        const dataQuery = `
+            SELECT
+                warehouse_assign_order.*,
+                warehouse_assign_order.id AS warehouse_assign_order_id,
+ 
+                tbl_freight.*,
+                tbl_orders.*,
+ 
+                COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) AS delivery_to,
+                COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) AS collection_from,
+ 
+                batches.batch_number,
+ 
+                COALESCE(tbl_freight.freight, tbl_orders.freight) AS Freight,
+                COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) AS product_desc,
+ 
+                COALESCE(
+                    NULLIF(tbl_freight.dimension, 0),
+                    NULLIF(CAST(tbl_orders.dimensions AS DECIMAL(10, 2)), 0),
+                    NULLIF(wp.wp_total_dimension, 0),
+                    0
+                ) AS total_dimension,
+ 
+                COALESCE(
+                    NULLIF(tbl_freight.weight, 0),
+                    NULLIF(CAST(tbl_orders.weight AS DECIMAL(10, 2)), 0),
+                    NULLIF(wp.wp_total_weight, 0),
+                    0
+                ) AS total_weight,
+ 
+                COALESCE(
+                    NULLIF(tbl_freight.no_of_packages, 0),
+                    NULLIF(CAST(tbl_orders.cartons AS UNSIGNED), 0),
+                    NULLIF(wp.wp_total_packages, 0),
+                    0
+                ) AS total_packages,
+ 
+                c.name AS delivery_to_name,
+                co.name AS collection_from_name,
+ 
+                CASE
+                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                    ELSE tbl_users.full_name
+                END AS client_name,
+ 
+                ${trackingStartedAtExpr} AS tracking_started_at,
+ 
+                CASE
+                    WHEN ${hasTrackingStartedExpr} THEN 'Out'
+                    ELSE 'In Store'
+                END AS warehouse_item_status,
+ 
+                CASE
+                    WHEN ${arrivalDateExpr} IS NULL THEN 0
+ 
+                    WHEN ${trackingStartedAtExpr} IS NOT NULL THEN
+                        GREATEST(
+                            DATEDIFF(DATE(${trackingStartedAtExpr}), ${arrivalDateExpr}),
+                            0
+                        )
+ 
+                    WHEN (tbl_orders.track_status IS NOT NULL AND tbl_orders.track_status != '')
+                        OR (batches.track_status IS NOT NULL AND batches.track_status != '') THEN
+                        GREATEST(
+                            DATEDIFF(
+                                COALESCE(
+                                    batches.date_dispatch,
+                                    warehouse_assign_order.dispatched_date,
+                                    CURDATE()
+                                ),
+                                ${arrivalDateExpr}
+                            ),
+                            0
+                        )
+ 
+                    ELSE GREATEST(DATEDIFF(CURDATE(), ${arrivalDateExpr}), 0)
+                END AS days_in_warehouse,
+ 
+                tbl_orders.track_status AS order_track_status,
+                batches.track_status AS batch_track_status
+ 
+            ${baseQuery}
+            ORDER BY warehouse_assign_order.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const runQuery = (sql, queryParams) => new Promise((resolve, reject) => {
+            con.query(sql, queryParams, (err, rows) => err ? reject(err) : resolve(rows));
         });
 
-        const total = totalResult[0]?.total || 0;
-        const offset = (page - 1) * limit;
+        const [totalResult, data] = await Promise.all([
+            runQuery(countQuery, params),
+            runQuery(dataQuery, [...params, pageSize, offset])
+        ]);
 
-        /* ---------- MAIN QUERY ---------- */
-
-        const query = `
-      SELECT 
-        warehouse_assign_order.*,
-           warehouse_assign_order.id as warehouse_assign_order_id,
-        tbl_freight.*,
-        tbl_orders.*,
-        COALESCE(tbl_freight.delivery_to, tbl_orders.delivery_to) AS delivery_to,
-COALESCE(tbl_freight.collection_from, tbl_orders.collection_from) AS collection_from,
-        batches.batch_number,
-
-        COALESCE(tbl_freight.freight, tbl_orders.freight) AS Freight,
-        COALESCE(tbl_freight.product_desc, tbl_orders.goods_description) AS product_desc,
-
-        SUM(IFNULL(tbl_freight.dimension,0) + IFNULL(wp.wp_total_dimension,0)) AS total_dimension,
-        SUM(IFNULL(tbl_freight.weight,0) + IFNULL(wp.wp_total_weight,0)) AS total_weight,
-        SUM(IFNULL(tbl_freight.no_of_packages,0) + IFNULL(wp.wp_total_packages,0)) AS total_packages,
-
-        c.name AS delivery_to_name,
-        co.name AS collection_from_name,
-
-        CASE 
-          WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
-          ELSE tbl_users.full_name
-        END AS client_name
-
-      ${baseQuery}
-      GROUP BY warehouse_assign_order.id
-      ORDER BY warehouse_assign_order.created_at DESC
-      LIMIT ? OFFSET ?
-    `;
-
-        const dataParams = [...params, Number(limit), offset];
-
-        con.query(query, dataParams, (err, data) => {
-            if (err) {
-                console.error("QUERY ERROR:", err);
-                return res.status(500).send({
-                    success: false,
-                    message: err.message
-                });
-            }
-
-            return res.status(200).send({
-                success: true,
-                data,
-                total,
-                page: Number(page),
-                limit: Number(limit)
-            });
+        return res.status(200).send({
+            success: true,
+            data,
+            total: totalResult[0]?.total || 0,
+            page: pageNo,
+            limit: pageSize
         });
 
     } catch (error) {
         console.error(error);
-        res.status(500).send({
+        return res.status(500).send({
             success: false,
             message: error.message
         });
     }
 };
+
 
 const assignWarehouseOrderToSupplier = (req, res) => {
     try {
@@ -11805,21 +12836,21 @@ const createBatch = async (req, res) => {
             registration_number,
             comment
         } = req.body;
-
+ 
         //  1. Check if batch_number already exists
         const checkQuery = 'SELECT * FROM batches WHERE batch_number = ?';
         con.query(checkQuery, [batch_number], (err, result) => {
             if (err) {
                 return res.status(500).send({ success: false, message: err.message });
             }
-
+ 
             if (result.length > 0) {
                 return res.status(400).send({
                     success: false,
                     message: 'Batch number already exists'
                 });
             }
-
+ 
             //  2. Insert new batch
             const insertQuery = `
                 INSERT INTO batches (
@@ -11837,7 +12868,7 @@ const createBatch = async (req, res) => {
                     origin_carrier, des_carrier, registration_number, comment
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
-
+ 
             con.query(insertQuery, [
                 batch_number, warehouse_id, date_first_received, ETD, total_days_storage,
                 batch_name, is_exporImport, freight_option, freight_speed,
@@ -11855,9 +12886,9 @@ const createBatch = async (req, res) => {
                 if (err) {
                     return res.status(500).send({ success: false, message: err.message });
                 }
-
+ 
                 const batchId = result.insertId;
-
+ 
                 // 3. Assign freights to batch
                 if (freight && Array.isArray(freight)) {
                     freight.forEach(freightId => {
@@ -11870,16 +12901,16 @@ const createBatch = async (req, res) => {
                         );
                     });
                 }
-
+ 
                 // 4. Handle uploaded documents
                 if (req.files && Object.keys(req.files).length > 0) {
                     for (const fieldName of Object.keys(req.files)) {
                         const filesArray = req.files[fieldName];
-
+ 
                         filesArray.forEach(file => {
                             const originalName = file.originalname;
                             const savedName = file.filename;
-
+ 
                             // Insert into batch_documents
                             con.query(
                                 `INSERT INTO batch_documents (batch_id, document_name, document_file) VALUES (?, ?, ?)`,
@@ -11888,7 +12919,7 @@ const createBatch = async (req, res) => {
                                     if (err) console.error("Error inserting batch document:", err);
                                 }
                             );
-
+ 
                             // For each freight, insert docs into freight_doc
                             if (freight && Array.isArray(freight)) {
                                 freight.forEach(freightId => {
@@ -11900,7 +12931,7 @@ const createBatch = async (req, res) => {
                                                 console.error("Error fetching freight_number:", err);
                                                 return;
                                             }
-
+ 
                                             if (freightRes.length > 0) {
                                                 const freightNumber = freightRes[0].freight_number;
                                                 con.query(
@@ -11918,7 +12949,7 @@ const createBatch = async (req, res) => {
                         });
                     }
                 }
-
+ 
                 //  5. Respond success
                 return res.status(201).send({
                     success: true,
@@ -12062,10 +13093,10 @@ const NewGetAllBatch = async (req, res) => {
         const offset = (page - 1) * limit;
 
         const getQuery = `
-            SELECT b.*, 
-                   b.origin_country_id AS origin_country, 
+            SELECT b.*,
+                   b.origin_country_id AS origin_country,
                    b.detination_country_id AS destination_country,
-                   c.name AS des_country_name, 
+                   c.name AS des_country_name,
                    co.name AS origin_country_name
             ${baseQuery}
             ORDER BY b.id DESC
@@ -12087,20 +13118,20 @@ const NewGetAllBatch = async (req, res) => {
                 const updatedResults = await Promise.all(
                     results.map((result) => {
                         return new Promise((resolve, reject) => {
-                            const getFreightQuery = `SELECT 
+                            const getFreightQuery = `SELECT
     COUNT(DISTINCT fa.id) AS count_freight,
     SUM(COALESCE(f.dimension, o.dimensions, 0)) AS total_dimension,
     SUM(COALESCE(f.weight, o.weight, 0)) AS total_weight,
     SUM(COALESCE(f.no_of_packages, o.cartons, 0)) AS total_packages
-
+ 
 FROM freight_assig_to_batch fa
-
-LEFT JOIN tbl_freight f 
-    ON f.id = fa.freight_id
-
-LEFT JOIN tbl_orders o 
+ 
+LEFT JOIN tbl_orders o
     ON o.id = fa.order_id
-
+ 
+LEFT JOIN tbl_freight f
+    ON f.id = COALESCE(fa.freight_id, o.freight_id)
+ 
 WHERE fa.batch_id = ?`;
 
                             con.query(getFreightQuery, [result.id], (err, data) => {
@@ -12108,10 +13139,24 @@ WHERE fa.batch_id = ?`;
 
                                 const totals = data[0];
 
+                                const freightWeight = parseFloat(totals.total_weight) || 0;
+                                const freightDimension = parseFloat(totals.total_dimension) || 0;
+                                const freightPackages = parseFloat(totals.total_packages) || 0;
+
                                 result.count_freight = totals.count_freight || 0;
-                                result.total_freight_dimension = totals.total_dimension || 0;
-                                result.total_freight_weight = totals.total_weight || 0;
-                                result.total_freight_packages = totals.total_packages || 0;
+                                result.total_freight_dimension = freightDimension;
+                                result.total_freight_weight = freightWeight;
+                                result.total_freight_packages = freightPackages;
+
+                                if (!(parseFloat(result.total_weight) || 0)) {
+                                    result.total_weight = freightWeight;
+                                }
+                                if (!(parseFloat(result.total_dimensions) || 0)) {
+                                    result.total_dimensions = freightDimension;
+                                }
+                                if (!(parseFloat(result.total_boxes) || 0)) {
+                                    result.total_boxes = freightPackages;
+                                }
 
                                 resolve(result);
                             });
@@ -12748,6 +13793,331 @@ const restoreOrderFromBatch = async (req, res) => {
 //     }
 // };
 
+
+// const getFreightsByBatch = async (req, res) => {
+
+//     try {
+
+//         const {
+//             batch_id,
+//             origin,
+//             destination,
+//             startDate,
+//             endDate,
+//             freightType,
+//             freightSpeed
+//         } = req.body;
+
+//         if (!batch_id) {
+
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Please provide batch_id"
+//             });
+//         }
+
+//         // =====================================================
+//         // CONDITIONS
+//         // =====================================================
+
+//         let condition = ` WHERE fa.batch_id = ? `;
+//         let params = [batch_id];
+
+//         // ORIGIN
+
+//         if (origin) {
+//             condition += `
+//                 AND (
+//                     f.collection_from = ?
+//                     OR o.collection_from = ?
+//                 )
+//             `;
+
+//             params.push(origin, origin);
+//         }
+
+//         // DESTINATION
+
+//         if (destination) {
+
+//             condition += `
+//                 AND (
+//                     f.delivery_to = ?
+//                     OR o.delivery_to = ?
+//                 )
+//             `;
+
+//             params.push(destination, destination);
+//         }
+
+//         // DATE FILTER
+
+//         if (startDate && endDate) {
+
+//             condition += ` AND fa.created_at BETWEEN ? AND ? `;
+//             params.push(startDate, endDate);
+//         }
+
+//         // FREIGHT TYPE
+
+//         if (freightType) {
+
+//             condition += `
+//                 AND (
+//                     f.freight = ?
+//                     OR o.freight = ?
+//                 )
+//             `;
+
+//             params.push(freightType, freightType);
+//         }
+
+//         // FREIGHT SPEED
+
+//         if (freightSpeed) {
+
+//             condition += ` AND f.type = ? `;
+//             params.push(freightSpeed);
+//         }
+
+//         // =====================================================
+//         // MAIN QUERY
+//         // =====================================================
+
+//         const getFreightsQuery = `SELECT
+
+//     -- ASSIGN TABLE
+//     fa.id AS freight_assig_to_batch_id,
+//     fa.batch_id,
+//     fa.freight_id,
+//     fa.order_id,
+//     fa.assigned_at,
+
+//     -- MAIN IDS
+//     COALESCE(f.id, o.freight_id, 0) AS freight_ID,
+//     o.id AS order_ID,
+
+//     -- CLIENT
+//     COALESCE(f.client_id, o.client_id, 0) AS client_id,
+//     COALESCE(f.client_name, o.client_name) AS client_name,
+
+//     -- FREIGHT TYPE
+//     COALESCE(f.freight, o.freight_type, b.freight) AS freight,
+
+//     -- ROUTE
+//     COALESCE(f.collection_from, o.collection_from) AS collection_from,
+//     COALESCE(f.delivery_to, o.delivery_to) AS delivery_to,
+
+//     -- WEIGHT / DIMENSION
+//     COALESCE(f.weight, o.weight) AS weight,
+//     COALESCE(f.dimension, o.dimensions) AS dimensions,
+
+//     -- GOODS
+//     COALESCE(f.product_desc, o.goods_description) AS goods_description,
+
+//     -- package_type
+//     COALESCE(f.package_type, ws.package_type) AS package_type,
+
+//     -- DATES
+//     COALESCE(f.created_at, o.created_at) AS created_at,
+//     COALESCE(f.updated_at, o.updated_at) AS updated_at,
+
+//     -- STATUS
+//     COALESCE(f.status, o.track_status) AS status,
+
+//     -- SPEED
+//     COALESCE(f.type, b.freight_speed) AS freight_speed,
+
+//      -- no_of_packages
+//     COALESCE(f.no_of_packages, o.cartons) AS no_of_packages,
+
+//     -- ORDER FIELDS
+//     o.order_number,
+//     o.cartons,
+//     o.CBM,
+//     o.supplier_id,
+//     o.warehouse_status,
+//     o.added_by,
+
+//     -- FREIGHT FIELDS
+//     f.freight_number,
+//     f.incoterm,
+//     f.volumetric_weight,
+//     f.commodity,
+//     f.hazardous,
+
+//     -- BATCH
+//     b.id,
+//     b.batch_number,
+//     b.batch_name,
+//     b.warehouse_id,
+//     b.origin_country_id,
+//     b.detination_country_id,
+//     b.vessel,
+//     b.freight_option,
+//     b.date_start,
+//     b.total_weight,
+//     b.total_dimensions,
+//     b.dispatched,
+//     b.date_dispatch,
+//     b.time_in_storage,
+//     b.costs_to_collect,
+//     b.warehouse_cost,
+//     b.costs_to_dispatch,
+//     b.destination,
+//     b.waybill,
+//     b.agent,
+//     b.forwarding_agent,
+//     b.freight_cost,
+//     b.costs_to_collect_des,
+//     b.costs_to_dispatch_des,
+//     b.warehouse_cost_des,
+//     b.container_no,
+//     b.carrier,
+//     b.attachment,
+//     b.assign_to_shipment,
+//     b.date_first_received,
+//     b.total_days_storage,
+//     b.is_exporImport,
+//     b.collection_warehouse,
+//     b.delivery_warehouse,
+//     b.origin_handler,
+//     b.des_handler,
+//     b.origin_doc_costs,
+//     b.des_doc_costs,
+//     b.origin_oncarriage_costs,
+//     b.des_oncarriage_costs,
+//     b.origin_Incidental_costs,
+//     b.des_Incidental_costs,
+//     b.no_of_shipments,
+//     b.nature_of_good,
+//     b.is_deleted,
+//     b.type_of_packaging,
+//     b.total_boxes,
+//     b.volumentric_weight,
+//     b.master_waybill,
+//     b.house_waybill,
+//     b.devy_port_of_loading,
+//     b.devy_port_of_discharge,
+//     b.devy_final_des,
+//     b.origin_carrier,
+//     b.des_carrier,
+//     b.registration_number,
+//     b.ETD,
+//     b.port_loading,
+//     b.port_discharge,
+//     b.document_name,
+//     b.document_file,
+
+//     -- EXTRA FREIGHT/ORDER MERGED
+//     o.track_status AS track_status,
+//     COALESCE(f.comment, '') AS comment,
+
+//     COALESCE(f.collection_address, '') AS collection_address,
+//     COALESCE(f.delivery_address, '') AS delivery_address,
+
+//     COALESCE(f.nature_of_goods, b.nature_of_good, '') AS nature_of_good,
+
+//     -- DELIVERY DETAILS
+//     od.status AS delivery_status,
+//     od.date_dispatched AS delivery_date_dispatched,
+//     od.ETA AS delivery_ETA,
+//     od.port_of_loading AS delivery_port_of_loading,
+//     od.port_of_discharge AS delivery_port_of_discharge,
+
+//     -- WAREHOUSE
+//     ws.id AS warehouse_assign_order_id,
+//     ws.batch_id AS warehouse_batch_id,
+//     ws.assign_to_batch,
+
+//     -- COUNTRY
+//     co.name AS warehouse_origin,
+
+//     -- WAREHOUSE NAME
+//     w.warehouse_name,
+
+//     -- USER
+//     COALESCE(u.full_name, o.client_name) AS client_Name,
+//     u.client_number AS client_number
+
+//            FROM freight_assig_to_batch fa
+
+// LEFT JOIN tbl_orders o
+//     ON (
+//         fa.order_id = o.id
+//         OR fa.freight_id = o.freight_id
+//     )
+
+// LEFT JOIN tbl_freight f
+//     ON f.id = COALESCE(fa.freight_id, o.freight_id)
+
+// LEFT JOIN order_delivery_details od
+//     ON od.order_id = o.id
+
+// LEFT JOIN batches b
+//     ON b.id = fa.batch_id
+
+// LEFT JOIN warehouse_tbl w
+//     ON w.id = b.warehouse_id
+
+// LEFT JOIN warehouse_assign_order ws
+//     ON ws.order_id = o.id
+
+// LEFT JOIN countries co
+//     ON co.id = w.country
+
+// LEFT JOIN tbl_users u
+//     ON u.id = COALESCE(f.client_id, o.client_id)
+//             ${condition}
+
+//             GROUP BY fa.id
+
+//             ORDER BY fa.id DESC
+//         `;
+
+//         // =====================================================
+//         // EXECUTE QUERY
+//         // =====================================================
+
+//         con.query(getFreightsQuery, params, (err, result) => {
+
+//             if (err) {
+
+//                 console.log("GET FREIGHTS ERROR:", err);
+
+//                 return res.status(500).send({
+//                     success: false,
+//                     message: err.message
+//                 });
+//             }
+
+//             if (!result.length) {
+
+//                 return res.status(404).send({
+//                     success: false,
+//                     message: 'No records found for this batch'
+//                 });
+//             }
+
+//             return res.status(200).send({
+//                 success: true,
+//                 total: result.length,
+//                 data: result
+//             });
+//         });
+
+//     } catch (error) {
+
+//         console.log("MAIN ERROR:", error);
+
+//         return res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+
 const getFreightsByBatch = async (req, res) => {
 
     try {
@@ -12839,52 +14209,57 @@ const getFreightsByBatch = async (req, res) => {
         // =====================================================
 
         const getFreightsQuery = `SELECT
-
+ 
     -- ASSIGN TABLE
     fa.id AS freight_assig_to_batch_id,
     fa.batch_id,
     fa.freight_id,
     fa.order_id,
     fa.assigned_at,
-
+ 
     -- MAIN IDS
     COALESCE(f.id, o.freight_id, 0) AS freight_ID,
     o.id AS order_ID,
-
+ 
     -- CLIENT
-    COALESCE(f.client_id, o.client_id, 0) AS client_id,
-    COALESCE(f.client_name, o.client_name) AS client_name,
+   COALESCE(NULLIF(f.client_id,0), o.client_id, 0) AS client_id,
 
+   COALESCE(
+    f.client_name,
+    o.client_name,
+    u.full_name
+   ) AS client_name,
+ 
     -- FREIGHT TYPE
     COALESCE(f.freight, o.freight_type, b.freight) AS freight,
-
+ 
     -- ROUTE
     COALESCE(f.collection_from, o.collection_from) AS collection_from,
     COALESCE(f.delivery_to, o.delivery_to) AS delivery_to,
-
+ 
     -- WEIGHT / DIMENSION
     COALESCE(f.weight, o.weight) AS weight,
     COALESCE(f.dimension, o.dimensions) AS dimensions,
-
+ 
     -- GOODS
     COALESCE(f.product_desc, o.goods_description) AS goods_description,
-
+ 
     -- package_type
     COALESCE(f.package_type, ws.package_type) AS package_type,
-
+ 
     -- DATES
     COALESCE(f.created_at, o.created_at) AS created_at,
     COALESCE(f.updated_at, o.updated_at) AS updated_at,
-
+ 
     -- STATUS
     COALESCE(f.status, o.track_status) AS status,
-
+ 
     -- SPEED
     COALESCE(f.type, b.freight_speed) AS freight_speed,
-
+ 
      -- no_of_packages
     COALESCE(f.no_of_packages, o.cartons) AS no_of_packages,
-
+ 
     -- ORDER FIELDS
     o.order_number,
     o.cartons,
@@ -12892,14 +14267,14 @@ const getFreightsByBatch = async (req, res) => {
     o.supplier_id,
     o.warehouse_status,
     o.added_by,
-
+ 
     -- FREIGHT FIELDS
     f.freight_number,
     f.incoterm,
     f.volumetric_weight,
     f.commodity,
     f.hazardous,
-
+ 
     -- BATCH
     b.id,
     b.batch_number,
@@ -12962,70 +14337,70 @@ const getFreightsByBatch = async (req, res) => {
     b.port_discharge,
     b.document_name,
     b.document_file,
-
+ 
     -- EXTRA FREIGHT/ORDER MERGED
     o.track_status AS track_status,
     COALESCE(f.comment, '') AS comment,
-
+ 
     COALESCE(f.collection_address, '') AS collection_address,
     COALESCE(f.delivery_address, '') AS delivery_address,
-
+ 
     COALESCE(f.nature_of_goods, b.nature_of_good, '') AS nature_of_good,
-
+ 
     -- DELIVERY DETAILS
     od.status AS delivery_status,
     od.date_dispatched AS delivery_date_dispatched,
     od.ETA AS delivery_ETA,
     od.port_of_loading AS delivery_port_of_loading,
     od.port_of_discharge AS delivery_port_of_discharge,
-
+ 
     -- WAREHOUSE
     ws.id AS warehouse_assign_order_id,
     ws.batch_id AS warehouse_batch_id,
     ws.assign_to_batch,
-
+ 
     -- COUNTRY
     co.name AS warehouse_origin,
-
+ 
     -- WAREHOUSE NAME
     w.warehouse_name,
-
+ 
     -- USER
     COALESCE(u.full_name, o.client_name) AS client_Name,
     u.client_number AS client_number
-
+ 
            FROM freight_assig_to_batch fa
-
-LEFT JOIN tbl_freight f
-    ON fa.freight_id = f.id
-
+ 
 LEFT JOIN tbl_orders o
     ON (
         fa.order_id = o.id
         OR fa.freight_id = o.freight_id
     )
-
+ 
+LEFT JOIN tbl_freight f
+    ON f.id = COALESCE(fa.freight_id, o.freight_id)
+ 
 LEFT JOIN order_delivery_details od
     ON od.order_id = o.id
-
+ 
 LEFT JOIN batches b
     ON b.id = fa.batch_id
-
+ 
 LEFT JOIN warehouse_tbl w
     ON w.id = b.warehouse_id
-
+ 
 LEFT JOIN warehouse_assign_order ws
     ON ws.order_id = o.id
-
+ 
 LEFT JOIN countries co
     ON co.id = w.country
-
+ 
 LEFT JOIN tbl_users u
-    ON u.id = COALESCE(f.client_id, o.client_id)
+ON u.id = COALESCE(NULLIF(f.client_id,0), o.client_id)
             ${condition}
-
+ 
             GROUP BY fa.id
-
+ 
             ORDER BY fa.id DESC
         `;
 
@@ -13071,55 +14446,395 @@ LEFT JOIN tbl_users u
     }
 };
 
-const MoveToOrder = async (req, res) => {
+// const MoveToOrder = async (req, res) => {
+//     try {
+//         const { freight_id, client_id } = req.body;
+//         // console.log(freight_id);
+//         if (!freight_id || !client_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Please provide freight_id or client_id"
+//             })
+//         }
+//         await con.query(`select * from tbl_orders where freight_id='${freight_id}'`, (err, order_status) => {
+//             if (err) throw err;
+//             if (order_status.length < 1) {
+//                 con.query(`update tbl_freight set order_status='${1}' where id='${freight_id}'`, (err, data) => {
+//                     if (err) throw err;
+//                     if (data.affectedRows > 0) {
+//                         con.query('INSERT INTO tbl_orders (freight_id, client_id) VALUES (?,?)', [freight_id, client_id], (err, result) => {
+//                             if (err) throw err;
+//                             // console.log(result.affectedRows);
+//                         })
+
+//                         res.status(200).send({
+//                             success: true,
+//                             message: "Move to order successfully"
+//                         })
+//                     }
+//                     else {
+//                         res.status(400).send({
+//                             success: false,
+//                             message: "Failed to move order"
+//                         })
+//                     }
+//                 })
+//             }
+//             else {
+//                 res.status(400).send({
+//                     success: false,
+//                     message: "Already moved into order."
+//                 })
+//             }
+//         })
+
+//     } catch (error) {
+//         res.status(500).send({
+//             success: false,
+//             message: error.message
+//         })
+//     }
+// }
+
+const generateClearanceNumber = (callback) => {
     try {
+        // Get the last inserted clearance number
+        con.query(
+            'SELECT clearance_number FROM tbl_clearance ORDER BY id DESC LIMIT 1',
+            (err, rows) => {
+                if (err) {
+                    callback(err);
+                    return;
+                }
+
+                let sequenceNumber = 1;
+                const currentDate = new Date();
+                const year = currentDate.getFullYear();
+                const month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); // Months are zero-indexed
+
+                if (rows.length > 0 && rows[0].clearance_number) {
+                    const lastClearanceNumber = rows[0].clearance_number;
+                    const lastYearMonth = lastClearanceNumber.slice(2, 8); // Extract the year and month (e.g., '202406')
+                    const currentYearMonth = `${year}${month}`;
+
+                    if (lastYearMonth === currentYearMonth) {
+                        const lastSequencePart = parseInt(lastClearanceNumber.slice(-3)); // Extract last 3 digits
+                        sequenceNumber = lastSequencePart + 1;
+                    }
+                }
+
+                // Format the clearance number as C-YYYYMMNNN
+                const clearanceNumber = `C-${year}${month}${sequenceNumber.toString().padStart(3, '0')}`;
+                callback(null, clearanceNumber);
+            }
+        );
+    } catch (error) {
+        // console.error('Error generating clearance number:', error);
+        callback(error);
+    }
+};
+
+const MoveToOrder = async (req, res) => {
+
+    try {
+
         const { freight_id, client_id } = req.body;
-        // console.log(freight_id);
+
         if (!freight_id || !client_id) {
             return res.status(400).send({
                 success: false,
-                message: "Please provide freight_id or client_id"
-            })
+                message: "Please provide freight_id and client_id"
+            });
         }
-        await con.query(`select * from tbl_orders where freight_id='${freight_id}'`, (err, order_status) => {
-            if (err) throw err;
-            if (order_status.length < 1) {
-                con.query(`update tbl_freight set order_status='${1}' where id='${freight_id}'`, (err, data) => {
-                    if (err) throw err;
-                    if (data.affectedRows > 0) {
-                        con.query('INSERT INTO tbl_orders (freight_id, client_id) VALUES (?,?)', [freight_id, client_id], (err, result) => {
-                            if (err) throw err;
-                            // console.log(result.affectedRows);
-                        })
 
-                        res.status(200).send({
-                            success: true,
-                            message: "Move to order successfully"
-                        })
-                    }
-                    else {
-                        res.status(400).send({
-                            success: false,
-                            message: "Failed to move order"
-                        })
-                    }
-                })
-            }
-            else {
-                res.status(400).send({
-                    success: false,
-                    message: "Already moved into order."
-                })
-            }
-        })
+        con.query(
+            "SELECT * FROM tbl_orders WHERE freight_id=?",
+            [freight_id],
+            (err, order_status) => {
+
+                if (err) {
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                if (order_status.length > 0) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Already moved into order."
+                    });
+                }
+
+                // Update Freight Status
+                con.query(
+                    "UPDATE tbl_freight SET order_status=1 WHERE id=?",
+                    [freight_id],
+                    (err, updateFreight) => {
+
+                        if (err) {
+                            return res.status(500).send({
+                                success: false,
+                                message: err.message
+                            });
+                        }
+
+                        if (updateFreight.affectedRows < 1) {
+                            return res.status(400).send({
+                                success: false,
+                                message: "Failed to move order"
+                            });
+                        }
+
+                        // Create Order
+                        con.query(
+                            "INSERT INTO tbl_orders (freight_id, client_id) VALUES (?,?)",
+                            [freight_id, client_id],
+                            (err, orderResult) => {
+
+                                if (err) {
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: err.message
+                                    });
+                                }
+
+                                const order_id = orderResult.insertId;
+
+                                // Fetch Freight Details
+                                con.query(
+                                    "SELECT * FROM tbl_freight WHERE id=?",
+                                    [freight_id],
+                                    (err, freightData) => {
+
+                                        if (err) {
+                                            return res.status(500).send({
+                                                success: false,
+                                                message: err.message
+                                            });
+                                        }
+
+                                        if (freightData.length == 0) {
+                                            return res.status(400).send({
+                                                success: false,
+                                                message: "Freight not found"
+                                            });
+                                        }
+
+                                        const freight = freightData[0];
+
+                                        // ===========================
+                                        // AUTO WAREHOUSE ASSIGN
+                                        // ===========================
+
+                                        if (freight.assign_warehouse == "Yes") {
+
+                                            con.query(
+                                                "UPDATE tbl_orders SET warehouse_status=1 WHERE id=?",
+                                                [order_id]
+                                            );
+
+                                            con.query(
+                                                "UPDATE tbl_freight SET warehouse_status=1 WHERE id=?",
+                                                [freight_id]
+                                            );
+
+                                            con.query(
+                                                "INSERT INTO warehouse_assign_order (freight_id,order_id,warehouse_status) VALUES (?,?,1)",
+                                                [freight_id, order_id]
+
+                                            );
+
+                                        }
+
+                                        // ===========================
+                                        // AUTO CLEARANCE
+                                        // ===========================
+
+                                        if (freight.assign_to_clearing == "Yes") {
+
+                                            const fetchQuery = `
+                                                SELECT
+                                                    o.client_id,
+                                                    o.dimensions,
+                                                    o.weight,
+                                                    f.client_ref_name,
+                                                    f.product_desc,
+                                                    f.shipment_ref as is_cong_shipp,
+                                                    f.collection_from,
+                                                    f.delivery_to,
+                                                    f.port_of_loading,
+                                                    f.post_of_discharge,
+                                                    f.commodity,
+                                                    f.package_type,
+                                                    f.no_of_packages
+                                                FROM tbl_orders o
+                                                INNER JOIN tbl_freight f
+                                                    ON f.id=o.freight_id
+                                                WHERE o.id=?
+                                            `;
+
+                                            con.query(
+                                                fetchQuery,
+                                                [order_id],
+                                                (err, result) => {
+
+                                                    if (err) {
+                                                        return res.status(500).send({
+                                                            success: false,
+                                                            message: err.message
+                                                        });
+                                                    }
+
+                                                    if (result.length == 0) {
+
+                                                        return res.status(400).send({
+                                                            success: false,
+                                                            message: "Order not found"
+                                                        });
+
+                                                    }
+
+                                                    const row = result[0];
+
+                                                    generateClearanceNumber((err, clearanceNumber) => {
+
+                                                        if (err) {
+
+                                                            return res.status(500).send({
+                                                                success: false,
+                                                                message: err.message
+                                                            });
+
+                                                        }
+
+                                                        // ---------- PART-2 CONTINUE ----------
+                                                        const insertQuery = `
+INSERT INTO tbl_clearance
+(
+    clearance_number,
+    user_id,
+    order_id,
+    customer_ref,
+    goods_desc,
+    is_cong_shipp,
+    loading_country,
+    discharge_country,
+    port_of_loading,
+    port_of_discharge,
+    nature_of_goods,
+    packing_type,
+    total_dimension,
+    total_weight,
+    total_box,
+    added_by
+)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+`;
+
+                                                        const insertParams = [
+
+                                                            clearanceNumber,
+                                                            row.client_id,
+                                                            order_id,
+                                                            row.client_ref_name,
+                                                            row.product_desc || "",
+                                                            row.is_cong_shipp,
+                                                            row.collection_from,
+                                                            row.delivery_to,
+                                                            row.port_of_loading,
+                                                            row.post_of_discharge,
+                                                            row.commodity,
+                                                            row.package_type,
+                                                            row.dimensions,
+                                                            row.weight,
+                                                            row.no_of_packages,
+                                                            1
+
+                                                        ];
+
+                                                        con.query(
+                                                            insertQuery,
+                                                            insertParams,
+                                                            (err, clearanceResult) => {
+
+                                                                if (err) {
+                                                                    return res.status(500).send({
+                                                                        success: false,
+                                                                        message: err.message
+                                                                    });
+                                                                }
+
+                                                                const clearance_id = clearanceResult.insertId;
+
+                                                                // con.query(
+                                                                //     "INSERT INTO clearance_order (clearance_id,user_id,order_id) VALUES (?,?,?)",
+                                                                //     [clearance_id, row.client_id || null, order_id]
+                                                                // );
+
+                                                                // con.query(
+                                                                //     "UPDATE tbl_clearance SET quotation_status=3 WHERE id=?",
+                                                                //     [clearance_id]
+                                                                // );
+
+                                                                con.query(
+                                                                    "UPDATE tbl_orders SET assign_to_clearance=1, clearance_id=? WHERE id=?",
+                                                                    [clearance_id, order_id],
+                                                                    (err) => {
+
+                                                                        if (err) {
+                                                                            return res.status(500).send({
+                                                                                success: false,
+                                                                                message: err.message
+                                                                            });
+                                                                        }
+
+                                                                        return res.status(200).send({
+                                                                            success: true,
+                                                                            message: "Move to order successfully"
+                                                                        });
+
+                                                                    }
+                                                                );
+
+                                                            }
+                                                        );
+
+                                                    });
+
+                                                });
+
+                                        }
+                                        else {
+
+                                            return res.status(200).send({
+                                                success: true,
+                                                message: "Move to order successfully"
+                                            });
+
+                                        }
+
+                                    });
+
+                            });
+
+                    });
+
+            });
+
 
     } catch (error) {
-        res.status(500).send({
+
+        return res.status(500).send({
+
             success: false,
             message: error.message
-        })
+
+        });
+
     }
-}
+
+};
 
 
 const MoveToClearaneOrder = async (req, res) => {
@@ -14324,7 +16039,7 @@ const DeleteWarehouse = async (req, res) => {
         const { warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status, warehouse_collect, date_received, package_type, packages, dimension,
             weight, costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch } = req.body;
         // console.log(req.body);
-
+ 
         con.query(`update warehouse_assign_order set ware_receipt_no='${ware_receipt_no}', tracking_number='${tracking_number}', warehouse_status='${warehouse_status}', warehouse_collect='${warehouse_collect}', date_received='${date_received}',
                 total_weight='${weight}', total_dimension='${dimension}',costs_to_collect='${costs_to_collect}',warehouse_cost='${warehouse_cost}',warehouse_dispatch='${warehouse_dispatch}',
                 cost_to_dispatch='${cost_to_dispatch}'
@@ -14333,11 +16048,11 @@ const DeleteWarehouse = async (req, res) => {
         })
         con.query(`update tbl_orders set dimensions='${dimension}', weight='${weight}' where id='${order_id}'`, (err, data) => {
             if (err) throw err;
-
+ 
         })
         con.query(`update tbl_freight set no_of_packages='${packages}', package_type='${package_type}' where id='${freight_id}'`, (err, data) => {
             if (err) throw err;
-
+ 
         })
         res.status(200).send({
             success: true,
@@ -14590,13 +16305,13 @@ const saveWarehouseFiles = (files, warehouseId) => {
 const editWarehouseDetails = async (req, res) => {
     try {
         const {
-            warehouse_assign_id, order_id, freight_id, ware_receipt_no, tracking_number, warehouse_status,
+            warehouse_assign_id, order_id, freight_id, customer_name, total_cbm, ware_receipt_no, tracking_number, warehouse_status,
             warehouse_collect, date_received, package_type, no_of_packages, total_dimension, weight,
             costs_to_collect, warehouse_cost, warehouse_dispatch, cost_to_dispatch,
             courier_waybill_ref, dispatched_date, warehouse_comment, customer_ref, box_marking, hazardous,
             hazard_description, package_comment, damage_goods, damaged_pkg_qty, damage_comment, supplier_company, supplier_person,
             supplier_address, supplier_contact_no, warehouse_order_id, warehouse_storage, handling_required, handling_cost,
-            client_id, good_description, freight, delivery_to, collection_from
+            client_id, goods_description, freight, delivery_to, collection_from
         } = req.body;
 
         console.log(req.body);
@@ -14618,21 +16333,21 @@ const editWarehouseDetails = async (req, res) => {
                 // Step 2: Update warehouse_assign_order (FIXED PARAM ORDER)
                 con.query(
                     `UPDATE warehouse_assign_order SET 
-                        ware_receipt_no = ?, tracking_number = ?, warehouse_status = ?, warehouse_collect = ?,
+                        customer_name = ?, total_cbm = ?, ware_receipt_no = ?, tracking_number = ?, warehouse_status = ?, warehouse_collect = ?,
                         date_received = ?, total_weight = ?, total_dimension = ?, costs_to_collect = ?, 
                         warehouse_cost = ?, warehouse_dispatch = ?, cost_to_dispatch = ?,
                         courier_waybill_ref = ?, dispatched_date = ?, warehouse_comment = ?, customer_ref = ?, box_marking = ?, hazardous = ?,
                         hazard_description = ?, package_comment = ?, damage_goods = ?, damaged_pkg_qty = ?, damage_comment = ?, supplier_company = ?, 
                         supplier_person = ?, supplier_address = ?, supplier_contact_no = ?, warehouse_order_id = ?, warehouse_storage = ?, 
-                        handling_required = ?, handling_cost = ?, total_packeges = ?
+                        handling_required = ?, goods_description = ?, handling_cost = ?, total_packeges = ?
                     WHERE id = ?`,
                     [
-                        ware_receipt_no, tracking_number, warehouse_status, warehouse_collect,
+                        customer_name, total_cbm, ware_receipt_no, tracking_number, warehouse_status, warehouse_collect,
                         date_received, weight, total_dimension, costs_to_collect, warehouse_cost,
                         warehouse_dispatch, cost_to_dispatch,
                         courier_waybill_ref, dispatched_date, warehouse_comment, customer_ref, box_marking, hazardous,
                         hazard_description, package_comment, damage_goods, damaged_pkg_qty, damage_comment, supplier_company, supplier_person,
-                        supplier_address, supplier_contact_no, warehouse_order_id || warehouse_order_id_old, warehouse_storage, handling_required, handling_cost, no_of_packages,
+                        supplier_address, supplier_contact_no, warehouse_order_id || warehouse_order_id_old, warehouse_storage, handling_required, goods_description, handling_cost, no_of_packages,
                         warehouse_assign_id //  FIXED POSITION
                     ],
                     async (err) => {
@@ -14644,7 +16359,7 @@ const editWarehouseDetails = async (req, res) => {
                         // Update tbl_orders
                         con.query(
                             `UPDATE tbl_orders SET dimensions = ?, weight = ?, goods_description = ?, freight = ?, client_id = ?, collection_from = ?, delivery_to = ? WHERE id = ?`,
-                            [total_dimension, weight, good_description, freight, client_id, collection_from, delivery_to, order_id]
+                            [total_dimension, weight, goods_description, freight, client_id, collection_from, delivery_to, order_id]
                         );
 
                         //  UPDATE FREIGHT ONLY IF EXISTS
@@ -14904,7 +16619,7 @@ const editWarehouseDetails = async (req, res) => {
             freight, groupage_batch_ref, supplier, warehouse_receipt_number, tracking_number, date_dspatched, supplier_address, warehouse_collect, 
             costs_to_collect, port_of_loading, warehouse_dispatch, warehouse_cost, cost_to_dispatch, waybill_ref, supplier_Email, Supplier_Contact) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
+ 
         const values = [
             user_id,
             added_by,
@@ -14934,13 +16649,13 @@ const editWarehouseDetails = async (req, res) => {
             supplier_Email,
             Supplier_Contact
         ];
-
+ 
         // Execute the query
         con.query(query, values, (err, data) => {
             if (err) {
                 throw err;
             }
-
+ 
             res.status(200).send({
                 success: true,
                 message: "Warehouse Product Details Added successfully"
@@ -15769,68 +17484,8 @@ const RevertOrder = async (req, res) => {
     }
 };
 
-/* const GetFreightImages = async (req, res) => {
-    const { freight_id } = req.body;
-
-    try {
-        // Validate the freight ID
-        if (!freight_id) {
-            return res.status(400).send({ success: false, message: 'Freight ID is required' });
-        }
-
-        // Query to fetch documents associated with the provided freight ID
-        const selectQuery = `SELECT * FROM freight_doc WHERE freight_id = ?`;
-
-        con.query(selectQuery, [freight_id], (err, docs) => {
-            if (err) {
-                return res.status(500).send({ success: false, message: 'Database error' });
-            }
-
-            if (docs.length > 0) {
-                const groupedDocuments = {};
-
-                docs.forEach((doc) => {
-                    // Normalize the document name for consistent grouping
-                    const normalizedKey = doc.document_name.trim().toLowerCase();
-
-                    if (!groupedDocuments[normalizedKey]) {
-                        groupedDocuments[normalizedKey] = {
-                            originalName: doc.document_name.trim(), // Store the original name
-                            items: []
-                        };
-                    }
-
-                    groupedDocuments[normalizedKey].items.push({
-                        id: doc.id,
-                        document_name: doc.document_name.trim(),
-                        document: doc.document,
-                        created_at: doc.created_at
-                    });
-                });
-
-                // Convert grouped result back to original structure using original names
-                const finalResult = {};
-                for (const key in groupedDocuments) {
-                    const group = groupedDocuments[key];
-                    finalResult[group.originalName] = group.items;
-                }
-
-                return res.status(200).send({
-                    success: true,
-                    data: finalResult
-                });
-            } else {
-                return res.status(400).send({ success: false, message: 'No images found for the given freight ID' });
-            }
-        });
-    } catch (error) {
-        return res.status(500).send({ success: false, message: error.message });
-    }
-};
- */
-
 const GetFreightImages = async (req, res) => {
-    const { freight_id, clearance_id, shipment_id, uploaded_by, warehouse_assign_order_id } = req.body;
+    const { freight_id, order_id, clearance_id, shipment_id, uploaded_by, warehouse_assign_order_id } = req.body;
     console.log(clearance_id);
 
     try {
@@ -15882,6 +17537,39 @@ const GetFreightImages = async (req, res) => {
                     if (docs.length > 0) groupDocuments(docs, false);
                     resolve();
                 });
+            });
+        };
+
+        const fetchOrderDocs = () => {
+            return new Promise((resolve, reject) => {
+
+                if (!order_id) return resolve();
+
+                let selectQuery = `
+            SELECT *
+            FROM freight_doc
+            WHERE order_id = ?
+        `;
+
+                let params = [order_id];
+
+                if (uploaded_by == 2) {
+                    selectQuery += ` AND uploaded_by = ?`;
+                    params.push(uploaded_by);
+                }
+
+                con.query(selectQuery, params, (err, docs) => {
+
+                    if (err) return reject(err);
+
+                    if (docs.length > 0) {
+                        groupDocuments(docs, false);
+                    }
+
+                    resolve();
+
+                });
+
             });
         };
 
@@ -16008,7 +17696,7 @@ const GetFreightImages = async (req, res) => {
             });
         };
 
-        await Promise.all([fetchFreightDocs(), fetchClearanceDocs(), fetchShipmentDocs(), fetchWarehouseDocs()]);
+        await Promise.all([fetchFreightDocs(), fetchOrderDocs(), fetchClearanceDocs(), fetchShipmentDocs(), fetchWarehouseDocs()]);
 
         if (Object.keys(finalResult).length === 0) {
             return res.status(404).send({ success: false, message: 'No images found for the given IDs' });
@@ -16510,70 +18198,231 @@ const OrderInvoiceList = async (req, res) => {
     }
 };
 
+// const revertMovedFreight = async (req, res) => {
+//     try {
+//         const { freight_id, batch_id } = req.body;
+
+//         // Check if freight is actually assigned to the batch
+//         const checkAssignmentQuery = `
+//             SELECT * FROM freight_assig_to_batch 
+//             WHERE freight_id = ? AND batch_id = ?
+//         `;
+//         con.query(checkAssignmentQuery, [freight_id, batch_id], (err, assignmentResult) => {
+//             if (err) {
+//                 return res.status(500).send({ success: false, message: err.message });
+//             }
+
+//             if (assignmentResult.length === 0) {
+//                 return res.status(400).send({ success: false, message: 'No such freight assigned to the batch' });
+//             }
+
+//             // Step 1: Delete from freight_assig_to_batch
+//             const deleteQuery = `
+//                 DELETE FROM freight_assig_to_batch 
+//                 WHERE freight_id = ? AND batch_id = ?
+//             `;
+//             con.query(deleteQuery, [freight_id, batch_id], (err, deleteResult) => {
+//                 if (err) {
+//                     return res.status(500).send({ success: false, message: err.message });
+//                 }
+
+//                 // Step 2: Update tbl_freight.asigned_to_batch = 0
+//                 const updateFreightQuery = `
+//                     UPDATE tbl_freight 
+//                     SET asigned_to_batch = 0 
+//                     WHERE id = ?
+//                 `;
+//                 con.query(updateFreightQuery, [freight_id], (err, updateResult) => {
+//                     if (err) {
+//                         return res.status(500).send({ success: false, message: err.message });
+//                     }
+
+//                     // Step 3: Reset warehouse assignment
+//                     const updateWarehouseQuery = `
+//                         UPDATE warehouse_assign_order 
+//                         SET assign_to_batch = 0, batch_id = NULL 
+//                         WHERE freight_id = ?
+//                     `;
+//                     con.query(updateWarehouseQuery, [freight_id], (err, warehouseUpdateResult) => {
+//                         if (err) {
+//                             return res.status(500).send({ success: false, message: err.message });
+//                         }
+
+//                         return res.status(200).send({
+//                             success: true,
+//                             message: 'Freight successfully removed from batch'
+//                         });
+//                     });
+//                 });
+//             });
+//         });
+
+//     } catch (error) {
+//         return res.status(500).send({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+
 const revertMovedFreight = async (req, res) => {
     try {
-        const { freight_id, batch_id } = req.body;
 
-        // Check if freight is actually assigned to the batch
-        const checkAssignmentQuery = `
-            SELECT * FROM freight_assig_to_batch 
-            WHERE freight_id = ? AND batch_id = ?
+        const { batch_id, freight_id, order_id } = req.body;
+
+        if (!batch_id) {
+            return res.status(400).send({
+                success: false,
+                message: "batch_id is required"
+            });
+        }
+
+        if (!freight_id && !order_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Either freight_id or order_id is required"
+            });
+        }
+
+        let where = `batch_id = ?`;
+        let params = [batch_id];
+
+        if (freight_id) {
+            where += ` AND freight_id = ?`;
+            params.push(freight_id);
+        }
+
+        if (order_id) {
+            where += ` AND order_id = ?`;
+            params.push(order_id);
+        }
+
+        // ================= Check =================
+
+        const checkQuery = `
+            SELECT *
+            FROM freight_assig_to_batch
+            WHERE ${where}
         `;
-        con.query(checkAssignmentQuery, [freight_id, batch_id], (err, assignmentResult) => {
+
+        con.query(checkQuery, params, (err, result) => {
+
             if (err) {
-                return res.status(500).send({ success: false, message: err.message });
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
             }
 
-            if (assignmentResult.length === 0) {
-                return res.status(400).send({ success: false, message: 'No such freight assigned to the batch' });
+            if (result.length === 0) {
+                return res.status(404).send({
+                    success: false,
+                    message: "No matching freight found in this batch"
+                });
             }
 
-            // Step 1: Delete from freight_assig_to_batch
+            // ================= Delete =================
+
             const deleteQuery = `
-                DELETE FROM freight_assig_to_batch 
-                WHERE freight_id = ? AND batch_id = ?
+                DELETE FROM freight_assig_to_batch
+                WHERE ${where}
             `;
-            con.query(deleteQuery, [freight_id, batch_id], (err, deleteResult) => {
-                if (err) {
-                    return res.status(500).send({ success: false, message: err.message });
+
+            con.query(deleteQuery, params, (deleteErr) => {
+
+                if (deleteErr) {
+                    return res.status(500).send({
+                        success: false,
+                        message: deleteErr.message
+                    });
                 }
 
-                // Step 2: Update tbl_freight.asigned_to_batch = 0
-                const updateFreightQuery = `
-                    UPDATE tbl_freight 
-                    SET asigned_to_batch = 0 
-                    WHERE id = ?
-                `;
-                con.query(updateFreightQuery, [freight_id], (err, updateResult) => {
-                    if (err) {
-                        return res.status(500).send({ success: false, message: err.message });
+                // ================= Update tbl_freight =================
+
+                const updateFreight = (callback) => {
+
+                    if (!freight_id) {
+                        return callback();
                     }
 
-                    // Step 3: Reset warehouse assignment
-                    const updateWarehouseQuery = `
-                        UPDATE warehouse_assign_order 
-                        SET assign_to_batch = 0, batch_id = NULL 
-                        WHERE freight_id = ?
-                    `;
-                    con.query(updateWarehouseQuery, [freight_id], (err, warehouseUpdateResult) => {
-                        if (err) {
-                            return res.status(500).send({ success: false, message: err.message });
-                        }
+                    con.query(
+                        `
+                        UPDATE tbl_freight
+                        SET asigned_to_batch = 0
+                        WHERE id = ?
+                        `,
+                        [freight_id],
+                        callback
+                    );
+                };
 
-                        return res.status(200).send({
-                            success: true,
-                            message: 'Freight successfully removed from batch'
+                updateFreight((freightErr) => {
+
+                    if (freightErr) {
+                        return res.status(500).send({
+                            success: false,
+                            message: freightErr.message
                         });
-                    });
+                    }
+
+                    // ================= warehouse_assign_order =================
+
+                    let warehouseWhere = [];
+
+                    let warehouseParams = [];
+
+                    if (freight_id) {
+                        warehouseWhere.push("freight_id = ?");
+                        warehouseParams.push(freight_id);
+                    }
+
+                    if (order_id) {
+                        warehouseWhere.push("order_id = ?");
+                        warehouseParams.push(order_id);
+                    }
+
+                    const warehouseQuery = `
+                        UPDATE warehouse_assign_order
+                        SET
+                            assign_to_batch = 0,
+                            batch_id = NULL
+                        WHERE ${warehouseWhere.join(" OR ")}
+                    `;
+
+                    con.query(
+                        warehouseQuery,
+                        warehouseParams,
+                        (warehouseErr) => {
+
+                            if (warehouseErr) {
+                                return res.status(500).send({
+                                    success: false,
+                                    message: warehouseErr.message
+                                });
+                            }
+
+                            return res.status(200).send({
+                                success: true,
+                                message: "Freight reverted successfully"
+                            });
+
+                        }
+                    );
+
                 });
+
             });
+
         });
 
     } catch (error) {
+
         return res.status(500).send({
             success: false,
             message: error.message
         });
+
     }
 };
 
@@ -16586,13 +18435,13 @@ const revertMovedFreight = async (req, res) => {
       WHERE tbl_freight.status <> 4
         AND TIMESTAMPDIFF(HOUR, tbl_freight.created_at, NOW()) >= 72
     `;
-
+ 
     con.query(query, function (err, results) {
         if (err) {
             console.error('Database error:', err);
             return;
         }
-
+ 
         if (results.length === 0) {
             console.log('No overdue estimates found.');
             return;
@@ -16600,7 +18449,7 @@ const revertMovedFreight = async (req, res) => {
         let estimatesTeamPhoneNumber = `+918340721420`
         results.forEach(freight => {
             const message = `*Quote overdue*\n\nQuote for client "${freight.full_name}"\nfreight: "${freight.freight_number}" has not been issued in the past 72 hours.\nUrgently`;
-
+ 
             sendWhatsApp(estimatesTeamPhoneNumber, message);  // <<== FIXED (use correct variable)
         });
     });
@@ -17709,7 +19558,7 @@ const addEstimatSupplierInvoice = async (req, res) => {
                         });
                     }
 
-                    const referenceNo = `ADINV${10000 + insertDataRes.insertId}`;
+                    const referenceNo = `SUPINV${10000 + insertDataRes.insertId}`;
 
                     con.query(
                         `UPDATE supplier_sage_invoice SET reference_no = ? WHERE id = ?`,
@@ -17731,6 +19580,646 @@ const addEstimatSupplierInvoice = async (req, res) => {
             }
         });
 
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const FreightQuoteInvoiceReferenceNo = (quoteId) => {
+    return `ADINV${10000 + Number(quoteId)}`.slice(0, 20);
+};
+
+const applyFreightQuoteInvoiceReferenceNo = (quoteId, callback) => {
+    const referenceNo = FreightQuoteInvoiceReferenceNo(quoteId);
+
+    con.query(
+        `UPDATE freight_quote_invoice SET reference_no = ? WHERE id = ?`,
+        [referenceNo, quoteId],
+        (updateErr) => callback(updateErr, referenceNo)
+    );
+};
+
+const addFreightQuoteInvoice = async (req, res) => {
+    try {
+        const data = req.body;
+        console.log(req.body);
+        let selectQuery = "";
+        let selectParams = [];
+
+        console.log(data);
+
+        // freight_quote_invoice extra columns (300+), matches DB schema
+        const ESTIMATE_EXTRA_FIELDS = [
+            'cust_vat_qty', 'cust_vat_curr', 'cust_vat_cost', 'cust_vat_unitTyp', 'cust_vat_unit', 'cust_vat_TCost', 'cust_vat_roe', 'cust_vat_finalAmt', 'cust_vat_vatTyp', 'cust_vat_disc%', 'cust_vat_disc', 'cust_vat_vatIncl', 'cust_vat_exclusive', 'cust_vat_vat',
+            'cust_duty_qty', 'cust_duty_curr', 'cust_duty_cost', 'cust_duty_unitTyp', 'cust_duty_unit', 'cust_duty_TCost', 'cust_duty_roe', 'cust_duty_finalAmt', 'cust_duty_vatTyp', 'cust_duty_disc%', 'cust_duty_disc', 'cust_duty_vatIncl', 'cust_duty_exclusive', 'cust_duty_vat',
+            'surcharge_qty', 'surcharge_curr', 'surcharge_cost', 'surcharge_unitTyp', 'surcharge_unit', 'surcharge_TCost', 'surcharge_roe', 'surcharge_finalAmt', 'surcharge_vatTyp', 'surcharge_disc%', 'surcharge_disc', 'surcharge_vatIncl', 'surcharge_exclusive', 'surcharge_vat',
+            'disbursement_qty', 'disbursement_curr', 'disbursement_cost', 'disbursement_unitTyp', 'disbursement_unit', 'disbursement_TCost', 'disbursement_roe', 'disbursement_finalAmt', 'disbursement_vatTyp', 'disbursement_disc%', 'disbursement_disc', 'disbursement_vatIncl', 'disbursement_exclusive', 'disbursement_vat',
+            'clearing_fee_qty', 'clearing_fee_curr', 'clearing_fee_cost', 'clearing_fee_unitTyp', 'clearing_fee_unit', 'clearing_fee_TCost', 'clearing_fee_roe', 'clearing_fee_finalAmt', 'clearing_fee_vatTyp', 'clearing_fee_disc%', 'clearing_fee_disc', 'clearing_fee_vatIncl', 'clearing_fee_exclusive', 'clearing_fee_vat',
+            'cust_penalty_qty', 'cust_penalty_curr', 'cust_penalty_cost', 'cust_penalty_unitTyp', 'cust_penalty_unit', 'cust_penalty_TCost', 'cust_penalty_roe', 'cust_penalty_finalAmt', 'cust_penalty_vatTyp', 'cust_penalty_disc%', 'cust_penalty_disc', 'cust_penalty_vatIncl', 'cust_penalty_exclusive', 'cust_penalty_vat',
+            'adv_duty_qty', 'adv_duty_curr', 'adv_duty_cost', 'adv_duty_unitTyp', 'adv_duty_unit', 'adv_duty_TCost', 'adv_duty_roe', 'adv_duty_finalAmt', 'adv_duty_vatTyp', 'adv_duty_disc%', 'adv_duty_disc', 'adv_duty_vatIncl', 'adv_duty_exclusive', 'adv_duty_vat',
+            'trans_unpack_charg_vatTyp', 'trans_unpack_charg_disc%', 'trans_unpack_charg_disc', 'trans_unpack_charg_vatIncl', 'trans_unpack_charg_exclusive', 'trans_unpack_charg_vat',
+            'trans_THC_levy_vatTyp', 'trans_THC_levy_disc%', 'trans_THC_levy_disc', 'trans_THC_levy_vatIncl', 'trans_THC_levy_exclusive', 'trans_THC_levy_vat',
+            'trans_CFS_charg_vatTyp', 'trans_CFS_charg_disc%', 'trans_CFS_charg_disc', 'trans_CFS_charg_vatIncl', 'trans_CFS_charg_exclusive', 'trans_CFS_charg_vat',
+            'trans_admin_charg_vatTyp', 'trans_admin_charg_disc%', 'trans_admin_charg_disc', 'trans_admin_charg_vatIncl', 'trans_admin_charg_exclusive', 'trans_admin_charg_vat',
+            'trans_portCargo_vatTyp', 'trans_portCargo_disc%', 'trans_portCargo_disc', 'trans_portCargo_vatIncl', 'trans_portCargo_exclusive', 'trans_portCargo_vat',
+            'trans_adv_loadHouse_vatTyp', 'trans_adv_loadHouse_disc%', 'trans_adv_loadHouse_disc', 'trans_adv_loadHouse_vatIncl', 'trans_adv_loadHouse_exclusive', 'trans_adv_loadHouse_vat',
+            'trans_doc_fee_vatTyp', 'trans_doc_fee_disc%', 'trans_doc_fee_disc', 'trans_doc_fee_vatIncl', 'trans_doc_fee_exclusive', 'trans_doc_fee_vat',
+            'dest_clearing_fees_vatTyp', 'dest_clearing_fees_disc%', 'dest_clearing_fees_disc', 'dest_clearing_fees_vatIncl', 'dest_clearing_fees_exclusive', 'dest_clearing_fees_vat',
+            'dest_THC_levy_vatTyp', 'dest_THC_levy_disc%', 'dest_THC_levy_disc', 'dest_THC_levy_vatIncl', 'dest_THC_levy_exclusive', 'dest_THC_levy_vat',
+            'dest_unpack_chrg_vatTyp', 'dest_unpack_chrg_disc%', 'dest_unpack_chrg_disc', 'dest_unpack_chrg_vatIncl', 'dest_unpack_chrg_exclusive', 'dest_unpack_chrg_vat',
+            'dest_fuel_Surchar_vatTyp', 'dest_fuel_Surchar_disc%', 'dest_fuel_Surchar_disc', 'dest_fuel_Surchar_vatIncl', 'dest_fuel_Surchar_exclusive', 'dest_fuel_Surchar_vat',
+            'dest_admin_chrg_vatTyp', 'dest_admin_chrg_disc%', 'dest_admin_chrg_disc', 'dest_admin_chrg_vatIncl', 'dest_admin_chrg_exclusive', 'dest_admin_chrg_vat',
+            'dest_adv_loadHouse_vatTyp', 'dest_adv_loadHouse_disc%', 'dest_adv_loadHouse_disc', 'dest_adv_loadHouse_vatIncl', 'dest_adv_loadHouse_exclusive', 'dest_adv_loadHouse_vat',
+            'dest_CFS_charg_vatTyp', 'dest_CFS_charg_disc%', 'dest_CFS_charg_disc', 'dest_CFS_charg_vatIncl', 'dest_CFS_charg_exclusive', 'dest_CFS_charg_vat',
+            'dest_delivry_charge_vatTyp', 'dest_delivry_charge_disc%', 'dest_delivry_charge_disc', 'dest_delivry_charge_vatIncl', 'dest_delivry_charge_exclusive', 'dest_delivry_charge_vat',
+            'dest_fuel_surchrg_vatTyp', 'dest_fuel_surchrg_disc%', 'dest_fuel_surchrg_disc', 'dest_fuel_surchrg_vatIncl', 'dest_fuel_surchrg_exclusive', 'dest_fuel_surchrg_vat',
+            'admin_agencyFee_vatTyp', 'admin_agencyFee_disc%', 'admin_agencyFee_disc', 'admin_agencyFee_vatIncl', 'admin_agencyFee_exclusive', 'admin_agencyFee_vat',
+            'admin_disbur_fee_vatTyp', 'admin_disbur_fee_disc%', 'admin_disbur_fee_disc', 'admin_disbur_fee_vatIncl', 'admin_disbur_fee_exclusive', 'admin_disbur_fee_vat',
+            'admin_doc_adminFees_vatTyp', 'admin_doc_adminFees_disc%', 'admin_doc_adminFees_disc', 'admin_doc_adminFees_vatIncl', 'admin_doc_adminFees_exclusive', 'admin_doc_adminFees_vat',
+            'org_clearance_vatTyp', 'org_clearance_disc%', 'org_clearance_disc', 'org_clearance_vatIncl', 'org_clearance_exclusive', 'org_clearance_vat',
+            'org_forwFee_vatTyp', 'org_forwFee_disc%', 'org_forwFee_disc', 'org_forwFee_vatIncl', 'org_forwFee_exclusive', 'org_forwFee_vat',
+            'org_docFee_vatTyp', 'org_docFee_disc%', 'org_docFee_disc', 'org_docFee_vatIncl', 'org_docFee_exclusive', 'org_docFee_vat',
+            'origin_cfs_vatTyp', 'origin_cfs_disc%', 'origin_cfs_disc', 'origin_cfs_vatIncl', 'origin_cfs_exclusive', 'origin_cfs_vat',
+            'origin_fuelSur_vatTyp', 'origin_fuelSur_disc%', 'origin_fuelSur_disc', 'origin_fuelSur_vatIncl', 'origin_fuelSur_exclusive', 'origin_fuelSur_vat',
+            'org_pickUp_vatTyp', 'org_pickUp_disc%', 'org_pickUp_disc', 'org_pickUp_vatIncl', 'org_pickUp_exclusive', 'org_pickUp_vat',
+            'trans_clear_fees_vatTyp', 'trans_clear_fees_disc%', 'trans_clear_fees_disc', 'trans_clear_fees_vatIncl', 'trans_clear_fees_exclusive', 'trans_clear_fees_vat',
+            'insurance_vatTyp', 'insurance_disc%', 'insurance_disc', 'insurance_vatIncl', 'insurance_exclusive', 'insurance_vat',
+            'ocenfreight_charge_vatTyp', 'ocenfreight_charge_disc%', 'ocenfreight_charge_disc', 'ocenfreight_charge_vatIncl', 'ocenfreight_charge_exclusive', 'ocenfreight_charge_vat',
+            'custProv_pay_qty', 'custProv_pay_curr', 'custProv_pay_cost', 'custProv_pay_unitTyp', 'custProv_pay_unit', 'custProv_pay_TCost', 'custProv_pay_roe', 'custProv_pay_finalAmt', 'custProv_pay_vatTyp', 'custProv_pay_disc%', 'custProv_pay_disc', 'custProv_pay_vatIncl', 'custProv_pay_exclusive', 'custProv_pay_vat',
+            'dest_portCargo_vatTyp', 'dest_portCargo_disc_percent', 'dest_portCargo_disc', 'dest_portCargo_vatIncl', 'dest_portCargo_exclusive', 'dest_portCargo_vat'
+        ];
+
+        const ESTIMATE_BASE_FIELDS = [
+            'freight_id', 'client_id', 'supplier_id', 'client_name', 'is_approved', 'serial_number', 'invoice_for_country', 'date', 'client_ref', 'customer_invoice_no', 'final_base_currency', 'product_desc',
+            'type', 'freight', 'incoterm', 'dimension', 'weight',
+            'origin_pick_up_cost', 'origin_pick_up_fees', 'origin_pickup_fee_gpcalc',
+            'oripick4', 'finalori1', 'roe_origin_currencyorigin', 'finalvlaueoriginPickup',
+            'origin_pick_up_fuel_cost', 'origin_pick_up_fuel_fees', 'origin_pick_fuelGP',
+            'orifuel4', 'finalfuel1', 'roe_origin_fuel_currency', 'finalvlaueoFuel',
+            'origin_pick_up_cfs_cost', 'origin_pick_up_cfs_fees', 'origin_pickup_vfs_gp',
+            'oricfs4', 'finalcfs1', 'roe_origin_cfs_currency', 'finalvlaueocfs',
+            'origin_pick_up_unitType',
+            'origin_pick_up_documantion_cost', 'origin_pick_up_documantation_fees',
+            'origin_pick_documantation_cost_gp', 'oridoc4', 'finaldoc1',
+            'roe_origin_doc_currency', 'finalvlaueodoc',
+            'origin_pick_up_forewarding_cost', 'origin_pick_up_forewarding_fees',
+            'origin_pickup_forewarding_gp', 'oriforewarding4', 'roe_origin_forewarding',
+            'finalforewarding1', 'finalvlaueoforewarding',
+            'origin_pick_up_custome_cost', 'origin_pick_up_custome_clearance',
+            'origin_pickup_custome_gp', 'oricustome4', 'roe_origin_customes',
+            'finalcustomes1', 'finalvlaueoCustomes',
+            'totalChageswithOutExchange', 'totalChangeRoeOrigin',
+            'freight_charge_currency_cost', 'freight_charge_currency_fees',
+            'freight_charge_currency_gp', 'orifreight4',
+            'finalValuefreight', 'finalfreight1', 'finalvlaueofreight',
+            'freight_currency_insurance_cost', 'freightorigin_insurance_gp',
+            'freight_currency_insurance_unit', 'oriinsurance4',
+            'roe_insurance_currency', 'finalinsurance1', 'finalvlaueoInsurance',
+            'totalChageswithOutExchangeinsurance',
+            'totalChangeRoeOriginaftercalcuinsurance',
+            'Transit_currency_Cost', 'Transit_currency_gp', 'Transit_currency_unit',
+            'finaltransit1', 'oritransit4', 'Transit_currency_roe',
+            'finalvlaueotransit',
+            'transit_currency_THC_cost', 'transit_currency_THC_init',
+            'transit_currency_THC_gp', 'oriThc4', 'finalThc1',
+            'finalvlaueotfineal', 'roe_Transit_Thc',
+            'Transit_currency_unpack_cost', 'Transit_currency_unpack_unit',
+            'Transit_currency_unpack_gp', 'finalunpack1', 'oriunpack4',
+            'finalvlaueotfunpack', 'Transit_unpack_roe',
+            'totalChaDestinationTransit', 'totalChaDestinationTransitRoe',
+            'sumofall', 'sumofRoe',
+            'transit_3rd_party_cost', 'transit_3rd_party_unit', 'transit_3rd_party_gp',
+            'ori3rdparty4', 'final3rdparty1', 'finalvlaueot3dparty', 'transit_currency_3rd',
+            'transit_admin_change', 'transit_admin_unit', 'transit_admin_gp', 'ori3rdAdmin4',
+            'final3rdAdmin1', 'finalvlaueotAdmin', 'roe_transit_admin',
+            'transit_currency_port', 'transit_currency_port_unit', 'transit_currency_port_gp',
+            'ori3rdport4', 'final3rdport1', 'finalvlaueotPort', 'roe_trans_port',
+            'Transit_advanced_load', 'Transit_advanced_unit', 'Transit_advanced_gp',
+            'oriadv4', 'final3rdadv1', 'finalvlaueotadv', 'Transit_advanced_gp_roe',
+            'transit_change_Documentation', 'transit_change_Documentation_unit', 'oridocumentation4',
+            'transit_change_Documentation_gp', 'final3rdocumantation1', 'finalvlaueotDocumantation',
+            'roe_transit_change_Documentation', 'totalChageswithOuTransit', 'transitRoe',
+            'Destination_freight_currency_cost', 'Destination_freight_currency_unit', 'Destination_freight_currency_gp',
+            'destinationdocumentation4', 'final3rdestinationRoe', 'final3rdestination1', 'Destination_freight_currency_Roe',
+            'Destination_THC_currency_cost', 'Destination_THC_currency_unit', 'Destination_THC_currency_gp',
+            'destinationTHCdocumentation4', 'final3rTHCdestination1', 'final3rTHCdestinationRoe', 'Destination_THC_currency_Roe',
+            'Destination_Unpack_currency_cost', 'Destination_Unpack_currency_unit', 'Destination_Unpack_currency_gp',
+            'destinationUnpackdocumentation4', 'Destination_Unpack_currency_roe', 'final3rUnpackdestinationRoe', 'final3runpackdestination1',
+            'totaAdminransit', 'totalAdminnsitRoe',
+            'Destination_fuelsurcharge_currency_cost', 'Destination_fuelsurcharge_currency_unit', 'Destination_fuelsurcharge_currency_gp',
+            'destinationfuelsurchargedocumentation4', 'final3rfuelsurchargedestination1', 'final3rfuelsurCahrgeestinationRoe', 'Destination_fuelsurcharge_currency_roe',
+            'Destination_adminsurcharge_currency_cost', 'Destination_adminsurcharge_currency_unit', 'Destination_adminsurcharge_currency_gp',
+            'destinatiadminsurcharge4', 'Valueadminsurchargedestanion', 'adminsurcharge2', 'Destination_adminsurcharge_currency_roe',
+            'Destination_portcargo_currency_cost', 'Destination_portcargo_currency_unit', 'Destination_portcargo_currency_gp',
+            'destinatiportcargo4', 'Vaportcargoion', 'admiportcargo2', 'Destination_portcargo_currency_roe',
+            'Destination_AdvancedLoad_currency_cost', 'Destination_AdvancedLoad_currency_unit', 'Destination_AdvancedLoad_currency_gp',
+            'destinatiAdvancedLoad4', 'VAdvancedLoadion', 'desdvancedLoadion', 'Destination_AdvancedLoad_currency_roe',
+            'Destination_3rdpartyDesc_currency_cost', 'Destination_3rdpartyDesc_currency_unit', 'Destination_3rdpartyDesc_currency_gp',
+            'destinati3rdpartyload4', 'VAdvanced3rdpartyLoadion', 'desdva3rdpartyion', 'Destination_3rdpartyDesc_currency_roe',
+            'Destination_delivery_currency_cost', 'Destination_delivery_currency_unit', 'Destination_delivery_currency_gp',
+            'destindeliveryyDesc4', 'VAdvandeliverytyLoadion', 'desddeliverytyion', 'Destination_delivery_currency_roe',
+            'Destination_fuelcharge_currency_cost', 'Destination_fuelcharge_currency_unit', 'Destination_fuelcharge_currency_gp',
+            'destindfuelchangerDesc4', 'VAdvfuelchangeon', 'defuelchangyion', 'Destination_fuelcharge_currency_roe',
+            'Destination_AdminAgrncy_currency_cost', 'Destination_AdminAgrncy_currency_unit', 'Destination_AdminAgrncy_currency_gp',
+            'deadminAgencyesc4', 'VAadminAgencyngeon', 'defuelchdminAgencyngangyion', 'Destination_AdminAgrncy_currency_roe',
+            'Destination_disbursemant_currency_cost', 'Destination_disbursemant_currency_unit', 'Destination_disbursemant_currency_gp',
+            'deaddisbursemantc4', 'VAdisbursemon', 'dedisbursementon', 'Destination_disbursemant_currency_roe',
+            'Destination_doc_currency_cost', 'Destination_doc_currency_unit', 'Destination_doc_currency_gp',
+            'deadoctc4', 'VAdocon', 'dedisbudoon', 'Destination_doc_currency_roe', 'roe_freight_currency',
+            'freight_charge_currency', 'freight_charge_currency_unitType', 'freight_currency_insurance_unittype',
+            'origin_pick_up_fuel_unitType', 'origin_pick_up_cfs_unitType', 'origin_pick_up_documantation_unitType', 'origin_pick_up_forewarding_unitType', 'origin_pick_up_custome_unitType',
+            'Transit_currency_unitTpe', 'transit_currency_THC_initType', 'Transit_currency_unpack_unitType',
+            'transit_3rd_party_unittype', 'transit_admin_unittype', 'transit_currency_port_unitType',
+            'Transit_advanced_unitType', 'transit_change_Documentation_unitType',
+            'Destination_freight_currency_unitType', 'Destination_THC_currency_unitType',
+            'Destination_Unpack_currency_unitType', 'Destination_fuelsurcharge_currency_typeUnit',
+            'Destination_adminsurcharge_currency_unitType', 'Destination_portcargo_currency_unitType',
+            'Destination_AdvancedLoad_currency_unitType', 'Destination_3rdpartyDesc_currency_unitType',
+            'Destination_delivery_currency_unitType', 'Destination_fuelcharge_currency_unitType',
+            'Destination_AdminAgrncy_currency_unitType', 'Destination_disbursemant_currency_unitType',
+            'Destination_doc_currency_unittype', 'freight_charge_currencyQTY', 'origin_pick_up_fuel_unitTypeQTY',
+            'origin_pick_up_cfs_unitTypeQTY', 'origin_pick_up_forewarding_unitTypeQTY',
+            'origin_pick_up_documantation_unitTypeQTY', 'origin_pick_up_custome_unitTypeQTY', 'chargable_rate',
+            'freight_charge_currency_unitTypeQTY', 'freight_currency_insurance_unittypeQTY',
+            'Transit_currency_unitTpeQTY', 'transit_currency_THC_initTypeQTY', 'transit_currency_THC_initTypeeQTY',
+            'transit_3rd_party_unittypeQTY', 'transit_admin_unittypeQTY', 'transit_currency_port_unitTypeQTY',
+            'Transit_advanced_unitTypeQTY', 'transit_change_Documentation_unitTypeQTY',
+            'Destination_freight_currency_unitTypeQTY', 'Destination_THC_currency_unitTypeQTY',
+            'Destination_Unpack_currency_unitTypeQTY', 'Destination_fuelsurcharge_currency_typeUnitQTY',
+            'Destination_adminsurcharge_currency_unitTypeQTY', 'Destination_portcargo_currency_unitTypeQTY',
+            'Destination_AdvancedLoad_currency_unitTypeQTY', 'Destination_3rdpartyDesc_currency_unitTypeQTY',
+            'Destination_delivery_currency_unitTypeQTY', 'Destination_fuelcharge_currency_unitTypeQTY',
+            'Destination_AdminAgrncy_currency_unitQTY', 'Destination_disbursemant_currency_unitTypeQTY',
+            'Destination_doc_currency_unittypeQTY', 'pickup_freight_currency', 'Transit_currency',
+            'Destination_freight_currency', 'admin_currency_charge', 'Destination_disbursemant_currenc_unitType1',
+            'user_type'
+        ];
+
+        if (data.quote_invoice_id) {
+            selectQuery = `
+                SELECT id AS quote_invoice_id
+                FROM freight_quote_invoice 
+                WHERE id = ?
+            `;
+            selectParams = [data.quote_invoice_id];
+        } else {
+            selectQuery = `
+                SELECT id AS quote_invoice_id
+                FROM freight_quote_invoice 
+                WHERE freight_id = ? AND supplier_id = ?
+            `;
+            selectParams = [data.freight_id, data.supplier_id];
+        }
+
+        con.query(selectQuery, selectParams, (err, result) => {
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            const updateFields = [...ESTIMATE_BASE_FIELDS, ...ESTIMATE_EXTRA_FIELDS];
+            const getFieldValue = (field) => {
+                if (data[field] !== undefined) return data[field];
+                if (field === 'is_approved') return 1;
+                return null;
+            };
+            const buildRowPayload = (fields) => {
+                const row = {};
+                fields.forEach(field => {
+                    row[field] = getFieldValue(field);
+                });
+                return row;
+            };
+
+            if (result.length > 0) {
+                // Build SQL dynamically to add new fields
+                const updateSet = updateFields.map(f => `\`${f}\`=?`).join(',\n');
+                const updateQuery = `
+                    UPDATE freight_quote_invoice SET
+                        ${updateSet}
+                    WHERE id=?
+                `;
+
+                const updateParams = [
+                    ...updateFields.map(f => getFieldValue(f)),
+                    result[0].quote_invoice_id
+                ];
+
+                con.query(updateQuery, updateParams, (err, updateData) => {
+                    if (err) {
+                        return res.status(500).send({
+                            success: false,
+                            message: err.message
+                        });
+                    }
+
+                    const quoteEstimateId = result[0].quote_invoice_id;
+
+                    if (data.user_type == "1" || data.user_type == "2") {
+                        con.query(
+                            `UPDATE tbl_freight SET status=?, freight_quote_invoice_id=?, estimate_date=NOW() WHERE id=?`,
+                            [4, quoteEstimateId, data.freight_id]
+                        );
+                    }
+
+                    const finishUpdate = (referenceNo = null) => {
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight quote invoice updated successfully",
+                            ID: quoteEstimateId,
+                            customer_invoice_no: data.customer_invoice_no || null,
+                            final_base_currency: data.final_base_currency || null,
+                            ...(referenceNo && { reference_no: referenceNo })
+                        });
+                    };
+
+                    if (data.regenerate_reference_no) {
+                        return applyFreightQuoteInvoiceReferenceNo(
+                            quoteEstimateId,
+                            (refErr, referenceNo) => {
+                                if (refErr) {
+                                    return res.status(500).send({
+                                        success: false,
+                                        message: refErr.message
+                                    });
+                                }
+                                finishUpdate(referenceNo);
+                            }
+                        );
+                    }
+
+                    finishUpdate();
+                });
+
+            }
+            /* ================= INSERT ================= */
+            else {
+                const insertQuery = `INSERT INTO freight_quote_invoice SET ?`;
+                const insertPayload = buildRowPayload(updateFields);
+                con.query(insertQuery, insertPayload, (err, insertResult) => {
+                    if (err) {
+                        return res.status(500).send({
+                            success: false,
+                            message: err.message
+                        });
+                    }
+
+                    const newQuoteId = insertResult.insertId;
+
+                    if (data.user_type == "1" || data.user_type == "2") {
+                        con.query(
+                            `UPDATE tbl_freight SET status=?, freight_quote_invoice_id=?, estimate_date=NOW() WHERE id=?`,
+                            [4, newQuoteId, data.freight_id]
+                        );
+                    }
+
+                    applyFreightQuoteInvoiceReferenceNo(newQuoteId, (refErr, referenceNo) => {
+                        if (refErr) {
+                            return res.status(500).send({
+                                success: false,
+                                message: refErr.message
+                            });
+                        }
+
+                        return res.status(200).send({
+                            success: true,
+                            message: "Freight quote invoice added successfully",
+                            ID: newQuoteId,
+                            reference_no: referenceNo,
+                            customer_invoice_no: data.customer_invoice_no || null,
+                            final_base_currency: data.final_base_currency || null
+                        });
+                    });
+                });
+            }
+        });
+
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const deleteFreightQuoteInvoice = async (req, res) => {
+    try {
+        const { quote_invoice_id } = req.body;
+
+        if (!quote_invoice_id) {
+            return res.status(400).send({
+                success: false,
+                message: "quote_invoice_id is required"
+            });
+        }
+
+        const checkQuery = `
+            SELECT id, freight_id
+            FROM freight_quote_invoice
+            WHERE id = ?
+        `;
+
+        con.query(checkQuery, [quote_invoice_id], (checkErr, checkResult) => {
+            if (checkErr) {
+                return res.status(500).send({
+                    success: false,
+                    message: checkErr.message
+                });
+            }
+
+            if (checkResult.length === 0) {
+                return res.status(404).send({
+                    success: false,
+                    message: "Freight quote not found"
+                });
+            }
+
+            const freightId = checkResult[0].freight_id;
+
+            const deleteQuery = `
+                DELETE FROM freight_quote_invoice
+                WHERE id = ?
+            `;
+
+            con.query(deleteQuery, [quote_invoice_id], (deleteErr, deleteResult) => {
+                if (deleteErr) {
+                    return res.status(500).send({
+                        success: false,
+                        message: deleteErr.message
+                    });
+                }
+
+                if (deleteResult.affectedRows === 0) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Failed to delete freight quote invoice"
+                    });
+                }
+
+                const updateFreightQuery = `
+                    UPDATE tbl_freight
+                    SET freight_quote_invoice_id = NULL
+                    WHERE id = ? AND freight_quote_invoice_id = ?
+                `;
+
+                con.query(updateFreightQuery, [freightId, quote_invoice_id], (updateErr) => {
+                    if (updateErr) {
+                        return res.status(500).send({
+                            success: false,
+                            message: updateErr.message
+                        });
+                    }
+
+                    return res.status(200).send({
+                        success: true,
+                        message: "Freight quote deleted successfully"
+                    });
+                });
+            });
+        });
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const GetFreightQuoteInvoiceById = async (req, res) => {
+    try {
+        const { quote_invoice_id, freight_id, supplier_id } = req.body;
+
+        if (!quote_invoice_id) {
+            return res.status(400).json({
+                success: false,
+                message: "quote_invoice_id is required"
+            });
+        }
+
+        let selectQuery = `
+            SELECT 
+                freight_quote_invoice.*,
+                freight_quote_invoice.id AS quote_invoice_id
+            FROM freight_quote_invoice
+            WHERE freight_quote_invoice.id = ?
+        `;
+
+        const queryParams = [quote_invoice_id];
+
+        // Optional freight filter
+        if (freight_id) {
+            selectQuery += ` AND freight_quote_invoice.freight_id = ?`;
+            queryParams.push(freight_id);
+        }
+
+        // Optional supplier filter
+        if (supplier_id) {
+            selectQuery += ` AND freight_quote_invoice.supplier_id = ?`;
+            queryParams.push(supplier_id);
+        }
+
+        con.query(selectQuery, queryParams, (err, data) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            if (!data || data.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Data not found"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: data[0]
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const GetFreightQuoteInvoiceBySupplier = async (req, res) => {
+    try {
+        const { freight_id, supplier_id } = req.body;
+
+        if (!freight_id || !supplier_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_id and supplier_id are required"
+            });
+        }
+
+        let selectQuery = `
+            SELECT 
+            freight_quote_invoice.*,
+            tbl_freight.*,
+            freight_quote_invoice.id AS quote_estimate_id
+            FROM freight_quote_invoice
+            LEFT JOIN tbl_freight 
+            ON freight_quote_invoice.freight_id = tbl_freight.id
+            WHERE freight_quote_invoice.freight_id = ?
+            AND freight_quote_invoice.supplier_id = ?
+            `;
+
+        const queryParams = [freight_id, supplier_id];
+
+        con.query(selectQuery, queryParams, (err, data) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            if (!data || data.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Data not found"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: data[0]
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getAllFreightQuoteInvoiceList = async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search
+        } = req.query;
+
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const offset = (pageNumber - 1) * pageLimit;
+
+        let condition = "";
+        let params = [];
+
+        if (search) {
+            const s = `%${search}%`;
+            condition += `
+                AND (
+                    fqi.id LIKE ?
+                    OR fqi.freight_id LIKE ?
+                    OR fqi.supplier_id LIKE ?
+                    OR fqi.serial_number LIKE ?
+                    OR fqi.client_ref LIKE ?
+                    OR fqi.reference_no LIKE ?
+                    OR fqi.customer_invoice_no LIKE ?
+                    OR fqi.final_base_currency LIKE ?
+                    OR sup.name LIKE ?
+                    OR tbl_freight.freight_number LIKE ?
+                    OR tbl_freight.product_desc LIKE ?
+                    OR tbl_users.full_name LIKE ?
+                )
+            `;
+            params.push(s, s, s, s, s, s, s, s, s, s, s, s);
+        }
+
+        const countQuery = `
+            SELECT COUNT(*) AS total
+            FROM freight_quote_invoice fqi
+            LEFT JOIN tbl_freight ON tbl_freight.id = fqi.freight_id
+            LEFT JOIN tbl_suppliers sup ON sup.id = fqi.supplier_id
+            LEFT JOIN tbl_users ON tbl_users.id = fqi.client_id
+            WHERE tbl_freight.is_deleted = 0
+            ${condition}
+        `;
+
+        const total = await new Promise((resolve, reject) => {
+            con.query(countQuery, params, (err, rows) => {
+                if (err) return reject(err);
+                resolve(rows[0].total);
+            });
+        });
+
+        const dataQuery = `
+            SELECT
+                fqi.id AS quote_invoice_id,
+                fqi.serial_number,
+                fqi.client_ref,
+                fqi.supplier_id,
+                fqi.reference_no,
+                fqi.customer_invoice_no,
+                fqi.date AS quote_date,
+                fqi.is_approved,
+                fqi.invoice_for_country,
+                fqi.final_base_currency,
+                fqi.status,
+                COALESCE(fqi.sumofRoe, 0) AS quote_total,
+
+                sup.name AS supplier_name,
+                sup.email AS supplier_email,
+                sup.phone_no AS supplier_phone,
+                
+
+                tbl_users.full_name AS client_name,
+
+                tbl_freight.id AS freight_id,
+                tbl_freight.freight_number,
+                tbl_freight.status AS freight_status,
+                tbl_freight.priority,
+                tbl_freight.type,
+                tbl_freight.freight,
+                tbl_freight.product_desc,
+                tbl_freight.date AS freight_date,
+                c1.name AS origin_country,
+                c2.name AS destination_country
+
+            FROM freight_quote_invoice fqi
+            LEFT JOIN tbl_suppliers sup ON sup.id = fqi.supplier_id
+            LEFT JOIN tbl_freight ON tbl_freight.id = fqi.freight_id
+            LEFT JOIN tbl_users ON tbl_users.id = fqi.client_id
+            LEFT JOIN countries c1 ON c1.id = tbl_freight.collection_from
+            LEFT JOIN countries c2 ON c2.id = tbl_freight.delivery_to
+
+            WHERE tbl_freight.is_deleted = 0
+            ${condition}
+
+            ORDER BY fqi.id DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const data = await new Promise((resolve, reject) => {
+            con.query(dataQuery, [...params, pageLimit, offset], (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
+
+        return res.status(200).send({
+            success: true,
+            total,
+            page: pageNumber,
+            limit: pageLimit,
+            data
+        });
     } catch (error) {
         return res.status(500).send({
             success: false,
@@ -18235,6 +20724,9701 @@ const copySupplierInvoice = async (req, res) => {
     }
 };
 
+const getAdminFrieghtComponentList = async (req, res) => {
+    try {
+
+        const { type } = req.query;
+
+        if (!type) {
+            return res.status(400).send({
+                success: false,
+                message: "type is required"
+            });
+        }
+
+        const query = `
+            SELECT
+                id as admin_frieght_component_id,
+                code,
+                description,
+                name,
+                status
+            FROM admin_frieght_component
+            WHERE name = ?
+            ORDER BY description ASC
+        `;
+
+        con.query(query, [type], (err, result) => {
+
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                count: result.length,
+                data: result
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// ================= FREIGHT QUOTE ESTIMATE (ADMIN & SUPPLIER) =================
+
+const addUpdateFreightQuotes = async (req, res) => {
+    let connection;
+
+    try {
+        const {
+            freight_id,
+            client_id,
+            quote_type,
+            client_name,
+            supplier_id,
+            customer_invoice_no,
+            company_id,
+            invoice_for_country,
+            is_approved,
+            date,
+            payment_terms,
+            quote_validity,
+            final_base_currency,
+            chargeable,
+            sumof_totalcost,
+            sumof_finalamount,
+            sumof_vatincl,
+            components = []
+        } = req.body;
+
+        // Validations
+
+        if (!final_base_currency || !final_base_currency.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "final_base_currency is required"
+            });
+        }
+
+        const allowedCurrencies = [
+            "USD",
+            "RAND",
+            "INR",
+            "EURO"
+        ];
+
+        if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
+            return res.status(400).json({
+                success: false,
+                message: `Please select a valid final base currency`
+            });
+        }
+
+        if (!freight_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_id is required"
+            });
+        }
+
+        // if (!client_id) {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "client_id is required"
+        //     });
+        // }
+
+        if (!quote_type) {
+            return res.status(400).json({
+                success: false,
+                message: "quote_type is required"
+            });
+        }
+
+        if (!company_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a country for the company"
+            });
+        }
+
+        if (!["ADMIN", "SUPPLIER"].includes(quote_type)) {
+            return res.status(400).json({
+                success: false,
+                message: "quote_type must be ADMIN or SUPPLIER"
+            });
+        }
+
+        const isApproved = quote_type === "ADMIN" ? 1 : 0;
+
+        if (!Array.isArray(components) || components.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "components are required"
+            });
+        }
+
+        const invalidComponent = components.find(
+            item =>
+                item.admin_frieght_component_id === undefined ||
+                item.admin_frieght_component_id === null ||
+                item.admin_frieght_component_id === ""
+        );
+
+        if (invalidComponent) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a description"
+            });
+        }
+
+        // Get connection from pool
+        connection = await new Promise((resolve, reject) => {
+            con.getConnection((err, conn) => {
+                if (err) return reject(err);
+                resolve(conn);
+            });
+        });
+
+        await new Promise((resolve, reject) => {
+            connection.beginTransaction(err => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+
+        // =====================================
+        // CHECK HEADER
+        // =====================================
+
+        let quoteQuery = `
+     SELECT id, reference_no, supplier_id
+     FROM freight_quote_estimate
+     WHERE freight_id = ?
+     AND client_id = ?
+     AND is_deleted = 0
+     `;
+
+        let quoteParams = [freight_id, client_id];
+
+        // SUPPLIER CASE
+        if (quote_type === "SUPPLIER") {
+            quoteQuery += `
+        AND quote_type = 'SUPPLIER'
+        AND supplier_id = ?
+        `;
+            quoteParams.push(supplier_id);
+        }
+
+        // ADMIN CASE
+        if (quote_type === "ADMIN") {
+            quoteQuery += `
+        AND quote_type = 'ADMIN'
+        `;
+        }
+
+        quoteQuery += ` LIMIT 1`;
+
+        const quoteResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                quoteQuery,
+                quoteParams,
+                (err, result) => {
+                    if (err) return reject(err);
+                    resolve(result);
+                }
+            );
+
+        });
+
+        let quoteId;
+        let referenceNo;
+
+        // =====================================
+        // UPDATE HEADER
+        // =====================================
+
+        if (quoteResult.length > 0) {
+
+            quoteId = quoteResult[0].id;
+            referenceNo = quoteResult[0].reference_no;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                UPDATE freight_quote_estimate
+                SET
+                client_name =?,
+                quote_type=?,
+                supplier_id =?,
+                customer_invoice_no =?,
+                company_id = ?,
+                invoice_for_country =?,
+                is_approved = ?,
+                quote_date =?,
+                payment_terms = ?,
+                quote_validity = ?,
+                final_base_currency =?,
+                chargeable =?,
+                sumof_totalcost =?,
+                sumof_finalamount =?,
+                sumof_vatincl =?
+                WHERE id =?
+                `,
+                    [
+                        client_name,
+                        quote_type,
+                        supplier_id,
+                        customer_invoice_no,
+                        company_id,
+                        invoice_for_country,
+                        isApproved,
+                        date,
+                        payment_terms,
+                        quote_validity,
+                        final_base_currency,
+                        chargeable,
+                        sumof_totalcost,
+                        sumof_finalamount,
+                        sumof_vatincl,
+                        quoteId
+                    ],
+                    (err) => {
+                        if (err) return reject(err);
+                        resolve();
+                    }
+                );
+
+            });
+
+        } else {
+
+            const insertHeader = await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                INSERT INTO freight_quote_estimate
+        (
+            freight_id,
+            client_id,
+            quote_type,
+            client_name,
+            supplier_id,
+            customer_invoice_no,
+            company_id,
+            invoice_for_country,
+            is_approved,
+            quote_date,
+            payment_terms,
+            quote_validity,
+            final_base_currency,
+            chargeable,
+            sumof_totalcost,
+            sumof_finalamount,
+            sumof_vatincl
+        )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                    [
+                        freight_id,
+                        client_id,
+                        quote_type,
+                        client_name,
+                        supplier_id,
+                        customer_invoice_no,
+                        company_id,
+                        invoice_for_country,
+                        isApproved,
+                        date,
+                        payment_terms,
+                        quote_validity,
+                        final_base_currency,
+                        chargeable,
+                        sumof_totalcost,
+                        sumof_finalamount,
+                        sumof_vatincl
+                    ],
+                    (err, result) => {
+                        if (err) return reject(err);
+                        resolve(result);
+                    }
+                );
+
+            });
+
+            quoteId = insertHeader.insertId;
+
+            referenceNo = `ADQO${10000 + Number(quoteId)} `;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                UPDATE freight_quote_estimate
+                SET reference_no = ?
+                WHERE id = ?
+                `,
+                    [referenceNo, quoteId],
+                    (err) => {
+                        if (err) return reject(err);
+                        resolve();
+                    }
+                );
+
+            });
+        }
+
+        // =====================================
+        // EXISTING DETAILS
+        // =====================================
+
+        const existingDetails = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+            SELECT id
+            FROM freight_quote_estimate_details
+            WHERE freight_quote_estimate_id = ?
+        `,
+                [quoteId],
+                (err, result) => {
+                    if (err) return reject(err);
+                    resolve(result);
+                }
+            );
+
+        });
+
+        const existingIds = existingDetails.map(item => Number(item.id));
+
+        const requestIds = components
+            .filter(item => item.id)
+            .map(item => Number(item.id));
+
+        const deleteIds = existingIds.filter(
+            id => !requestIds.includes(id)
+        );
+
+        // =====================================
+        // DELETE REMOVED RECORDS
+        // =====================================
+
+        if (deleteIds.length > 0) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                DELETE FROM freight_quote_estimate_details
+                WHERE id IN(?)
+                 `,
+                    [deleteIds],
+                    (err) => {
+                        if (err) return reject(err);
+                        resolve();
+                    }
+                );
+
+            });
+        }
+
+        // =====================================
+        // INSERT / UPDATE DETAILS
+        // =====================================
+
+        for (const item of components) {
+
+            if (item.id) {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                    UPDATE freight_quote_estimate_details
+    SET
+    admin_frieght_component_id =?,
+        description =?,
+        qty =?,
+        currency =?,
+        cost =?,
+        unit_type =?,
+        unit =?,
+        total_cost =?,
+        gp_percent =?,
+        sales_price =?,
+        roe =?,
+        final_amount =?,
+        vat_type =?,
+        disc_percent =?,
+        discount =?,
+        exclusive =?,
+        vat =?,
+        vat_incl =?,
+        comment =?
+            WHERE id =?
+                `,
+                        [
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null,
+                            item.id
+                        ],
+                        (err) => {
+                            if (err) return reject(err);
+                            resolve();
+                        }
+                    );
+
+                });
+
+            } else {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                    INSERT INTO freight_quote_estimate_details
+        (
+            freight_quote_estimate_id,
+            admin_frieght_component_id,
+            description,
+            qty,
+            currency,
+            cost,
+            unit_type,
+            unit,
+            total_cost,
+            gp_percent,
+            sales_price,
+            roe,
+            final_amount,
+            vat_type,
+            disc_percent,
+            discount,
+            exclusive,
+            vat,
+            vat_incl,
+            comment
+        )
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `,
+                        [
+                            quoteId,
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null
+                        ],
+                        (err) => {
+                            if (err) return reject(err);
+                            resolve();
+                        }
+                    );
+
+                });
+            }
+        }
+
+        // it will uncomment later
+
+        if (quote_type === "ADMIN") {
+            await new Promise((resolve, reject) => {
+                connection.query(
+                    `UPDATE tbl_freight
+                SET status = ?, freight_quote_estimate_id = ?, quote_estimate_date = NOW()
+                WHERE id = ?`,
+                    [4, quoteId, freight_id],
+                    (err) => {
+                        if (err) return reject(err);
+                        resolve();
+                    }
+                );
+            });
+        }
+
+        await new Promise((resolve, reject) => {
+            connection.commit(err => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: quoteResult.length
+                ? "Freight Quote Updated Successfully"
+                : "Freight Quote Added Successfully",
+            freight_quote_estimate_id: quoteId,
+            reference_no: referenceNo
+        });
+
+    } catch (error) {
+
+        if (connection) {
+            try {
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+            } catch (_) { }
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+
+        if (connection) {
+            connection.release();
+        }
+    }
+
+};
+
+const GetFreightQuoteEstimateById = async (req, res) => {
+
+    try {
+
+        const {
+            freight_quote_estimate_id,
+            freight_id
+        } = req.body;
+
+        if (!freight_quote_estimate_id && !freight_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_quote_estimate_id or freight_id is required"
+            });
+        }
+
+        let whereCondition = "";
+        let queryParams = [];
+
+        if (freight_quote_estimate_id) {
+            whereCondition = "fqe.id = ?";
+            queryParams = [freight_quote_estimate_id];
+        } else {
+            whereCondition = "fqe.freight_id = ?";
+            queryParams = [freight_id];
+        }
+
+        const headerQuery = `
+            SELECT
+        fqe.id,
+        fqe.reference_no,
+        fqe.freight_id,
+        fqe.client_id,
+        fqe.client_name,
+        fqe.supplier_id,
+        fqe.company_id,
+
+        ca.company_name,
+        ca.address_line,
+        ca.city,
+        ca.state_region,
+        ca.country,
+        ca.postal_code,
+        ca.email,
+        ca.telephone,
+        ca.company_registration_no,
+        ca.tax_vat_no,
+
+        bd.id AS bank_id,
+        bd.account_name,
+        bd.bank_name,
+        bd.branch_name,
+        bd.branch_code,
+        bd.account_no,
+        bd.swift_code,
+        bd.branch_address,
+        bd.note,
+        bd.email AS bank_email,
+
+        fqe.customer_invoice_no,
+        fqe.invoice_for_country,
+        fqe.is_approved,
+        fqe.quote_date,
+        fqe.payment_terms,
+        fqe.quote_validity,
+        fqe.quote_type,
+        fqe.final_base_currency,
+        fqe.chargeable,
+        fqe.sumof_totalcost,
+        fqe.sumof_finalamount,
+        fqe.sumof_vatincl,
+        fqe.status,
+        fqe.created_at,
+        fqe.updated_at
+
+    FROM freight_quote_estimate fqe
+
+    LEFT JOIN company_addresses ca
+        ON ca.id = fqe.company_id
+        AND ca.is_deleted = 0
+
+    LEFT JOIN banking_details bd
+        ON bd.id = ca.bank_id
+        AND bd.is_deleted = 0
+
+    WHERE ${whereCondition}
+     AND fqe.is_deleted = 0
+
+    LIMIT 1
+        `;
+
+        con.query(headerQuery, queryParams, (headerErr, headerResult) => {
+
+            if (headerErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: headerErr.message
+                });
+            }
+
+            if (headerResult.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Freight Quote Estimate not found"
+                });
+            }
+
+            const quote = headerResult[0];
+
+            const detailsQuery = `
+                SELECT
+                    fqed.id,
+                    fqed.freight_quote_estimate_id,
+                    fqed.admin_frieght_component_id,
+
+                    afc.code,
+                    afc.description AS component_description,
+                    afc.name,
+
+                    fqed.description,
+                    fqed.qty,
+                    fqed.currency,
+                    fqed.cost,
+                    fqed.unit_type,
+                    fqed.unit,
+                    fqed.total_cost,
+                    fqed.gp_percent,
+                    fqed.sales_price,
+                    fqed.roe,
+                    fqed.final_amount,
+                    fqed.vat_type,
+                    fqed.disc_percent,
+                    fqed.discount,
+                    fqed.exclusive,
+                    fqed.vat,
+                    fqed.vat_incl,
+                    fqed.comment,
+
+                    fqed.created_at,
+                    fqed.updated_at
+
+                FROM freight_quote_estimate_details fqed
+
+                LEFT JOIN admin_frieght_component afc
+                    ON afc.id = fqed.admin_frieght_component_id
+
+                WHERE fqed.freight_quote_estimate_id = ?
+
+                ORDER BY fqed.id ASC
+            `;
+
+            con.query(detailsQuery, [quote.id], (detailsErr, detailsResult) => {
+
+                if (detailsErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: detailsErr.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Freight Quote Estimate fetched successfully",
+                    data: {
+                        id: quote.id,
+                        reference_no: quote.reference_no,
+                        freight_id: quote.freight_id,
+                        client_id: quote.client_id,
+                        client_name: quote.client_name,
+                        supplier_id: quote.supplier_id,
+                        company_id: quote.company_id,
+
+                        customer_invoice_no: quote.customer_invoice_no,
+                        invoice_for_country: quote.invoice_for_country,
+                        is_approved: quote.is_approved,
+                        quote_date: quote.quote_date,
+                        payment_terms: quote.payment_terms,
+                        quote_validity: quote.quote_validity,
+                        date: quote.quote_date,
+                        final_base_currency: quote.final_base_currency,
+                        chargeable: quote.chargeable,
+                        sumof_totalcost: quote.sumof_totalcost,
+                        sumof_finalamount: quote.sumof_finalamount,
+                        sumof_vatincl: quote.sumof_vatincl,
+                        status: quote.status,
+                        quote_type: quote.quote_type,
+                        created_at: quote.created_at,
+                        updated_at: quote.updated_at,
+
+                        company_address: quote.company_id
+                            ? {
+                                id: quote.company_id,
+                                company_name: quote.company_name,
+                                address_line: quote.address_line,
+                                city: quote.city,
+                                state_region: quote.state_region,
+                                country: quote.country,
+                                postal_code: quote.postal_code,
+                                email: quote.email,
+                                telephone: quote.telephone,
+                                company_registration_no: quote.company_registration_no,
+                                tax_vat_no: quote.tax_vat_no
+                            }
+                            : null,
+
+                        bank_details: quote.bank_id
+                            ? {
+                                bank_id: quote.bank_id,
+                                account_name: quote.account_name,
+                                bank_name: quote.bank_name,
+                                branch_name: quote.branch_name,
+                                branch_code: quote.branch_code,
+                                account_no: quote.account_no,
+                                swift_code: quote.swift_code,
+                                branch_address: quote.branch_address,
+                                note: quote.note,
+                                bank_email: quote.bank_email
+                            }
+                            : null,
+
+                        components: detailsResult
+                    }
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const getFreightQuoteEstimateBySupplier = async (req, res) => {
+
+    try {
+
+        const {
+            freight_quote_estimate_id,
+            freight_id,
+            supplier_id
+        } = req.body;
+
+        if (
+            !freight_quote_estimate_id &&
+            (!freight_id || !supplier_id)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_quote_estimate_id OR freight_id + supplier_id is required"
+            });
+        }
+
+        let whereCondition = "";
+        let queryParams = [];
+
+        if (freight_quote_estimate_id) {
+
+            whereCondition = "fqe.id = ?";
+            queryParams = [freight_quote_estimate_id];
+
+        } else {
+
+            whereCondition = `
+         fqe.freight_id = ?
+         AND fqe.supplier_id = ?
+         AND fqe.quote_type = 'SUPPLIER'
+         `;
+
+            queryParams = [
+                freight_id,
+                supplier_id
+            ];
+        }
+
+        const headerQuery = `
+             SELECT
+        fqe.id,
+        fqe.reference_no,
+        fqe.freight_id,
+        fqe.client_id,
+        fqe.quote_type,
+        fqe.client_name,
+        fqe.supplier_id,
+        fqe.company_id,
+
+        ca.company_name,
+        ca.address_line,
+        ca.city,
+        ca.state_region,
+        ca.country,
+        ca.postal_code,
+        ca.email,
+        ca.telephone,
+        ca.company_registration_no,
+        ca.tax_vat_no,
+
+        fqe.customer_invoice_no,
+        fqe.invoice_for_country,
+        fqe.is_approved,
+        fqe.quote_date,
+        fqe.payment_terms,
+        fqe.quote_validity,
+        fqe.final_base_currency,
+        fqe.chargeable,
+        fqe.sumof_totalcost,
+        fqe.sumof_finalamount,
+        fqe.sumof_vatincl,
+        fqe.status,
+        fqe.created_at,
+        fqe.updated_at
+
+    FROM freight_quote_estimate fqe
+
+    LEFT JOIN company_addresses ca
+        ON ca.id = fqe.company_id
+        AND ca.is_deleted = 0
+
+    WHERE ${whereCondition}
+     AND fqe.is_deleted = 0
+
+    ORDER BY fqe.id DESC
+    LIMIT 1
+        `;
+
+        con.query(
+            headerQuery,
+            queryParams,
+            (headerErr, headerResult) => {
+
+                if (headerErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: headerErr.message
+                    });
+                }
+
+                if (!headerResult.length) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Supplier Quote Estimate not found"
+                    });
+                }
+
+                const quote = headerResult[0];
+
+                const detailsQuery = `
+                    SELECT
+                        fqed.id,
+                        fqed.freight_quote_estimate_id,
+                        fqed.admin_frieght_component_id,
+
+                        afc.code,
+                        afc.description AS component_description,
+                        afc.name,
+
+                        fqed.description,
+                        fqed.qty,
+                        fqed.currency,
+                        fqed.cost,
+                        fqed.unit_type,
+                        fqed.unit,
+                        fqed.total_cost,
+                        fqed.gp_percent,
+                        fqed.sales_price,
+                        fqed.roe,
+                        fqed.final_amount,
+                        fqed.vat_type,
+                        fqed.disc_percent,
+                        fqed.discount,
+                        fqed.exclusive,
+                        fqed.vat,
+                        fqed.vat_incl,
+                        fqed.comment,
+
+                        fqed.created_at,
+                        fqed.updated_at
+
+                    FROM freight_quote_estimate_details fqed
+
+                    LEFT JOIN admin_frieght_component afc
+                        ON afc.id = fqed.admin_frieght_component_id
+
+                    WHERE fqed.freight_quote_estimate_id = ?
+
+                    ORDER BY fqed.id ASC
+                `;
+
+                con.query(
+                    detailsQuery,
+                    [quote.id],
+                    (detailsErr, detailsResult) => {
+
+                        if (detailsErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: detailsErr.message
+                            });
+                        }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Supplier Quote Estimate fetched successfully",
+                            data: {
+                                id: quote.id,
+                                reference_no: quote.reference_no,
+                                freight_id: quote.freight_id,
+                                client_id: quote.client_id,
+                                quote_type: quote.quote_type,
+                                client_name: quote.client_name,
+                                supplier_id: quote.supplier_id,
+                                company_id: quote.company_id,
+
+                                customer_invoice_no: quote.customer_invoice_no,
+                                invoice_for_country: quote.invoice_for_country,
+                                is_approved: quote.is_approved,
+                                quote_date: quote.quote_date,
+                                date: quote.quote_date,
+                                payment_terms: quote.payment_terms,
+                                quote_validity: quote.quote_validity,
+                                final_base_currency: quote.final_base_currency,
+                                chargeable: quote.chargeable,
+                                sumof_totalcost: quote.sumof_totalcost,
+                                sumof_finalamount: quote.sumof_finalamount,
+                                sumof_vatincl: quote.sumof_vatincl,
+                                status: quote.status,
+                                created_at: quote.created_at,
+                                updated_at: quote.updated_at,
+
+                                company_address: quote.company_id
+                                    ? {
+                                        id: quote.company_id,
+                                        company_name: quote.company_name,
+                                        address_line: quote.address_line,
+                                        city: quote.city,
+                                        state_region: quote.state_region,
+                                        country: quote.country,
+                                        postal_code: quote.postal_code,
+                                        email: quote.email,
+                                        telephone: quote.telephone,
+                                        company_registration_no: quote.company_registration_no,
+                                        tax_vat_no: quote.tax_vat_no
+                                    }
+                                    : null,
+
+                                components: detailsResult
+                            }
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+const GetFreightQuoteEstimateList = async (req, res) => {
+    try {
+
+        let {
+            page = 1,
+            limit = 10,
+            search = "",
+            is_approved,
+            client_id,
+            supplier_id,
+            freight_id
+        } = req.query;
+
+        page = parseInt(page);
+        limit = parseInt(limit);
+
+        const offset = (page - 1) * limit;
+
+        let whereClause = " WHERE 1=1 ";
+        let params = [];
+
+        // Search
+        if (search) {
+            whereClause += `
+            AND (
+            fqe.reference_no LIKE ?
+            OR fqe.client_name LIKE ?
+            OR fqe.customer_invoice_no LIKE ?
+            OR tf.freight_number LIKE ?
+            OR ts.name LIKE ?
+            )
+            `;
+
+            params.push(
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`,
+                `%${search}%`
+            );
+        }
+
+        // Filters
+        if (is_approved !== undefined && is_approved !== "") {
+            whereClause += ` AND is_approved = ? `;
+            params.push(is_approved);
+        }
+
+        if (client_id) {
+            whereClause += ` AND client_id = ? `;
+            params.push(client_id);
+        }
+
+        if (supplier_id) {
+            whereClause += ` AND supplier_id = ? `;
+            params.push(supplier_id);
+        }
+
+        if (freight_id) {
+            whereClause += ` AND freight_id = ? `;
+            params.push(freight_id);
+        }
+
+        const countQuery = `
+         SELECT COUNT(DISTINCT fqe.id) AS total
+
+         FROM freight_quote_estimate fqe
+
+         LEFT JOIN tbl_freight tf
+         ON tf.id = fqe.freight_id
+
+         LEFT JOIN tbl_suppliers ts
+         ON ts.id = fqe.client_id
+
+         ${whereClause}
+          AND fqe.is_deleted = 0
+         `;
+
+        con.query(countQuery, params, (countErr, countResult) => {
+
+            if (countErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
+            }
+
+            const totalRecords = countResult[0].total;
+            const totalPages = Math.ceil(totalRecords / limit);
+
+            const listQuery = `
+         SELECT
+         fqe.id as freight_quote_estimate_id,
+         fqe.reference_no,
+
+         fqe.freight_id,
+         tf.freight_number,
+
+         fqe.client_id,
+         fqe.client_name,
+         
+         fqe.supplier_id,
+         ts.name as supplier_name,
+         fqe.company_id,
+         ca.company_name,
+         ca.country,
+         fqe.customer_invoice_no,
+         fqe.invoice_for_country,
+         fqe.is_approved,
+
+         fqe.quote_date,
+         fqe.payment_terms,
+         fqe.quote_validity,
+         fqe.inv_date,
+         fqe.final_base_currency,
+         fqe.chargeable,
+         fqe.sumof_totalcost,
+         fqe.sumof_finalamount,
+         fqe.sumof_vatincl,
+         fqe.status,
+
+         fqe.created_at,
+         fqe.updated_at
+
+         FROM freight_quote_estimate fqe
+
+         LEFT JOIN tbl_freight tf
+         ON tf.id = fqe.freight_id
+
+         LEFT JOIN tbl_suppliers ts
+         ON ts.id = fqe.supplier_id
+
+         LEFT JOIN company_addresses ca
+         ON ca.id = fqe.company_id
+
+         ${whereClause}
+          AND fqe.is_deleted = 0
+
+         ORDER BY fqe.id DESC
+         LIMIT ? OFFSET ?
+         `;
+
+            const listParams = [...params, limit, offset];
+
+            con.query(
+                listQuery,
+                listParams,
+                (listErr, listResult) => {
+
+                    if (listErr) {
+                        return res.status(500).json({
+                            success: false,
+                            message: listErr.message
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        message: "Freight Quote Estimate List fetched successfully",
+
+                        pagination: {
+                            total_records: totalRecords,
+                            total_pages: totalPages,
+                            current_page: page,
+                            limit: limit
+                        },
+                        data: listResult
+
+                    });
+                }
+            );
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const approveRejectFreightQuote = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const {
+            freight_quote_estimate_id,
+            is_approved
+        } = req.body;
+
+        if (!freight_quote_estimate_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_quote_estimate_id is required"
+            });
+        }
+
+        if (![1, 2].includes(Number(is_approved))) {
+            return res.status(400).json({
+                success: false,
+                message: "is_approved must be 1 (Approved) or 2 (Rejected)"
+            });
+        }
+
+        // GET CONNECTION
+
+        connection = await new Promise((resolve, reject) => {
+            con.getConnection((err, conn) => {
+                if (err) return reject(err);
+                resolve(conn);
+            });
+        });
+
+        // START TRANSACTION
+
+        await new Promise((resolve, reject) => {
+            connection.beginTransaction(err => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+
+        // CHECK QUOTE
+
+        const quoteResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    freight_id,
+                    supplier_id,
+                    reference_no,
+                    is_approved
+                FROM freight_quote_estimate
+                WHERE id = ?
+                LIMIT 1
+                `,
+                [freight_quote_estimate_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!quoteResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Freight Quote Estimate not found"
+            });
+
+        }
+
+        const quote = quoteResult[0];
+
+        // UPDATE QUOTE APPROVAL STATUS
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE freight_quote_estimate
+                SET is_approved = ?
+                WHERE id = ?
+                `,
+                [
+                    is_approved,
+                    freight_quote_estimate_id
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+        });
+
+        // IF APPROVED THEN UPDATE FREIGHT
+
+        if (Number(is_approved) === 1) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    UPDATE tbl_freight
+                    SET
+                        status = ?,
+                        freight_quote_estimate_id = ?,
+                        confirmed_supplier_id = ?,
+                        isConfirmed = 1,
+                        quote_estimate_date = NOW()
+                    WHERE id = ?
+                    `,
+                    [
+                        4,
+                        freight_quote_estimate_id,
+                        quote.supplier_id,
+                        quote.freight_id
+                    ],
+                    (err) => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+
+                    }
+                );
+            });
+        }
+
+        // COMMIT
+        await new Promise((resolve, reject) => {
+            connection.commit(err => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+
+        return res.status(200).json({
+            success: true,
+            message:
+                Number(is_approved) === 1
+                    ? "Freight Quote Approved Successfully"
+                    : "Freight Quote Rejected Successfully",
+
+            data: {
+                freight_quote_estimate_id,
+                freight_id: quote.freight_id,
+                reference_no: quote.reference_no,
+                is_approved
+            }
+        });
+
+    } catch (error) {
+        // ROLLBACK
+        if (connection) {
+            try {
+
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+
+            } catch (_) { }
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+        // RELEASE CONNECTION
+        if (connection) {
+            connection.release();
+        }
+    }
+};
+
+const deleteFreightQuoteEstimateById = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const { freight_quote_estimate_id } = req.body;
+
+        if (!freight_quote_estimate_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_quote_estimate_id is required"
+            });
+        }
+
+        // =====================================
+        // GET CONNECTION
+        // =====================================
+
+        connection = await new Promise((resolve, reject) => {
+            con.getConnection((err, conn) => {
+                if (err) return reject(err);
+                resolve(conn);
+            });
+        });
+
+        // =====================================
+        // START TRANSACTION
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+            connection.beginTransaction(err => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+
+        // =====================================
+        // CHECK RECORD
+        // =====================================
+
+        const quoteResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    freight_id,
+                    is_deleted
+                FROM freight_quote_estimate
+                WHERE id = ?
+                LIMIT 1
+                `,
+                [freight_quote_estimate_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!quoteResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Freight Quote Estimate not found"
+            });
+
+        }
+
+        if (quoteResult[0].is_deleted == 1) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(400).json({
+                success: false,
+                message: "Freight Quote Estimate already deleted"
+            });
+
+        }
+
+        // =====================================
+        // SOFT DELETE HEADER
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE freight_quote_estimate
+                SET is_deleted = 1
+                WHERE id = ?
+                `,
+                [freight_quote_estimate_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // REMOVE REFERENCE FROM FREIGHT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE tbl_freight
+                SET
+                    freight_quote_estimate_id = NULL,
+                    confirmed_supplier_id = NULL,
+                    status = 0,
+                    isConfirmed = 0
+                WHERE freight_quote_estimate_id = ?
+                `,
+                [freight_quote_estimate_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // COMMIT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+
+            });
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Freight Quote Estimate deleted successfully"
+        });
+
+    } catch (error) {
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+
+        if (connection) {
+            connection.release();
+        }
+
+    }
+
+};
+
+// ===================================== Supplier Shipment Invoices =====================================
+
+const addUpdateSupplierShipmentInvoice = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const {
+            supplier_id,
+            shipment_id,
+            customer_invoice_no,
+            company_id,
+            invoice_for_country,
+            due_date,
+            final_base_currency,
+            chargeable,
+            sumof_totalcost,
+            sumof_finalamount,
+            sumof_vatincl,
+            status = "unpaid",
+            components = []
+        } = req.body;
+
+        // VALIDATION
+
+        if (!final_base_currency || !final_base_currency.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "final_base_currency is required"
+            });
+        }
+
+        const allowedCurrencies = [
+            "USD",
+            "RAND",
+            "INR",
+            "EURO"
+        ];
+
+        if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
+            return res.status(400).json({
+                success: false,
+                message: `Please select a valid final base currency`
+            });
+        }
+
+        if (!supplier_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select supplier"
+            });
+        }
+
+        if (!shipment_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select shipment"
+            });
+        }
+
+        if (!company_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a country for the company"
+            });
+        }
+
+        if (!Array.isArray(components) || !components.length) {
+            return res.status(400).json({
+                success: false,
+                message: "components are required"
+            });
+        }
+
+        const invalidComponent = components.find(
+            item =>
+                !item.admin_frieght_component_id
+        );
+
+        if (invalidComponent) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a description"
+            });
+        }
+
+        // CONNECTION
+
+        connection = await new Promise((resolve, reject) => {
+
+            con.getConnection((err, conn) => {
+
+                if (err) return reject(err);
+
+                resolve(conn);
+            });
+
+        });
+
+        await new Promise((resolve, reject) => {
+
+            connection.beginTransaction(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        // CHECK EXISTING INVOICE
+
+        const existingInvoice = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    reference_no
+                FROM supplier_shipment_invoice
+                WHERE supplier_id = ?
+                AND shipment_id = ?
+                LIMIT 1
+                `,
+                [
+                    supplier_id,
+                    shipment_id
+                ],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+
+        });
+
+        let invoiceId;
+        let referenceNo;
+
+        // UPDATE HEADER
+
+        if (existingInvoice.length > 0) {
+
+            invoiceId = existingInvoice[0].id;
+            referenceNo = existingInvoice[0].reference_no;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    UPDATE supplier_shipment_invoice
+                    SET
+                        supplier_id = ?,
+                        shipment_id = ?,
+                        customer_invoice_no = ?,
+                        company_id = ?,
+                        invoice_for_country = ?,
+                        due_date = ?,
+                        final_base_currency = ?,
+                        chargeable = ?,
+                        sumof_totalcost = ?,
+                        sumof_finalamount = ?,
+                        sumof_vatincl = ?,
+                        status = ?
+                    WHERE id = ?
+                    `,
+                    [
+                        supplier_id,
+                        shipment_id,
+                        customer_invoice_no || null,
+                        company_id,
+                        invoice_for_country || null,
+                        due_date || null,
+                        final_base_currency || null,
+                        chargeable || 0,
+                        sumof_totalcost || 0,
+                        sumof_finalamount || 0,
+                        sumof_vatincl || 0,
+                        status,
+                        invoiceId
+                    ],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        } else {
+
+            // INSERT HEADER
+
+            const insertInvoice = await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    INSERT INTO supplier_shipment_invoice
+                    (
+                        supplier_id,
+                        shipment_id,
+                        customer_invoice_no,
+                        company_id,
+                        invoice_for_country,
+                        due_date,
+                        final_base_currency,
+                        chargeable,
+                        sumof_totalcost,
+                        sumof_finalamount,
+                        sumof_vatincl,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    [
+                        supplier_id,
+                        shipment_id,
+                        customer_invoice_no || null,
+                        company_id,
+                        invoice_for_country || null,
+                        due_date || null,
+                        final_base_currency || null,
+                        chargeable || 0,
+                        sumof_totalcost || 0,
+                        sumof_finalamount || 0,
+                        sumof_vatincl || 0,
+                        status
+                    ],
+                    (err, result) => {
+
+                        if (err) return reject(err);
+
+                        resolve(result);
+                    }
+                );
+
+            });
+
+            invoiceId = insertInvoice.insertId;
+
+            referenceNo = `SUPINV${10000 + Number(invoiceId)}`;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    UPDATE supplier_shipment_invoice
+                    SET reference_no = ?
+                    WHERE id = ?
+                    `,
+                    [
+                        referenceNo,
+                        invoiceId
+                    ],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        }
+
+        // UPDATE SHIPMENT
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+        UPDATE tbl_shipments
+        SET
+            supplier_invoice_id = ?,
+            supplier_invoice_date = NOW()
+        WHERE id = ?
+        `,
+                [
+                    invoiceId,
+                    shipment_id
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+                }
+            );
+
+        });
+
+        // =====================================
+        // EXISTING DETAILS
+        // =====================================
+
+        const existingDetails = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT id
+                FROM supplier_shipment_invoice_details
+                WHERE supplier_shipment_invoice_id = ?
+                `,
+                [invoiceId],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+        });
+
+        const existingIds = existingDetails.map(
+            item => Number(item.id)
+        );
+
+        const requestIds = components
+            .filter(item => item.id)
+            .map(item => Number(item.id));
+
+        const deleteIds = existingIds.filter(
+            id => !requestIds.includes(id)
+        );
+
+        // DELETE REMOVED DETAILS
+
+        if (deleteIds.length) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    DELETE FROM supplier_shipment_invoice_details
+                    WHERE id IN (?)
+                    `,
+                    [deleteIds],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        }
+
+        // INSERT / UPDATE DETAILS
+
+        for (const item of components) {
+
+            if (item.id) {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                        UPDATE supplier_shipment_invoice_details
+                        SET
+                            admin_frieght_component_id = ?,
+                            description = ?,
+                            qty = ?,
+                            currency = ?,
+                            cost = ?,
+                            unit_type = ?,
+                            unit = ?,
+                            total_cost = ?,
+                            gp_percent = ?,
+                            sales_price = ?,
+                            roe = ?,
+                            final_amount = ?,
+                            vat_type = ?,
+                            disc_percent = ?,
+                            discount = ?,
+                            exclusive = ?,
+                            vat = ?,
+                            vat_incl = ?,
+                            comment = ?
+                        WHERE id = ?
+                        `,
+                        [
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null,
+                            item.id
+                        ],
+                        err => {
+
+                            if (err) return reject(err);
+
+                            resolve();
+                        }
+                    );
+
+                });
+
+            } else {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                        INSERT INTO supplier_shipment_invoice_details
+                        (
+                            supplier_shipment_invoice_id,
+                            admin_frieght_component_id,
+                            description,
+                            qty,
+                            currency,
+                            cost,
+                            unit_type,
+                            unit,
+                            total_cost,
+                            gp_percent,
+                            sales_price,
+                            roe,
+                            final_amount,
+                            vat_type,
+                            disc_percent,
+                            discount,
+                            exclusive,
+                            vat,
+                            vat_incl,
+                            comment
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        `,
+                        [
+                            invoiceId,
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null
+                        ],
+                        err => {
+
+                            if (err) return reject(err);
+
+                            resolve();
+                        }
+                    );
+
+                });
+
+            }
+        }
+
+        // =====================================
+        // COMMIT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: existingInvoice.length
+                ? "Supplier Shipment Invoice Updated Successfully"
+                : "Supplier Shipment Invoice Added Successfully",
+            supplier_shipment_invoice_id: invoiceId,
+            reference_no: referenceNo
+        });
+
+    } catch (error) {
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+
+        if (connection) {
+            connection.release();
+        }
+
+    }
+
+};
+
+const GetSupplierShipmentInvoiceById = async (req, res) => {
+
+    try {
+
+        const {
+            supplier_shipment_invoice_id,
+            shipment_id
+        } = req.body;
+
+        if (!supplier_shipment_invoice_id && !shipment_id) {
+            return res.status(400).json({
+                success: false,
+                message: "supplier_shipment_invoice_id OR shipment_id is required"
+            });
+        }
+
+        let whereCondition = "";
+        let queryParams = [];
+
+        if (supplier_shipment_invoice_id) {
+
+            whereCondition = `ssi.id = ?`;
+            queryParams = [supplier_shipment_invoice_id];
+
+        } else {
+
+            whereCondition = `ts.id = ?`;
+            queryParams = [shipment_id];
+        }
+
+        const headerQuery = `
+            SELECT
+        ssi.id AS supplier_shipment_invoice_id,
+        ssi.reference_no,
+        ssi.supplier_id,
+        ssi.company_id,
+        ssi.customer_invoice_no,
+        ssi.invoice_for_country,
+        ssi.due_date,
+        ssi.quote_date,
+        ssi.final_base_currency,
+        ssi.chargeable,
+        ssi.sumof_totalcost,
+        ssi.sumof_finalamount,
+        ssi.sumof_vatincl,
+        ssi.status,
+        ssi.created_at,
+        ssi.updated_at,
+        
+        ca.company_name,
+        ca.address_line,
+        ca.city,
+        ca.state_region,
+        ca.country,
+        ca.postal_code,
+        ca.email,
+        ca.telephone,
+        ca.company_registration_no,
+        ca.tax_vat_no,
+
+        ts.id AS shipment_id,
+        ts.supplier_invoice_date,
+
+        s.name AS supplier_name
+
+    FROM supplier_shipment_invoice ssi
+
+    LEFT JOIN tbl_shipments ts
+        ON ts.supplier_invoice_id = ssi.id
+
+    LEFT JOIN tbl_suppliers s
+        ON s.id = ssi.supplier_id
+
+    LEFT JOIN company_addresses ca
+        ON ca.id = ssi.company_id
+        AND ca.is_deleted = 0
+
+    WHERE ${whereCondition}
+
+    LIMIT 1
+        `;
+
+        con.query(
+            headerQuery,
+            queryParams,
+            (headerErr, headerResult) => {
+
+                if (headerErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: headerErr.message
+                    });
+                }
+
+                if (!headerResult.length) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Supplier Shipment Invoice not found"
+                    });
+                }
+
+                const invoice = headerResult[0];
+
+                const detailsQuery = `
+                    SELECT
+                        ssid.id,
+                        ssid.supplier_shipment_invoice_id,
+                        ssid.admin_frieght_component_id,
+
+                        afc.code,
+                        afc.name,
+                        afc.description AS component_description,
+
+                        ssid.description,
+                        ssid.qty,
+                        ssid.currency,
+                        ssid.cost,
+                        ssid.unit_type,
+                        ssid.unit,
+                        ssid.total_cost,
+                        ssid.gp_percent,
+                        ssid.sales_price,
+                        ssid.roe,
+                        ssid.final_amount,
+                        ssid.vat_type,
+                        ssid.disc_percent,
+                        ssid.discount,
+                        ssid.exclusive,
+                        ssid.vat,
+                        ssid.vat_incl,
+                        ssid.comment,
+
+                        ssid.created_at,
+                        ssid.updated_at
+
+                    FROM supplier_shipment_invoice_details ssid
+
+                    LEFT JOIN admin_frieght_component afc
+                        ON afc.id = ssid.admin_frieght_component_id
+
+                    WHERE ssid.supplier_shipment_invoice_id = ?
+
+                    ORDER BY ssid.id ASC
+                `;
+
+                con.query(
+                    detailsQuery,
+                    [invoice.supplier_shipment_invoice_id],
+                    (detailsErr, detailsResult) => {
+
+                        if (detailsErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: detailsErr.message
+                            });
+                        }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Supplier Shipment Invoice fetched successfully",
+                            data: {
+                                supplier_shipment_invoice_id: invoice.supplier_shipment_invoice_id,
+                                reference_no: invoice.reference_no,
+                                supplier_id: invoice.supplier_id,
+                                supplier_name: invoice.supplier_name,
+                                company_id: invoice.company_id,
+
+                                shipment_id: invoice.shipment_id,
+                                supplier_invoice_date: invoice.supplier_invoice_date,
+
+                                customer_invoice_no: invoice.customer_invoice_no,
+                                invoice_for_country: invoice.invoice_for_country,
+                                due_date: invoice.due_date,
+                                quote_date: invoice.quote_date,
+                                final_base_currency: invoice.final_base_currency,
+                                chargeable: invoice.chargeable,
+                                sumof_totalcost: invoice.sumof_totalcost,
+                                sumof_finalamount: invoice.sumof_finalamount,
+                                sumof_vatincl: invoice.sumof_vatincl,
+                                status: invoice.status,
+                                created_at: invoice.created_at,
+                                updated_at: invoice.updated_at,
+
+                                company_address: invoice.company_id
+                                    ? {
+                                        id: invoice.company_id,
+                                        company_name: invoice.company_name,
+                                        address_line: invoice.address_line,
+                                        city: invoice.city,
+                                        state_region: invoice.state_region,
+                                        country: invoice.country,
+                                        postal_code: invoice.postal_code,
+                                        email: invoice.email,
+                                        telephone: invoice.telephone,
+                                        company_registration_no: invoice.company_registration_no,
+                                        tax_vat_no: invoice.tax_vat_no
+                                    }
+                                    : null,
+
+                                components: detailsResult
+                            }
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const getAllSupplierShipmentInvoices = async (req, res) => {
+
+    try {
+
+        let {
+            page = 1,
+            limit = 10,
+            search = "",
+            supplier_id,
+            startDate,
+            endDate
+        } = req.query;
+
+        page = Number(page);
+        limit = Number(limit);
+
+        const offset = (page - 1) * limit;
+
+        let whereCondition = `WHERE 1=1`;
+        let queryParams = [];
+
+        // =====================================
+        // SEARCH
+        // =====================================
+
+        if (search && search.trim()) {
+
+            whereCondition += `
+                AND (
+                    ssi.reference_no LIKE ?
+                    OR ssi.customer_invoice_no LIKE ?
+                    OR s.name LIKE ?
+                    OR ts.waybill LIKE ?
+                )
+            `;
+
+            const searchValue = `%${search.trim()}%`;
+
+            queryParams.push(
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        // =====================================
+        // SUPPLIER FILTER
+        // =====================================
+
+        if (supplier_id) {
+
+            whereCondition += ` AND ssi.supplier_id = ? `;
+            queryParams.push(supplier_id);
+        }
+
+        // =====================================
+        // DATE FILTER
+        // =====================================
+
+        if (startDate && endDate) {
+
+            whereCondition += `
+                AND DATE(ssi.created_at)
+                BETWEEN ? AND ?
+            `;
+
+            queryParams.push(
+                startDate,
+                endDate
+            );
+        }
+
+        // =====================================
+        // COUNT QUERY
+        // =====================================
+
+        const countQuery = `
+           SELECT COUNT(DISTINCT ssi.id) AS total
+
+           FROM supplier_shipment_invoice ssi
+
+           LEFT JOIN tbl_suppliers s
+           ON s.id = ssi.supplier_id
+
+           LEFT JOIN tbl_shipments ts
+           ON ts.supplier_invoice_id = ssi.id
+
+           ${whereCondition}
+           `;
+
+        con.query(
+            countQuery,
+            queryParams,
+            (countErr, countResult) => {
+
+                if (countErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: countErr.message
+                    });
+                }
+
+                const totalRecords = countResult[0].total;
+                const totalPages = Math.ceil(totalRecords / limit);
+
+                // =====================================
+                // MAIN QUERY
+                // =====================================
+
+                const dataQuery = `
+                    SELECT
+                        ssi.id AS supplier_shipment_invoice_id,
+                        ssi.reference_no,
+                        ssi.supplier_id,
+
+                        s.name AS supplier_name,
+
+                        ssi.customer_invoice_no,
+                        ssi.company_id,
+                        ssi.invoice_for_country,
+                        ssi.due_date,
+                        ssi.final_base_currency,
+                        ssi.chargeable,
+                        ssi.sumof_totalcost,
+                        ssi.sumof_finalamount,
+                        ssi.sumof_vatincl,
+                        ssi.status,
+
+                        ca.company_name,
+
+                        ts.id AS shipment_id,
+                        ts.supplier_invoice_date,
+                        ts.waybill,
+                        ts.status as shipment_status,
+
+                        ssi.created_at,
+                        ssi.updated_at
+
+                    FROM supplier_shipment_invoice ssi
+
+                    LEFT JOIN tbl_suppliers s
+                        ON s.id = ssi.supplier_id
+
+                    LEFT JOIN tbl_shipments ts
+                        ON ts.supplier_invoice_id = ssi.id
+
+                    LEFT JOIN company_addresses ca
+                        ON ca.id = ssi.company_id
+
+                    ${whereCondition}
+
+                    ORDER BY ssi.id DESC
+
+                    LIMIT ? OFFSET ?
+                `;
+
+                const dataParams = [
+                    ...queryParams,
+                    limit,
+                    offset
+                ];
+
+                con.query(
+                    dataQuery,
+                    dataParams,
+                    (dataErr, dataResult) => {
+
+                        if (dataErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: dataErr.message
+                            });
+                        }
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Supplier Shipment Invoices fetched successfully",
+
+                            pagination: {
+                                currentPage: page,
+                                perPage: limit,
+                                totalRecords,
+                                totalPages
+                            },
+
+                            data: dataResult
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const deleteSupplierShipmentInvoiceById = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const { supplier_shipment_invoice_id } = req.body;
+
+        if (!supplier_shipment_invoice_id) {
+            return res.status(400).json({
+                success: false,
+                message: "supplier_shipment_invoice_id is required"
+            });
+        }
+
+        // GET CONNECTION
+
+        connection = await new Promise((resolve, reject) => {
+
+            con.getConnection((err, conn) => {
+
+                if (err) return reject(err);
+
+                resolve(conn);
+            });
+
+        });
+
+        // START TRANSACTION
+
+        await new Promise((resolve, reject) => {
+
+            connection.beginTransaction(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        // CHECK INVOICE
+
+        const invoiceResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    reference_no,
+                    supplier_id
+                FROM supplier_shipment_invoice
+                WHERE id = ?
+                LIMIT 1
+                `,
+                [supplier_shipment_invoice_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+
+        });
+
+        if (!invoiceResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Supplier Shipment Invoice not found"
+            });
+        }
+
+        const invoice = invoiceResult[0];
+
+        // REMOVE INVOICE LINK FROM SHIPMENT
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE tbl_shipments
+                SET
+                    supplier_invoice_id = NULL,
+                    supplier_invoice_date = NULL
+                WHERE supplier_invoice_id = ?
+                `,
+                [supplier_shipment_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+                }
+            );
+
+        });
+
+        // DELETE DETAILS
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                DELETE FROM supplier_shipment_invoice_details
+                WHERE supplier_shipment_invoice_id = ?
+                `,
+                [supplier_shipment_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+                }
+            );
+
+        });
+
+        // DELETE HEADER
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                DELETE FROM supplier_shipment_invoice
+                WHERE id = ?
+                `,
+                [supplier_shipment_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+                }
+            );
+
+        });
+
+        // COMMIT
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Supplier Shipment Invoice deleted successfully",
+            data: {
+                supplier_shipment_invoice_id,
+                reference_no: invoice.reference_no
+            }
+        });
+
+    } catch (error) {
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+
+        if (connection) {
+            connection.release();
+        }
+
+    }
+};
+
+// ================================ Freight Quote Invoice Management ==========================
+
+const addUpdateNewFreightQuoteInvoice = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const {
+            supplier_id,
+            freight_id,
+            order_id,
+            client_id,
+            client_name,
+            customer_invoice_no,
+            company_id,
+            invoice_for_country,
+            due_date,
+            payment_terms,
+            quote_validity,
+            final_base_currency,
+            chargeable,
+            sumof_totalcost,
+            sumof_finalamount,
+            sumof_vatincl,
+            status = "unpaid",
+            components = []
+        } = req.body;
+
+        // VALIDATION
+
+        if (!final_base_currency || !final_base_currency.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "final_base_currency is required"
+            });
+        }
+
+        if (!order_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select order"
+            });
+        }
+
+        const allowedCurrencies = [
+            "USD",
+            "RAND",
+            "INR",
+            "EURO"
+        ];
+
+        if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
+            return res.status(400).json({
+                success: false,
+                message: `Please select a valid final base currency`
+            });
+        }
+
+        if (!company_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a country for the company"
+            });
+        }
+
+        if (!Array.isArray(components) || !components.length) {
+            return res.status(400).json({
+                success: false,
+                message: "components are required"
+            });
+        }
+
+        const invalidComponent = components.find(
+            item =>
+                !item.admin_frieght_component_id
+        );
+
+        if (invalidComponent) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a description"
+            });
+        }
+
+        // CONNECTION
+
+        connection = await new Promise((resolve, reject) => {
+
+            con.getConnection((err, conn) => {
+
+                if (err) return reject(err);
+
+                resolve(conn);
+            });
+
+        });
+
+        await new Promise((resolve, reject) => {
+
+            connection.beginTransaction(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        // CHECK EXISTING INVOICE
+
+        const existingInvoice = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+        SELECT
+            id,
+            reference_no
+        FROM quote_invoice
+        WHERE id = ?
+        AND is_deleted = 0
+        LIMIT 1
+        `,
+                [
+                    req.body.quote_invoice_id || 0
+                ],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        let invoiceId;
+        let referenceNo;
+
+        const orderResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+        SELECT
+            id,
+            freight_id
+        FROM tbl_orders
+        WHERE id = ?
+        LIMIT 1
+        `,
+                [order_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!orderResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Order not found"
+            });
+
+        }
+
+        const freightId = orderResult[0].freight_id || null;
+
+        // UPDATE HEADER
+
+        if (existingInvoice.length > 0) {
+
+            invoiceId = existingInvoice[0].id;
+            referenceNo = existingInvoice[0].reference_no;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    UPDATE quote_invoice
+                    SET
+                        supplier_id = ?,
+                        freight_id = ?,
+                        order_id = ?,
+                        client_id = ?,
+                        client_name = ?,
+                        customer_invoice_no = ?,
+                        company_id = ?,
+                        invoice_for_country = ?,
+                        due_date = ?,
+                        payment_terms = ?,
+                        quote_validity = ?,
+                        final_base_currency = ?,
+                        chargeable = ?,
+                        sumof_totalcost = ?,
+                        sumof_finalamount = ?,
+                        sumof_vatincl = ?,
+                        status = ?
+                    WHERE id = ?
+                    `,
+                    [
+                        supplier_id,
+                        freightId || null,
+                        order_id || null,
+                        client_id || null,
+                        client_name || null,
+                        customer_invoice_no || null,
+                        company_id,
+                        invoice_for_country || null,
+                        due_date || null,
+                        payment_terms || null,
+                        quote_validity || null,
+                        final_base_currency || null,
+                        chargeable || 0,
+                        sumof_totalcost || 0,
+                        sumof_finalamount || 0,
+                        sumof_vatincl || 0,
+                        status,
+                        invoiceId
+                    ],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        } else {
+
+            // INSERT HEADER
+
+            const insertInvoice = await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    INSERT INTO quote_invoice
+                    (
+                        supplier_id,
+                        freight_id,
+                        order_id,
+                        client_id,
+                        client_name,
+                        customer_invoice_no,
+                        company_id,
+                        invoice_for_country,
+                        due_date,
+                        payment_terms,
+                        quote_validity,
+                        final_base_currency,
+                        chargeable,
+                        sumof_totalcost,
+                        sumof_finalamount,
+                        sumof_vatincl,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    [
+                        supplier_id,
+                        freightId,
+                        order_id || null,
+                        client_id || null,
+                        client_name || null,
+                        customer_invoice_no || null,
+                        company_id,
+                        invoice_for_country || null,
+                        due_date || null,
+                        payment_terms || null,
+                        quote_validity || null,
+                        final_base_currency || null,
+                        chargeable || 0,
+                        sumof_totalcost || 0,
+                        sumof_finalamount || 0,
+                        sumof_vatincl || 0,
+                        status
+                    ],
+                    (err, result) => {
+
+                        if (err) return reject(err);
+
+                        resolve(result);
+                    }
+                );
+
+            });
+
+            invoiceId = insertInvoice.insertId;
+
+            referenceNo = `ADINV${10000 + Number(invoiceId)}`;
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    UPDATE quote_invoice
+                    SET reference_no = ?
+                    WHERE id = ?
+                    `,
+                    [
+                        referenceNo,
+                        invoiceId
+                    ],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        }
+
+        // UPDATE FREIGHT
+
+        if (freightId) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+            UPDATE tbl_freight
+            SET
+                quote_invoice_id = ?,
+                quote_invoice_date = NOW()
+            WHERE id = ?
+            `,
+                    [
+                        invoiceId,
+                        freightId
+                    ],
+                    (err) => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+
+                    }
+                );
+
+            });
+
+        }
+
+        // =====================================
+        // EXISTING DETAILS
+        // =====================================
+
+        const existingDetails = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT id
+                FROM quote_invoice_details
+                WHERE quote_invoice_id = ?
+                `,
+                [invoiceId],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+        });
+
+        const existingIds = existingDetails.map(
+            item => Number(item.id)
+        );
+
+        const requestIds = components
+            .filter(item => item.id)
+            .map(item => Number(item.id));
+
+        const deleteIds = existingIds.filter(
+            id => !requestIds.includes(id)
+        );
+
+        // DELETE REMOVED DETAILS
+
+        if (deleteIds.length) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    DELETE FROM quote_invoice_details
+                    WHERE id IN (?)
+                    `,
+                    [deleteIds],
+                    err => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+        }
+
+        // INSERT / UPDATE DETAILS
+
+        for (const item of components) {
+
+            if (item.id) {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                        UPDATE quote_invoice_details
+                        SET
+                            admin_frieght_component_id = ?,
+                            description = ?,
+                            qty = ?,
+                            currency = ?,
+                            cost = ?,
+                            unit_type = ?,
+                            unit = ?,
+                            total_cost = ?,
+                            gp_percent = ?,
+                            sales_price = ?,
+                            roe = ?,
+                            final_amount = ?,
+                            vat_type = ?,
+                            disc_percent = ?,
+                            discount = ?,
+                            exclusive = ?,
+                            vat = ?,
+                            vat_incl = ?,
+                            comment = ?
+                        WHERE id = ?
+                        `,
+                        [
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null,
+                            item.id
+                        ],
+                        err => {
+
+                            if (err) return reject(err);
+
+                            resolve();
+                        }
+                    );
+
+                });
+
+            } else {
+
+                await new Promise((resolve, reject) => {
+
+                    connection.query(
+                        `
+                        INSERT INTO quote_invoice_details
+                        (
+                            quote_invoice_id,
+                            admin_frieght_component_id,
+                            description,
+                            qty,
+                            currency,
+                            cost,
+                            unit_type,
+                            unit,
+                            total_cost,
+                            gp_percent,
+                            sales_price,
+                            roe,
+                            final_amount,
+                            vat_type,
+                            disc_percent,
+                            discount,
+                            exclusive,
+                            vat,
+                            vat_incl,
+                            comment
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        `,
+                        [
+                            invoiceId,
+                            item.admin_frieght_component_id,
+                            item.description || null,
+                            item.qty || 0,
+                            item.currency || null,
+                            item.cost || 0,
+                            item.unit_type || null,
+                            item.unit || 0,
+                            item.total_cost || 0,
+                            item.gp_percent || 0,
+                            item.sales_price || 0,
+                            item.roe || 0,
+                            item.final_amount || 0,
+                            item.vat_type || null,
+                            item.disc_percent || 0,
+                            item.discount || 0,
+                            item.exclusive || 0,
+                            item.vat || 0,
+                            item.vat_incl || 0,
+                            item.comment || null
+                        ],
+                        err => {
+
+                            if (err) return reject(err);
+
+                            resolve();
+                        }
+                    );
+
+                });
+
+            }
+        }
+
+        // =====================================
+        // COMMIT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+            });
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: existingInvoice.length
+                ? "Quote Invoice Updated Successfully"
+                : "Quote Invoice Added Successfully",
+            quote_invoice_id: invoiceId,
+            reference_no: referenceNo
+        });
+
+    } catch (error) {
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+                    connection.rollback(() => resolve());
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    } finally {
+
+        if (connection) {
+            connection.release();
+        }
+
+    }
+};
+
+const GetNewFreightQuoteInvoiceById = async (req, res) => {
+
+    try {
+
+        const {
+            quote_invoice_id,
+            freight_id
+        } = req.body;
+
+        // =====================================
+        // VALIDATION
+        // =====================================
+
+        if (!quote_invoice_id && !freight_id) {
+
+            return res.status(400).json({
+                success: false,
+                message: "quote_invoice_id OR freight_id is required"
+            });
+
+        }
+
+        let whereCondition = "";
+        let queryParams = [];
+
+        if (quote_invoice_id) {
+
+            whereCondition = `qi.id = ?`;
+            queryParams = [quote_invoice_id];
+
+        } else {
+
+            whereCondition = `tf.id = ?`;
+            queryParams = [freight_id];
+
+        }
+
+        // =====================================
+        // HEADER QUERY
+        // =====================================
+
+        const headerQuery = `
+            SELECT
+
+                qi.id AS quote_invoice_id,
+
+                qi.reference_no,
+
+                qi.freight_quote_estimate_id,
+
+                qi.freight_id,
+                qi.order_id,
+
+                ord.order_number,
+
+                qi.client_id,
+
+                qi.client_name,
+
+                qi.supplier_id,
+
+                s.name AS supplier_name,
+
+                qi.company_id,
+
+                qi.customer_invoice_no,
+
+                qi.invoice_for_country,
+
+                qi.quote_date,
+
+                qi.due_date,
+                qi.payment_terms,
+                qi.quote_validity,
+
+                qi.final_base_currency,
+
+                qi.chargeable,
+
+                qi.sumof_totalcost,
+
+                qi.sumof_finalamount,
+
+                qi.sumof_vatincl,
+
+                qi.status,
+
+                qi.created_at,
+
+                qi.updated_at,
+
+                ca.company_name,
+
+                ca.address_line,
+
+                ca.city,
+
+                ca.state_region,
+
+                ca.country,
+
+                ca.postal_code,
+
+                ca.email,
+
+                ca.telephone,
+
+                ca.company_registration_no,
+
+                ca.tax_vat_no,
+
+                bd.id AS bank_id,
+                bd.account_name,
+                bd.bank_name,
+                bd.branch_name,
+                bd.branch_code,
+                bd.account_no,
+                bd.swift_code,
+                bd.branch_address,
+                bd.note,
+                bd.email as bank_email,
+
+                tf.freight_number,
+
+                tf.quote_invoice_date
+
+            FROM quote_invoice qi
+
+            LEFT JOIN tbl_orders ord
+                ON ord.id = qi.order_id
+
+            LEFT JOIN tbl_suppliers s
+                ON s.id = qi.supplier_id
+
+            LEFT JOIN company_addresses ca
+                ON ca.id = qi.company_id
+                AND ca.is_deleted = 0
+
+            LEFT JOIN banking_details bd
+                ON bd.id = ca.bank_id
+                AND bd.is_deleted = 0
+
+            LEFT JOIN tbl_freight tf
+                ON tf.quote_invoice_id = qi.id
+
+            WHERE
+                qi.is_deleted = 0
+                AND ${whereCondition}
+
+            LIMIT 1
+        `;
+
+        con.query(
+            headerQuery,
+            queryParams,
+            (headerErr, headerResult) => {
+
+                if (headerErr) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: headerErr.message
+                    });
+
+                }
+
+                if (!headerResult.length) {
+
+                    return res.status(404).json({
+                        success: false,
+                        message: "Freight Quote Invoice not found"
+                    });
+
+                }
+
+                const invoice = headerResult[0];
+
+                // =====================================
+                // DETAILS QUERY
+                // =====================================
+
+                const detailsQuery = `
+                    SELECT
+
+                        qid.id,
+
+                        qid.quote_invoice_id,
+
+                        qid.admin_frieght_component_id,
+
+                        afc.code,
+
+                        afc.name,
+
+                        afc.description AS component_description,
+
+                        qid.description,
+
+                        qid.qty,
+
+                        qid.currency,
+
+                        qid.cost,
+
+                        qid.unit_type,
+
+                        qid.unit,
+
+                        qid.total_cost,
+
+                        qid.gp_percent,
+
+                        qid.sales_price,
+
+                        qid.roe,
+
+                        qid.final_amount,
+
+                        qid.vat_type,
+
+                        qid.disc_percent,
+
+                        qid.discount,
+
+                        qid.exclusive,
+
+                        qid.vat,
+
+                        qid.vat_incl,
+
+                        qid.comment,
+
+                        qid.created_at,
+
+                        qid.updated_at
+
+                    FROM quote_invoice_details qid
+
+                    LEFT JOIN admin_frieght_component afc
+                        ON afc.id = qid.admin_frieght_component_id
+
+                    WHERE qid.quote_invoice_id = ?
+
+                    ORDER BY qid.id ASC
+                `;
+
+                con.query(
+                    detailsQuery,
+                    [invoice.quote_invoice_id],
+                    (detailsErr, detailsResult) => {
+
+                        if (detailsErr) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: detailsErr.message
+                            });
+
+                        }
+                        return res.status(200).json({
+                            success: true,
+                            message: "Freight Quote Invoice fetched successfully",
+                            data: {
+
+                                quote_invoice_id: invoice.quote_invoice_id,
+
+                                reference_no: invoice.reference_no,
+
+                                freight_quote_estimate_id: invoice.freight_quote_estimate_id,
+
+                                freight_id: invoice.freight_id,
+                                order_id: invoice.order_id,
+                                order_number: invoice.order_number,
+
+                                freight_number: invoice.freight_number,
+
+                                client_id: invoice.client_id,
+
+                                client_name: invoice.client_name,
+
+                                supplier_id: invoice.supplier_id,
+
+                                supplier_name: invoice.supplier_name,
+
+                                company_id: invoice.company_id,
+
+                                customer_invoice_no: invoice.customer_invoice_no,
+
+                                invoice_for_country: invoice.invoice_for_country,
+
+                                quote_date: invoice.quote_date,
+
+                                due_date: invoice.due_date,
+                                payment_terms: invoice.payment_terms,
+                                quote_validity: invoice.quote_validity,
+
+                                final_base_currency: invoice.final_base_currency,
+
+                                chargeable: invoice.chargeable,
+
+                                sumof_totalcost: invoice.sumof_totalcost,
+
+                                sumof_finalamount: invoice.sumof_finalamount,
+
+                                sumof_vatincl: invoice.sumof_vatincl,
+
+                                status: invoice.status,
+
+                                created_at: invoice.created_at,
+
+                                updated_at: invoice.updated_at,
+
+                                quote_invoice_date: invoice.quote_invoice_date,
+
+                                company_address: invoice.company_id
+                                    ? {
+                                        id: invoice.company_id,
+                                        company_name: invoice.company_name,
+                                        address_line: invoice.address_line,
+                                        city: invoice.city,
+                                        state_region: invoice.state_region,
+                                        country: invoice.country,
+                                        postal_code: invoice.postal_code,
+                                        email: invoice.email,
+                                        telephone: invoice.telephone,
+                                        company_registration_no: invoice.company_registration_no,
+                                        tax_vat_no: invoice.tax_vat_no
+                                    }
+                                    : null,
+
+                                bank_details: invoice.bank_id
+                                    ? {
+                                        bank_id: invoice.bank_id,
+                                        account_name: invoice.account_name,
+                                        bank_name: invoice.bank_name,
+                                        branch_name: invoice.branch_name,
+                                        branch_code: invoice.branch_code,
+                                        account_no: invoice.account_no,
+                                        swift_code: invoice.swift_code,
+                                        branch_address: invoice.branch_address,
+                                        note: invoice.note,
+                                        bank_email: invoice.bank_email
+                                    }
+                                    : null,
+
+                                components: detailsResult
+
+                            }
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getAllNewFreightQuoteInvoices = async (req, res) => {
+
+    try {
+
+        let {
+            page = 1,
+            limit = 10,
+            search = "",
+            supplier_id,
+            startDate,
+            endDate
+        } = req.query;
+
+        page = Number(page);
+        limit = Number(limit);
+
+        const offset = (page - 1) * limit;
+
+        let whereCondition = `
+            WHERE qi.is_deleted = 0
+        `;
+
+        let queryParams = [];
+
+        // =====================================
+        // SEARCH
+        // =====================================
+
+        if (search && search.trim()) {
+
+            whereCondition += `
+                AND (
+                    qi.reference_no LIKE ?
+                    OR qi.customer_invoice_no LIKE ?
+                    OR qi.client_name LIKE ?
+                    OR s.name LIKE ?
+                    OR tf.freight_number LIKE ?
+                    OR ord.order_number LIKE ?
+                    OR ca.company_name LIKE ?
+                )
+            `;
+
+            const searchValue = `%${search.trim()}%`;
+
+            queryParams.push(
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        // =====================================
+        // SUPPLIER FILTER
+        // =====================================
+
+        if (supplier_id) {
+
+            whereCondition += ` AND qi.supplier_id = ?`;
+
+            queryParams.push(supplier_id);
+
+        }
+
+        // =====================================
+        // DATE FILTER
+        // =====================================
+
+        if (startDate && endDate) {
+
+            whereCondition += `
+                AND DATE(qi.created_at)
+                BETWEEN ? AND ?
+            `;
+
+            queryParams.push(
+                startDate,
+                endDate
+            );
+
+        }
+
+        // =====================================
+        // COUNT QUERY
+        // =====================================
+
+        const countQuery = `
+            SELECT
+                COUNT(*) AS total
+
+            FROM quote_invoice qi
+
+            LEFT JOIN tbl_suppliers s
+                ON s.id = qi.supplier_id
+
+            LEFT JOIN freight_quote_estimate fqe
+                ON fqe.id = qi.freight_quote_estimate_id
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = qi.freight_id
+
+            LEFT JOIN tbl_orders ord
+                ON ord.id = qi.order_id
+
+            LEFT JOIN company_addresses ca
+                ON ca.id = qi.company_id
+                AND ca.is_deleted = 0
+
+            ${whereCondition}
+        `;
+
+        con.query(
+            countQuery,
+            queryParams,
+            (countErr, countResult) => {
+
+                if (countErr) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: countErr.message
+                    });
+
+                }
+
+                const totalRecords = countResult[0].total;
+                const totalPages = Math.ceil(totalRecords / limit);
+
+                // =====================================
+                // MAIN QUERY
+                // =====================================
+
+                const dataQuery = `
+                    SELECT
+
+                        qi.id AS quote_invoice_id,
+                        qi.reference_no,
+
+                        qi.freight_quote_estimate_id,
+
+                        qi.freight_id,
+                        qi.order_id,
+
+                        ord.order_number,
+
+                        tf.freight_number,
+
+                        qi.client_id,
+                        qi.client_name,
+
+                        qi.supplier_id,
+                        s.name AS supplier_name,
+
+                        qi.company_id,
+
+                        qi.customer_invoice_no,
+                        qi.invoice_for_country,
+
+                        qi.quote_date,
+                        qi.payment_terms,
+                        qi.quote_validity,
+
+                        qi.final_base_currency,
+
+                        qi.chargeable,
+
+                        qi.sumof_totalcost,
+
+                        qi.sumof_finalamount,
+
+                        qi.sumof_vatincl,
+
+                        qi.status,
+
+                        tf.quote_invoice_date,
+
+                        tf.status AS freight_status,
+
+                        tf.client_ref_name as customer_ref,
+
+                        qi.created_at as inv_date,
+
+                        qi.updated_at,
+
+                        ca.company_name,
+                        ca.address_line,
+                        ca.city,
+                        ca.state_region,
+                        ca.country,
+                        ca.postal_code,
+                        ca.email,
+                        ca.telephone,
+                        ca.company_registration_no,
+                        ca.tax_vat_no
+
+                    FROM quote_invoice qi
+
+                    LEFT JOIN tbl_suppliers s
+                        ON s.id = qi.supplier_id
+
+                    LEFT JOIN freight_quote_estimate fqe
+                        ON fqe.id = qi.freight_quote_estimate_id
+
+                    LEFT JOIN tbl_freight tf
+                        ON tf.id = fqe.freight_id
+
+                    LEFT JOIN tbl_orders ord
+                        ON ord.id = qi.order_id
+
+                    LEFT JOIN company_addresses ca
+                        ON ca.id = qi.company_id
+                        AND ca.is_deleted = 0
+
+                    ${whereCondition}
+
+                    ORDER BY qi.id DESC
+
+                    LIMIT ? OFFSET ?
+                `;
+
+                const dataParams = [
+                    ...queryParams,
+                    limit,
+                    offset
+                ];
+
+                con.query(
+                    dataQuery,
+                    dataParams,
+                    (dataErr, dataResult) => {
+
+                        if (dataErr) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: dataErr.message
+                            });
+
+                        }
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message: "Freight Quote Invoices fetched successfully",
+
+                            pagination: {
+
+                                currentPage: page,
+                                perPage: limit,
+                                totalRecords,
+                                totalPages
+
+                            },
+
+                            data: dataResult.map(item => ({
+
+                                quote_invoice_id: item.quote_invoice_id,
+
+                                reference_no: item.reference_no,
+
+                                freight_quote_estimate_id: item.freight_quote_estimate_id,
+
+                                freight_id: item.freight_id,
+
+                                order_id: item.order_id,
+
+                                order_number: item.order_number,
+
+                                freight_number: item.freight_number,
+
+                                client_id: item.client_id,
+
+                                client_name: item.client_name,
+
+                                customer_ref: item.customer_ref,
+
+                                supplier_id: item.supplier_id,
+
+                                supplier_name: item.supplier_name,
+
+                                customer_invoice_no: item.customer_invoice_no,
+
+                                invoice_for_country: item.invoice_for_country,
+
+                                is_approved: item.is_approved,
+
+                                payment_terms: item.payment_terms,
+
+                                quote_validity: item.quote_validity,
+
+                                quote_date: item.quote_date,
+
+                                final_base_currency: item.final_base_currency,
+
+                                country: item.country,
+
+                                chargeable: item.chargeable,
+
+                                sumof_totalcost: item.sumof_totalcost,
+
+                                sumof_finalamount: item.sumof_finalamount,
+
+                                sumof_vatincl: item.sumof_vatincl,
+
+                                status: item.status,
+
+                                freight_status: item.freight_status,
+
+                                quote_invoice_date: item.quote_invoice_date,
+
+                                inv_date: item.inv_date,
+
+                                created_at: item.created_at,
+
+                                updated_at: item.updated_at,
+
+                                company_address: item.company_id ? {
+
+                                    id: item.company_id,
+
+                                    company_name: item.company_name,
+
+                                    address_line: item.address_line,
+
+                                    city: item.city,
+
+                                    state_region: item.state_region,
+
+                                    postal_code: item.postal_code,
+
+                                    email: item.email,
+
+                                    telephone: item.telephone,
+
+                                    company_registration_no: item.company_registration_no,
+
+                                    tax_vat_no: item.tax_vat_no
+
+                                } : null
+
+                            }))
+
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+const deleteNewFreightQuoteInvoiceById = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const { quote_invoice_id } = req.params;
+
+        // =====================================
+        // VALIDATION
+        // =====================================
+
+        if (!quote_invoice_id) {
+
+            return res.status(400).json({
+                success: false,
+                message: "quote_invoice_id is required"
+            });
+
+        }
+
+        // =====================================
+        // GET CONNECTION
+        // =====================================
+
+        connection = await new Promise((resolve, reject) => {
+
+            con.getConnection((err, conn) => {
+
+                if (err) return reject(err);
+
+                resolve(conn);
+
+            });
+
+        });
+
+        // =====================================
+        // START TRANSACTION
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.beginTransaction(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+
+            });
+
+        });
+
+        // =====================================
+        // CHECK INVOICE
+        // =====================================
+
+        const invoiceResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    reference_no,
+                    freight_id,
+                    freight_quote_estimate_id,
+                    supplier_id
+                FROM quote_invoice
+                WHERE id = ?
+                AND is_deleted = 0
+                LIMIT 1
+                `,
+                [quote_invoice_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!invoiceResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Quote Invoice not found"
+            });
+
+        }
+
+        const invoice = invoiceResult[0];
+
+        // =====================================
+        // REMOVE INVOICE LINK FROM FREIGHT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE tbl_freight
+                SET
+                    quote_invoice_id = NULL,
+                    quote_invoice_date = NULL
+                WHERE quote_invoice_id = ?
+                `,
+                [quote_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // RESET INVOICE DATE
+        // IN FREIGHT QUOTE ESTIMATE
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE freight_quote_estimate
+                SET
+                    inv_date = NULL
+                WHERE id = ?
+                `,
+                [
+                    invoice.freight_quote_estimate_id
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // DELETE DETAILS
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                DELETE FROM quote_invoice_details
+                WHERE quote_invoice_id = ?
+                `,
+                [quote_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // SOFT DELETE INVOICE
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE quote_invoice
+                SET
+                    is_deleted = 1
+                WHERE id = ?
+                `,
+                [quote_invoice_id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // =====================================
+        // COMMIT
+        // =====================================
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+
+            });
+
+        });
+
+        return res.status(200).json({
+
+            success: true,
+
+            message: "Freight Quote Invoice deleted successfully",
+
+            data: {
+
+                quote_invoice_id,
+
+                reference_no: invoice.reference_no
+
+            }
+
+        });
+
+    } catch (error) {
+
+        // =====================================
+        // ROLLBACK
+        // =====================================
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+
+                    connection.rollback(() => resolve());
+
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    } finally {
+
+        // =====================================
+        // RELEASE CONNECTION
+        // =====================================
+
+        if (connection) {
+
+            connection.release();
+
+        }
+
+    }
+
+};
+
+const createQuoteInvoice = async (req, res) => {
+
+    let connection;
+
+    try {
+
+        const {
+            freight_quote_estimate_id
+        } = req.body;
+
+        // ===========================
+        // VALIDATION
+        // ===========================
+
+        // if (!freight_quote_estimate_id) {
+
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "freight_quote_estimate_id is required"
+        //     });
+
+        // }
+
+        if (freight_quote_estimate_id === null || freight_quote_estimate_id === undefined || freight_quote_estimate_id === '') {
+
+            return res.status(400).json({
+                success: false,
+                message: "Please create Estimate first for this freights order"
+            });
+        }
+
+        // ===========================
+        // GET CONNECTION
+        // ===========================
+
+        connection = await new Promise((resolve, reject) => {
+
+            con.getConnection((err, conn) => {
+
+                if (err) return reject(err);
+
+                resolve(conn);
+
+            });
+
+        });
+
+        // ===========================
+        // START TRANSACTION
+        // ===========================
+
+        await new Promise((resolve, reject) => {
+
+            connection.beginTransaction(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+
+            });
+
+        });
+
+        // ===========================
+        // CHECK QUOTE
+        // ===========================
+
+        const quoteResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT *
+                FROM freight_quote_estimate
+                WHERE id = ?
+                AND is_deleted = 0
+                LIMIT 1
+                `,
+                [freight_quote_estimate_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!quoteResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "Freight Quote Estimate not found"
+            });
+
+        }
+
+        const quote = quoteResult[0];
+
+        // ===========================
+        // GET ORDER ID
+        // ===========================
+
+        const orderResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+        SELECT id
+        FROM tbl_orders
+        WHERE freight_id = ?
+        LIMIT 1
+        `,
+                [quote.freight_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!orderResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(400).json({
+                success: false,
+                message: "Please create order first for this freight"
+            });
+
+        }
+
+        const orderId = orderResult[0].id;
+        // const orderId = orderResult.length
+        //     ? orderResult[0].id
+        //     : null;
+
+        // ===========================
+        // CHECK DUPLICATE INVOICE
+        // ===========================
+
+        const invoiceResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT
+                    id,
+                    reference_no
+                FROM quote_invoice
+                WHERE freight_quote_estimate_id = ? and is_deleted = 0
+                LIMIT 1
+                `,
+                [freight_quote_estimate_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        // if (invoiceResult.length) {
+
+        //     await new Promise(resolve => {
+        //         connection.rollback(() => resolve());
+        //     });
+
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "Invoice already created for this Freight Quote"
+        //     });
+
+        // }
+
+        // ===========================
+        // FETCH QUOTE DETAILS
+        // ===========================
+
+        const detailResult = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                SELECT *
+                FROM freight_quote_estimate_details
+                WHERE freight_quote_estimate_id = ?
+                ORDER BY id ASC
+                `,
+                [freight_quote_estimate_id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        if (!detailResult.length) {
+
+            await new Promise(resolve => {
+                connection.rollback(() => resolve());
+            });
+
+            return res.status(404).json({
+                success: false,
+                message: "No Quote Components found"
+            });
+
+        }
+
+        // ===========================
+        // INSERT HEADER
+        // ===========================
+
+        const insertHeader = await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                INSERT INTO quote_invoice
+                (
+                    freight_quote_estimate_id,
+                    freight_id,
+                    order_id,
+                    client_id,
+                    client_name,
+                    supplier_id,
+                    company_id,
+                    customer_invoice_no,
+                    payment_terms,
+                    quote_validity,
+                    invoice_for_country,
+                    final_base_currency,
+                    chargeable,
+                    sumof_totalcost,
+                    sumof_finalamount,
+                    sumof_vatincl,
+                    status
+                )
+                VALUES
+                (
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                )
+                `,
+                [
+                    quote.id,
+                    quote.freight_id,
+                    orderId,
+                    quote.client_id,
+                    quote.client_name,
+                    quote.supplier_id,
+                    quote.company_id,
+                    quote.customer_invoice_no,
+                    quote.payment_terms,
+                    quote.quote_validity,
+                    quote.invoice_for_country,
+                    quote.final_base_currency,
+                    quote.chargeable,
+                    quote.sumof_totalcost,
+                    quote.sumof_finalamount,
+                    quote.sumof_vatincl,
+                    quote.status
+                ],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+
+                }
+            );
+
+        });
+
+        const quoteInvoiceId = insertHeader.insertId;
+
+        const referenceNo = `ADINV${10000 + Number(quoteInvoiceId)}`;
+
+        // ===========================
+        // UPDATE REFERENCE NO
+        // ===========================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE quote_invoice
+                SET reference_no = ?
+                WHERE id = ?
+                `,
+                [
+                    referenceNo,
+                    quoteInvoiceId
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // ===========================
+        // INSERT DETAILS
+        // ===========================
+
+        for (const item of detailResult) {
+
+            await new Promise((resolve, reject) => {
+
+                connection.query(
+                    `
+                    INSERT INTO quote_invoice_details
+                    (
+                        quote_invoice_id,
+                        admin_frieght_component_id,
+                        description,
+                        qty,
+                        currency,
+                        cost,
+                        unit_type,
+                        unit,
+                        total_cost,
+                        gp_percent,
+                        sales_price,
+                        roe,
+                        final_amount,
+                        vat_type,
+                        disc_percent,
+                        discount,
+                        exclusive,
+                        vat,
+                        vat_incl,
+                        comment
+                    )
+                    VALUES
+                    (
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    )
+                    `,
+                    [
+                        quoteInvoiceId,
+                        item.admin_frieght_component_id,
+                        item.description,
+                        item.qty,
+                        item.currency,
+                        item.cost,
+                        item.unit_type,
+                        item.unit,
+                        item.total_cost,
+                        item.gp_percent,
+                        item.sales_price,
+                        item.roe,
+                        item.final_amount,
+                        item.vat_type,
+                        item.disc_percent,
+                        item.discount,
+                        item.exclusive,
+                        item.vat,
+                        item.vat_incl,
+                        item.comment
+                    ],
+                    (err) => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+
+                    }
+                );
+
+            });
+
+        }
+
+        // ===========================
+        // UPDATE FREIGHT QUOTE
+        // ===========================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+                UPDATE freight_quote_estimate
+                SET
+                    inv_date = NOW()
+                WHERE id = ?
+                `,
+                [
+                    freight_quote_estimate_id
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // ===========================
+        // UPDATE FREIGHT
+        // ===========================
+
+        await new Promise((resolve, reject) => {
+
+            connection.query(
+                `
+        UPDATE tbl_freight
+        SET
+            quote_invoice_id = ?,
+            quote_invoice_date = NOW()
+        WHERE id = ?
+        `,
+                [
+                    quoteInvoiceId,      // New Quote Invoice ID
+                    quote.freight_id     // Freight ID from freight_quote_estimate
+                ],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+
+                }
+            );
+
+        });
+
+        // ===========================
+        // COMMIT
+        // ===========================
+
+        await new Promise((resolve, reject) => {
+
+            connection.commit(err => {
+
+                if (err) return reject(err);
+
+                resolve();
+
+            });
+
+        });
+
+        return res.status(200).json({
+
+            success: true,
+            message: "Quote Invoice created successfully",
+
+            data: {
+
+                quote_invoice_id: quoteInvoiceId,
+
+                freight_quote_estimate_id,
+
+                reference_no: referenceNo
+
+            }
+
+        });
+
+    } catch (error) {
+
+        // ===========================
+        // ROLLBACK
+        // ===========================
+
+        if (connection) {
+
+            try {
+
+                await new Promise(resolve => {
+
+                    connection.rollback(() => resolve());
+
+                });
+
+            } catch (_) { }
+
+        }
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    } finally {
+
+        // ===========================
+        // RELEASE CONNECTION
+        // ===========================
+
+        if (connection) {
+
+            connection.release();
+
+        }
+
+    }
+
+};
+
+const getFreightOrderList = async (req, res) => {
+
+    try {
+
+        const query = `
+           SELECT
+           id AS order_id,
+           freight_id,
+           CONCAT('OR000', id) AS order_number
+           FROM tbl_orders
+           ORDER BY id DESC;`
+
+        con.query(query, (err, result) => {
+
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Freight Order List fetched successfully",
+                data: result
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+// ===================================== Companies Address =====================================
+
+const addUpdateCountryAddresses = async (req, res) => {
+
+    try {
+
+        const {
+            id,
+            company_name,
+            address_line,
+            city,
+            state_region,
+            country,
+            postal_code,
+            email,
+            telephone,
+            company_registration_no,
+            tax_vat_no
+        } = req.body;
+
+        // =====================================
+        // VALIDATIONS
+        // =====================================
+
+        if (!company_name || !company_name.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "company name is required"
+            });
+        }
+
+        if (!address_line || !address_line.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "address line is required"
+            });
+        }
+
+        if (!country || !country.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "country is required"
+            });
+        }
+
+        if (!email || !email.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "email is required"
+            });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        if (!emailRegex.test(email.trim())) {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide a valid email address"
+            });
+        }
+
+        if (!telephone || !telephone.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "telephone is required"
+            });
+        }
+
+        if (!tax_vat_no || !tax_vat_no.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "tax_vat_no is required"
+            });
+        }
+
+        // =====================================
+        // DUPLICATE COUNTRY CHECK
+        // =====================================
+
+        const duplicateQuery = id
+            ? `
+                SELECT id
+                FROM company_addresses
+                WHERE LOWER(TRIM(country)) = LOWER(TRIM(?))
+                AND id != ?
+                AND is_deleted = 0
+                LIMIT 1
+              `
+            : `
+                SELECT id
+                FROM company_addresses
+                WHERE LOWER(TRIM(country)) = LOWER(TRIM(?))
+                AND is_deleted = 0
+                LIMIT 1
+              `;
+
+        const duplicateParams = id
+            ? [country, id]
+            : [country];
+
+        const duplicateResult = await new Promise((resolve, reject) => {
+
+            con.query(
+                duplicateQuery,
+                duplicateParams,
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+
+        });
+
+        if (duplicateResult.length > 0) {
+
+            return res.status(400).json({
+                success: false,
+                message: `Address already exists for country '${country}'`
+            });
+
+        }
+
+        // UPDATE
+
+        if (id) {
+
+            const existingRecord = await new Promise((resolve, reject) => {
+
+                con.query(
+                    `
+                    SELECT id
+                    FROM company_addresses
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [id],
+                    (err, result) => {
+
+                        if (err) return reject(err);
+
+                        resolve(result);
+                    }
+                );
+
+            });
+
+            if (!existingRecord.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Company address not found"
+                });
+
+            }
+
+            await new Promise((resolve, reject) => {
+
+                con.query(
+                    `
+                    UPDATE company_addresses
+                    SET
+                        company_name = ?,
+                        address_line = ?,
+                        city = ?,
+                        state_region = ?,
+                        country = ?,
+                        postal_code = ?,
+                        email = ?,
+                        telephone = ?,
+                        company_registration_no = ?,
+                        tax_vat_no = ?
+                    WHERE id = ?
+                    `,
+                    [
+                        company_name.trim(),
+                        address_line.trim(),
+                        city || null,
+                        state_region || null,
+                        country.trim(),
+                        postal_code || null,
+                        email.trim(),
+                        telephone.trim(),
+                        company_registration_no || null,
+                        tax_vat_no.trim(),
+                        id
+                    ],
+                    (err) => {
+
+                        if (err) return reject(err);
+
+                        resolve();
+                    }
+                );
+
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: "Company address updated successfully"
+            });
+
+        }
+
+        // =====================================
+        // INSERT
+        // =====================================
+
+        const insertResult = await new Promise((resolve, reject) => {
+
+            con.query(
+                `
+                INSERT INTO company_addresses
+                (
+                    company_name,
+                    address_line,
+                    city,
+                    state_region,
+                    country,
+                    postal_code,
+                    email,
+                    telephone,
+                    company_registration_no,
+                    tax_vat_no
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                [
+                    company_name.trim(),
+                    address_line.trim(),
+                    city || null,
+                    state_region || null,
+                    country.trim(),
+                    postal_code || null,
+                    email.trim(),
+                    telephone.trim(),
+                    company_registration_no || null,
+                    tax_vat_no.trim()
+                ],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Company address added successfully",
+            id: insertResult.insertId
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getCompanyAddresses = async (req, res) => {
+
+    try {
+
+        const { country } = req.query;
+
+        let query = `
+            SELECT
+                id,
+                company_name,
+                address_line,
+                city,
+                state_region,
+                country,
+                postal_code,
+                email,
+                telephone,
+                company_registration_no,
+                tax_vat_no,
+                created_at,
+                updated_at
+            FROM company_addresses
+            WHERE is_deleted = 0
+        `;
+
+        let params = [];
+
+        if (country && country.trim()) {
+
+            query += `
+                AND LOWER(country) = LOWER(?)
+            `;
+
+            params.push(country.trim());
+        }
+
+        query += ` ORDER BY country ASC`;
+
+        con.query(
+            query,
+            params,
+            (err, result) => {
+
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                if (!result.length) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "No company addresses found"
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    total: result.length,
+                    message: "Company addresses fetched successfully",
+                    data: result
+                });
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getCompanyAddressById = async (req, res) => {
+
+    try {
+
+        const { id } = req.params;
+
+        const query = `
+            SELECT *
+            FROM company_addresses
+            WHERE id = ?
+            AND is_deleted = 0
+            LIMIT 1
+        `;
+
+        con.query(
+            query,
+            [id],
+            (err, result) => {
+
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                if (!result.length) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Company address not found"
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    data: result[0]
+                });
+
+            }
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+const deleteCountryAddress = async (req, res) => {
+
+    try {
+
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "id is required"
+            });
+        }
+
+        // CHECK RECORD
+
+        const existingRecord = await new Promise((resolve, reject) => {
+
+            con.query(
+                `
+                SELECT
+                    id,
+                    company_name,
+                    country,
+                    is_deleted
+                FROM company_addresses
+                WHERE id = ?
+                LIMIT 1
+                `,
+                [id],
+                (err, result) => {
+
+                    if (err) return reject(err);
+
+                    resolve(result);
+                }
+            );
+
+        });
+
+        if (!existingRecord.length) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Company address not found"
+            });
+
+        }
+
+        if (existingRecord[0].is_deleted == 1) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Company address already deleted"
+            });
+
+        }
+
+        // SOFT DELETE
+
+        await new Promise((resolve, reject) => {
+
+            con.query(
+                `
+                UPDATE company_addresses
+                SET is_deleted = 1
+                WHERE id = ?
+                `,
+                [id],
+                (err) => {
+
+                    if (err) return reject(err);
+
+                    resolve();
+                }
+            );
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Company address deleted successfully",
+            data: {
+                id: existingRecord[0].id,
+                company_name: existingRecord[0].company_name,
+                country: existingRecord[0].country
+            }
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getCompanyAddressWithBankDetails = async (req, res) => {
+
+    try {
+
+        const { country } = req.query;
+
+        let query = `
+            SELECT
+
+                ca.id,
+                ca.company_name,
+                ca.address_line,
+                ca.city,
+                ca.state_region,
+                ca.country,
+                ca.postal_code,
+                ca.email,
+                ca.telephone,
+                ca.company_registration_no,
+                ca.tax_vat_no,
+                ca.created_at,
+                ca.updated_at,
+
+                bd.id AS bank_id,
+                bd.account_name,
+                bd.bank_name,
+                bd.branch_name,
+                bd.branch_code,
+                bd.account_no,
+                bd.swift_code,
+                bd.branch_address,
+                bd.note,
+                bd.email as bank_email
+
+            FROM company_addresses ca
+
+            LEFT JOIN banking_details bd
+                ON bd.id = ca.bank_id
+                AND bd.is_deleted = 0
+
+            WHERE ca.is_deleted = 0
+        `;
+
+        let params = [];
+
+        if (country && country.trim()) {
+
+            query += `
+                AND LOWER(ca.country) = LOWER(?)
+            `;
+
+            params.push(country.trim());
+
+        }
+
+        query += ` ORDER BY ca.country ASC`;
+
+        con.query(
+            query,
+            params,
+            (err, result) => {
+
+                if (err) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+
+                }
+
+                if (!result.length) {
+
+                    return res.status(404).json({
+                        success: false,
+                        message: "No company addresses found"
+                    });
+
+                }
+
+                return res.status(200).json({
+
+                    success: true,
+                    total: result.length,
+                    message: "Company addresses with bank details fetched successfully",
+
+                    data: result.map(item => ({
+
+                        id: item.id,
+                        company_name: item.company_name,
+                        address_line: item.address_line,
+                        city: item.city,
+                        state_region: item.state_region,
+                        country: item.country,
+                        postal_code: item.postal_code,
+                        email: item.email,
+                        telephone: item.telephone,
+                        company_registration_no: item.company_registration_no,
+                        tax_vat_no: item.tax_vat_no,
+                        created_at: item.created_at,
+                        updated_at: item.updated_at,
+
+                        bank_details: item.bank_id ? {
+
+                            bank_id: item.bank_id,
+                            account_name: item.account_name,
+                            bank_name: item.bank_name,
+                            branch_name: item.branch_name,
+                            branch_code: item.branch_code,
+                            account_no: item.account_no,
+                            swift_code: item.swift_code,
+                            branch_address: item.branch_address,
+                            note: item.note,
+                            bank_email: item.bank_email
+
+                        } : null
+
+                    }))
+
+                });
+
+            }
+
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+const getCustomerQuotesReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            start_date,
+            end_date,
+
+            customer_from,
+            customer_to,
+
+            category_from,
+            category_to,
+
+            sales_rep_id,
+
+            document_status = "ALL",
+
+            status = "BOTH"
+
+        } = req.body;
+
+        let where = `
+            WHERE
+                fqe.is_deleted = 0
+        `;
+
+        let params = [];
+
+        // =====================================
+        // DATE FILTER
+        // =====================================
+
+        const formatDate = (date) => {
+
+            if (!date) return null;
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return date;
+            }
+
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(date)) {
+
+                const [month, day, year] = date.split("/");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            return null;
+        };
+
+        const formattedStartDate = formatDate(start_date);
+        const formattedEndDate = formatDate(end_date);
+
+        if (formattedStartDate && formattedEndDate) {
+
+            where += `
+                AND fqe.quote_date BETWEEN ? AND ?
+            `;
+
+            params.push(
+                formattedStartDate,
+                formattedEndDate
+            );
+
+        }
+        else if (formattedStartDate) {
+
+            where += `
+                AND fqe.quote_date >= ?
+            `;
+
+            params.push(formattedStartDate);
+
+        }
+        else if (formattedEndDate) {
+
+            where += `
+                AND fqe.quote_date <= ?
+            `;
+
+            params.push(formattedEndDate);
+
+        }
+
+        // =====================================
+        // CUSTOMER RANGE
+        // =====================================
+
+        if (customer_from) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, fqe.client_name),1)) >= ?
+    `;
+
+            params.push(customer_from.toUpperCase());
+
+        }
+
+        if (customer_to) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, fqe.client_name),1)) <= ?
+    `;
+
+            params.push(customer_to.toUpperCase());
+
+        }
+        // =====================================
+        // CATEGORY RANGE
+        // =====================================
+
+        if (category_from && category_to) {
+
+            where += `
+        AND fqe.invoice_for_country IN (?, ?)
+    `;
+
+            params.push(category_from, category_to);
+
+        }
+        else if (category_from) {
+
+            where += `
+        AND fqe.invoice_for_country = ?
+    `;
+
+            params.push(category_from);
+
+        }
+        else if (category_to) {
+
+            where += `
+        AND fqe.invoice_for_country = ?
+    `;
+
+            params.push(category_to);
+
+        }
+        // =====================================
+        // SALES REPRESENTATIVE
+        // =====================================
+
+        if (sales_rep_id) {
+
+            where += `
+                AND tf.sales_representative = ?
+            `;
+
+            params.push(sales_rep_id);
+
+        }
+
+        // =====================================
+        // ACTIVE / INACTIVE
+        // =====================================
+
+        if (status === "ACTIVE") {
+
+            where += `
+                AND tf.is_active = 1
+            `;
+
+        }
+        else if (status === "INACTIVE") {
+
+            where += `
+                AND tf.is_active = 0
+            `;
+
+        }
+
+        const docStatus = (document_status || "ALL").toUpperCase();
+
+        // =====================================
+        // DOCUMENT STATUS
+        // =====================================
+
+        if (docStatus === "INVOICED") {
+
+            where += `
+        AND EXISTS (
+            SELECT 1
+            FROM quote_invoice q
+            WHERE q.freight_quote_estimate_id = fqe.id
+              AND q.is_deleted = 0
+        )
+    `;
+
+        }
+        else if (docStatus === "PENDING") {
+
+            where += `
+        AND NOT EXISTS (
+            SELECT 1
+            FROM quote_invoice q
+            WHERE q.freight_quote_estimate_id = fqe.id
+              AND q.is_deleted = 0
+        )
+        AND (
+            fqe.quote_validity IS NULL
+            OR fqe.quote_validity = 0
+            OR CURDATE() <= DATE_ADD(
+                fqe.quote_date,
+                INTERVAL fqe.quote_validity DAY
+            )
+        )
+    `;
+
+        }
+        else if (docStatus === "EXPIRED") {
+
+            where += `
+        AND NOT EXISTS (
+            SELECT 1
+            FROM quote_invoice q
+            WHERE q.freight_quote_estimate_id = fqe.id
+              AND q.is_deleted = 0
+        )
+        AND fqe.quote_validity IS NOT NULL
+        AND fqe.quote_validity > 0
+        AND CURDATE() > DATE_ADD(
+            fqe.quote_date,
+            INTERVAL fqe.quote_validity DAY
+        )
+    `;
+
+        }
+
+        // =====================================
+        // SUMMARY QUERY
+        // =====================================
+
+        const countQuery = `
+
+            SELECT
+
+                COUNT(DISTINCT fqe.id) AS total,
+
+                COALESCE(
+                    SUM(fqe.sumof_totalcost),
+                    0
+                ) AS total_exclusive,
+
+                COALESCE(
+                    SUM(
+                        fqe.sumof_vatincl -
+                        fqe.sumof_totalcost
+                    ),
+                    0
+                ) AS total_vat,
+
+                COALESCE(
+                    SUM(fqe.sumof_vatincl),
+                    0
+                ) AS grand_total
+
+            FROM freight_quote_estimate fqe
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = fqe.freight_id
+
+            LEFT JOIN tbl_users c
+                ON c.id = fqe.client_id
+
+            LEFT JOIN quote_invoice qi
+                ON qi.freight_quote_estimate_id = fqe.id
+                AND qi.is_deleted = 0
+
+            ${where}
+
+        `;
+
+        con.query(
+            countQuery,
+            params,
+            (countErr, countResult) => {
+
+                if (countErr) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: countErr.message
+                    });
+
+                }
+
+                const summary = countResult[0];
+
+                // ======== PART 2 CONTINUES FROM HERE ========
+
+                // =====================================
+                // REPORT QUERY
+                // =====================================
+
+                const reportQuery = `
+
+                    SELECT
+
+                        fqe.id AS quote_id,
+
+                        fqe.reference_no,
+
+                        fqe.quote_date,
+
+                        CASE
+                            WHEN fqe.quote_validity IS NULL
+                                 OR fqe.quote_validity = 0
+                            THEN NULL
+                        
+                            ELSE DATE_ADD(
+                                fqe.quote_date,
+                                INTERVAL fqe.quote_validity DAY
+                            )
+                        END AS expiry_date,
+
+                        tf.freight_number AS customer_reference,
+
+                        tf.freight_type AS category,
+
+                        fqe.client_id,
+
+                        COALESCE(
+                            c.full_name,
+                            fqe.client_name
+                        ) AS client_name,
+
+                        tf.sales_representative AS sales_rep_id,
+
+                        u.full_name AS sales_rep_name,
+
+                        fqe.quote_type,
+
+                        fqe.final_base_currency,
+                        fqe.invoice_for_country,
+
+                        fqe.sumof_totalcost AS exclusive,
+
+                        (
+                            fqe.sumof_vatincl -
+                            fqe.sumof_totalcost
+                        ) AS vat,
+
+                        fqe.sumof_vatincl AS total,
+
+                        fqe.is_approved,
+
+                        CASE
+
+    WHEN EXISTS (
+        SELECT 1
+        FROM quote_invoice q
+        WHERE q.freight_quote_estimate_id = fqe.id
+          AND q.is_deleted = 0
+    )
+    THEN 'Invoiced'
+
+    WHEN fqe.quote_validity IS NULL
+         OR fqe.quote_validity = 0
+    THEN 'Pending'
+
+    WHEN CURDATE() >
+         DATE_ADD(
+             fqe.quote_date,
+             INTERVAL fqe.quote_validity DAY
+         )
+    THEN 'Expired'
+
+    ELSE 'Pending'
+
+END AS document_status
+
+                    FROM freight_quote_estimate fqe
+
+                    LEFT JOIN tbl_freight tf
+                        ON tf.id = fqe.freight_id
+
+                    LEFT JOIN tbl_users c
+                        ON c.id = fqe.client_id
+
+                    LEFT JOIN tbl_users u
+                        ON u.id = tf.sales_representative
+
+                    LEFT JOIN quote_invoice qi
+                        ON qi.freight_quote_estimate_id = fqe.id
+                        AND qi.is_deleted = 0
+
+                    ${where}
+
+                    ORDER BY
+                        fqe.id DESC
+
+                `;
+
+                con.query(
+                    reportQuery,
+                    params,
+                    (err, result) => {
+
+                        if (err) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+
+                        }
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message:
+                                "Customer Quotes Report fetched successfully",
+
+                            summary: {
+
+                                total_records:
+                                    Number(summary.total || 0),
+
+                                total_exclusive:
+                                    Number(
+                                        summary.total_exclusive || 0
+                                    ).toFixed(2),
+
+                                total_vat:
+                                    Number(
+                                        summary.total_vat || 0
+                                    ).toFixed(2),
+
+                                grand_total:
+                                    Number(
+                                        summary.grand_total || 0
+                                    ).toFixed(2)
+
+                            },
+
+                            data: result
+
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    }
+    catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getCustomerInvoicesReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            start_date,
+            end_date,
+
+            customer_from,
+            customer_to,
+
+            category_from,
+            category_to,
+
+            sales_rep_id,
+
+            invoice_status = "ALL",
+
+            status = "BOTH",
+
+        } = req.body;
+
+        let where = `
+            WHERE
+                qi.is_deleted = 0
+        `;
+
+        let params = [];
+
+        // =====================================
+        // DATE FILTER
+        // =====================================
+
+        if (start_date && end_date) {
+
+            where += `
+                AND DATE(qi.quote_date)
+                BETWEEN ? AND ?
+            `;
+
+            params.push(start_date);
+            params.push(end_date);
+
+        }
+
+        // =====================================
+        // CUSTOMER RANGE
+        // =====================================
+
+        if (customer_from) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) >= ?
+    `;
+
+            params.push(customer_from.toUpperCase());
+
+        }
+
+        if (customer_to) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) <= ?
+    `;
+
+            params.push(customer_to.toUpperCase());
+
+        }
+        // =====================================
+        // CATEGORY RANGE
+        // =====================================
+
+        if (category_from && category_to) {
+
+            where += `
+        AND qi.invoice_for_country IN (?, ?)
+    `;
+
+            params.push(category_from, category_to);
+
+        }
+        else if (category_from) {
+
+            where += `
+        AND qi.invoice_for_country = ?
+    `;
+
+            params.push(category_from);
+
+        }
+        else if (category_to) {
+
+            where += `
+        AND qi.invoice_for_country = ?
+    `;
+
+            params.push(category_to);
+
+        }
+        // =====================================
+        // SALES REP
+        // =====================================
+
+        if (sales_rep_id) {
+
+            where += `
+                AND tf.sales_representative = ?
+            `;
+
+            params.push(sales_rep_id);
+
+        }
+
+        // =====================================
+        // ACTIVE / INACTIVE
+        // =====================================
+
+        if (status === "ACTIVE") {
+
+            where += `
+                AND tf.is_active = 1
+            `;
+
+        }
+
+        if (status === "INACTIVE") {
+
+            where += `
+                AND tf.is_active = 0
+            `;
+
+        }
+
+        // Invoices status filter (PAID | UNPAID | ALL)
+
+        const invoiceStatus = (invoice_status || "ALL").toLowerCase();
+
+        if (invoiceStatus !== "all") {
+
+            where += `
+            AND LOWER(qi.status) = ?
+            `;
+
+            params.push(invoiceStatus);
+
+        }
+        // =====================================
+        // COUNT QUERY
+        // =====================================
+
+        const countQuery = `
+
+            SELECT
+                COUNT(DISTINCT qi.id) AS total
+
+            FROM quote_invoice qi
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = qi.freight_id
+
+            LEFT JOIN freight_quote_estimate fqe
+                ON fqe.id = qi.freight_quote_estimate_id
+
+            LEFT JOIN tbl_users tu
+                ON tu.id = tf.sales_representative
+                AND tu.is_deleted = 0
+
+            LEFT JOIN tbl_suppliers ts
+                ON ts.id = qi.supplier_id
+
+            LEFT JOIN tbl_users c
+            ON c.id = qi.client_id
+            AND c.is_deleted = 0
+
+            ${where}
+
+        `;
+
+        con.query(
+            countQuery,
+            params,
+            (countErr, countResult) => {
+
+                if (countErr) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: countErr.message
+                    });
+
+                }
+
+                const total = countResult[0].total;
+
+                // ===== Part 2 =====
+                // =====================================
+                // MAIN QUERY
+                // =====================================
+
+                const reportQuery = `
+
+                    SELECT
+
+                        qi.id AS quote_invoice_id,
+
+                        qi.reference_no,
+
+                        fqe.reference_no AS quote_reference_no,
+
+                        qi.freight_id,
+
+                        tf.freight_number,
+
+                        qi.client_id,
+
+                        qi.client_name,
+
+                        tf.sales_representative,
+
+                        tu.full_name AS sales_rep_name,
+
+                        qi.supplier_id,
+
+                        ts.name AS supplier_name,
+
+                        tf.freight_type,
+
+                        qi.customer_invoice_no,
+
+                        qi.invoice_for_country,
+
+                        qi.quote_date,
+
+                        qi.due_date,
+
+                        qi.final_base_currency,
+
+                        qi.sumof_totalcost AS exclusive,
+
+                        (
+                            qi.sumof_vatincl -
+                            qi.sumof_totalcost
+                        ) AS vat,
+
+                        qi.sumof_vatincl AS total,
+
+                        qi.status,
+
+                        qi.created_at
+
+                    FROM quote_invoice qi
+
+                    LEFT JOIN tbl_freight tf
+                        ON tf.id = qi.freight_id
+
+                    LEFT JOIN freight_quote_estimate fqe
+                        ON fqe.id = qi.freight_quote_estimate_id
+
+                    LEFT JOIN tbl_users tu
+                        ON tu.id = tf.sales_representative
+                        AND tu.is_deleted = 0
+
+                    LEFT JOIN tbl_suppliers ts
+                        ON ts.id = qi.supplier_id
+
+                    LEFT JOIN tbl_users c
+                        ON c.id = qi.client_id
+                        AND c.is_deleted = 0
+
+                    ${where}
+
+                    ORDER BY qi.id DESC
+
+                `;
+
+                con.query(
+                    reportQuery,
+                    params,
+
+                    (err, result) => {
+
+                        if (err) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+
+                        }
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message: "Customer Invoices Report fetched successfully",
+
+                            data: result
+
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getCustomerBalancesOutstandingReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            run_date,
+
+            customer_from,
+            customer_to,
+
+            category_from,
+            category_to,
+
+            status = "BOTH",
+
+            invoice_status = "BOTH", // PAID | UNPAID | BOTH
+
+            style = "SUMMARY",
+
+            exclude_zero_balance = false,
+
+            use_foreign_currency = false
+
+        } = req.body;
+
+        // =====================================
+        // FORMAT DATE
+        // =====================================
+
+        const formatDate = (date) => {
+
+            if (!date) return null;
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return date;
+            }
+
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(date)) {
+
+                const [month, day, year] = date.split("/");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            return null;
+
+        };
+
+        const reportDate = formatDate(run_date);
+
+        if (!reportDate) {
+
+            return res.status(400).json({
+
+                success: false,
+                message: "run_date is required"
+
+            });
+
+        }
+
+        // =====================================
+        // WHERE CLAUSE
+        // =====================================
+
+        let where = `
+            WHERE
+                qi.is_deleted = 0
+                AND tf.is_deleted = 0
+        `;
+
+        let params = [];
+
+        // =====================================
+        // CUSTOMER RANGE
+        // =====================================
+
+        if (customer_from) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) >= ?
+    `;
+
+            params.push(customer_from.toUpperCase());
+
+        }
+
+        if (customer_to) {
+
+            where += `
+        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) <= ?
+    `;
+
+            params.push(customer_to.toUpperCase());
+
+        }
+
+        // =====================================
+        // COUNTRY RANGE
+        // =====================================
+
+        if (category_from && category_to) {
+
+            where += `
+            AND qi.invoice_for_country IN (?, ?)
+            `;
+
+            params.push(category_from, category_to);
+
+        }
+        else if (category_from) {
+
+            where += `
+            AND qi.invoice_for_country = ?
+            `;
+
+            params.push(category_from);
+
+        }
+        else if (category_to) {
+
+            where += `
+            AND qi.invoice_for_country = ?
+            `;
+
+            params.push(category_to);
+
+        }
+
+        // =====================================
+        // ACTIVE / INACTIVE
+        // =====================================
+
+        if (status === "ACTIVE") {
+
+            where += `
+                AND tf.is_active = 1
+            `;
+
+        }
+        else if (status === "INACTIVE") {
+
+            where += `
+                AND tf.is_active = 0
+            `;
+
+        }
+
+        // =====================================
+        // PAID / UNPAID
+        // =====================================
+
+        if (invoice_status === "PAID") {
+
+            where += `
+                AND LOWER(qi.status) = 'paid'
+            `;
+
+        }
+        else if (invoice_status === "UNPAID") {
+
+            where += `
+                AND LOWER(qi.status) = 'unpaid'
+            `;
+
+        }
+
+        // =====================================
+        // HAVING
+        // =====================================
+
+        let having = "";
+
+        if (exclude_zero_balance) {
+
+            having = `
+                HAVING outstanding_amount <> 0
+            `;
+
+        }
+
+        // =====================================
+        // COUNT QUERY
+        // =====================================
+
+        const countQuery = `
+
+            SELECT
+                COUNT(*) AS total
+
+            FROM
+            (
+
+                SELECT
+                    qi.client_id
+
+                FROM quote_invoice qi
+
+                LEFT JOIN tbl_freight tf
+                    ON tf.id = qi.freight_id
+
+                LEFT JOIN tbl_users c
+                    ON c.id = qi.client_id
+                    AND c.is_deleted = 0
+
+                ${where}
+
+                GROUP BY qi.client_id
+
+            ) x
+
+        `;
+
+        con.query(
+            countQuery,
+            params,
+            (countErr, countResult) => {
+
+                if (countErr) {
+
+                    return res.status(500).json({
+
+                        success: false,
+                        message: countErr.message
+
+                    });
+
+                }
+
+                const total = countResult[0].total;
+
+                // ===== PART 2 CONTINUES FROM HERE =====
+
+                const reportQuery = `
+
+                    SELECT
+
+                        qi.client_id,
+
+                        COALESCE(
+                            c.full_name,
+                            qi.client_name
+                        ) AS customer,
+
+                        SUM(
+                            CASE
+                                WHEN DATEDIFF(?, qi.quote_date) <= 30
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS current_amount,
+
+                        SUM(
+                            CASE
+                                WHEN DATEDIFF(?, qi.quote_date)
+                                    BETWEEN 31 AND 60
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS days30,
+
+                        SUM(
+                            CASE
+                                WHEN DATEDIFF(?, qi.quote_date)
+                                    BETWEEN 61 AND 90
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS days60,
+
+                        SUM(
+                            CASE
+                                WHEN DATEDIFF(?, qi.quote_date)
+                                    BETWEEN 91 AND 120
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS days90,
+
+                        SUM(
+                            CASE
+                                WHEN DATEDIFF(?, qi.quote_date) > 120
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS days120,
+
+                        SUM(qi.sumof_vatincl) AS total_due,
+
+                        SUM(
+                            CASE
+                                WHEN LOWER(qi.status) = 'paid'
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS paid_amount,
+
+                        SUM(
+                            CASE
+                                WHEN LOWER(qi.status) <> 'paid'
+                                THEN qi.sumof_vatincl
+                                ELSE 0
+                            END
+                        ) AS unpaid_amount
+
+                    FROM quote_invoice qi
+
+                    LEFT JOIN tbl_freight tf
+                        ON tf.id = qi.freight_id
+
+                    LEFT JOIN tbl_users c
+                        ON c.id = qi.client_id
+                        AND c.is_deleted = 0
+
+                    ${where}
+
+                    GROUP BY
+                        qi.client_id
+
+                    ${having}
+
+                    ORDER BY
+                        customer ASC
+
+                `;
+
+                const reportParams = [
+
+                    reportDate,
+                    reportDate,
+                    reportDate,
+                    reportDate,
+                    reportDate,
+
+                    ...params
+
+                ];
+
+                con.query(
+                    reportQuery,
+                    reportParams,
+                    (err, result) => {
+
+                        if (err) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+
+                        }
+
+                        let summary = {
+
+                            current: 0,
+                            days30: 0,
+                            days60: 0,
+                            days90: 0,
+                            days120: 0,
+                            total_due: 0,
+                            paid: 0,
+                            unpaid: 0
+
+                        };
+
+                        result.forEach(item => {
+
+                            summary.current += Number(item.current_amount || 0);
+                            summary.days30 += Number(item.days30 || 0);
+                            summary.days60 += Number(item.days60 || 0);
+                            summary.days90 += Number(item.days90 || 0);
+                            summary.days120 += Number(item.days120 || 0);
+
+                            summary.total_due += Number(item.total_due || 0);
+
+                            summary.paid += Number(item.paid_amount || 0);
+
+                            summary.unpaid += Number(item.unpaid_amount || 0);
+
+                        });
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message: "Customer Balances - Days Outstanding Report fetched successfully",
+
+                            total_records: total,
+
+                            run_date: reportDate,
+
+                            style,
+
+                            use_foreign_currency,
+
+                            summary: {
+
+                                current: summary.current.toFixed(2),
+
+                                days30: summary.days30.toFixed(2),
+
+                                days60: summary.days60.toFixed(2),
+
+                                days90: summary.days90.toFixed(2),
+
+                                days120: summary.days120.toFixed(2),
+
+                                total_due: summary.total_due.toFixed(2),
+
+                                paid: summary.paid.toFixed(2),
+
+                                unpaid: summary.unpaid.toFixed(2)
+
+                            },
+
+                            data: result.map(row => ({
+
+                                customer: row.customer,
+
+                                current: Number(row.current_amount).toFixed(2),
+
+                                days30: Number(row.days30).toFixed(2),
+
+                                days60: Number(row.days60).toFixed(2),
+
+                                days90: Number(row.days90).toFixed(2),
+
+                                days120: Number(row.days120).toFixed(2),
+
+                                total_due: Number(row.total_due).toFixed(2),
+
+                                paid: Number(row.paid_amount).toFixed(2),
+
+                                unpaid: Number(row.unpaid_amount).toFixed(2)
+
+                            }))
+
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getCustomerUnallocatedReceiptsReport = async (req, res) => {
+    try {
+
+        const {
+            start_date,
+            end_date,
+            customer_from,
+            customer_to,
+            category_from,
+            category_to,
+            status = "BOTH"
+        } = req.body;
+
+        /* ================= DATE FORMAT ================= */
+
+        const formatDate = (date) => {
+
+            if (!date) return null;
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return date;
+            }
+
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(date)) {
+                const [month, day, year] = date.split("/");
+                return `${year}-${month}-${day}`;
+            }
+
+            return null;
+        };
+
+        const formattedStartDate = formatDate(start_date);
+        const formattedEndDate = formatDate(end_date);
+
+        /* ================= WHERE ================= */
+
+        let where = `
+            WHERE
+            (
+                cb.receipt -
+                COALESCE(
+                    (
+                        SELECT SUM(cs.allocated_amount)
+                        FROM tbl_cashbook_splits cs
+                        WHERE cs.cashbook_id = cb.id
+                    ),
+                    0
+                )
+            ) > 0
+        `;
+
+        const params = [];
+
+        /* ================= DATE FILTER ================= */
+
+        if (formattedStartDate && formattedEndDate) {
+
+            where += ` AND cb.date BETWEEN ? AND ? `;
+            params.push(formattedStartDate, formattedEndDate);
+
+        } else if (formattedStartDate) {
+
+            where += ` AND cb.date >= ? `;
+            params.push(formattedStartDate);
+
+        } else if (formattedEndDate) {
+
+            where += ` AND cb.date <= ? `;
+            params.push(formattedEndDate);
+
+        }
+
+        /* ================= CUSTOMER ================= */
+
+        if (customer_from) {
+            where += ` AND cb.customer_id >= ? `;
+            params.push(customer_from);
+        }
+
+        if (customer_to) {
+            where += ` AND cb.customer_id <= ? `;
+            params.push(customer_to);
+        }
+
+        /* ================= CATEGORY ================= */
+
+        if (category_from) {
+            where += ` AND qi.invoice_for_country >= ? `;
+            params.push(category_from);
+        }
+
+        if (category_to) {
+            where += ` AND qi.invoice_for_country <= ? `;
+            params.push(category_to);
+        }
+
+        /* ================= STATUS ================= */
+
+        if (status === "ACTIVE") {
+            where += ` AND tu.status = 1 `;
+        } else if (status === "INACTIVE") {
+            where += ` AND tu.status = 0 `;
+        }
+
+        /* ================= COUNT QUERY ================= */
+
+        const countQuery = `
+            SELECT COUNT(DISTINCT cb.id) AS total
+
+            FROM tbl_cashbook cb
+
+            LEFT JOIN tbl_users tu
+                ON tu.id = cb.customer_id
+
+            LEFT JOIN tbl_orders o
+                ON o.id = cb.order_id
+
+            LEFT JOIN quote_invoice qi
+                ON qi.order_id = o.id
+                AND qi.is_deleted = 0
+
+            ${where}
+        `;
+
+        con.query(countQuery, params, (countErr, countResult) => {
+
+            if (countErr) {
+
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
+
+            }
+
+            const totalRecords = countResult[0].total;
+
+            /* ================= REPORT QUERY ================= */
+
+            const reportQuery = `
+                SELECT
+
+                    cb.id,
+
+                    cb.customer_id,
+
+                    tu.full_name AS customer,
+
+                    cb.date,
+
+                    CONCAT('RCP', LPAD(cb.id,6,'0')) AS document_no,
+
+                    cb.bank_ref AS reference,
+
+                    cb.description_on_receipt AS description,
+
+                    cb.receipt,
+
+                    qi.invoice_for_country,
+
+                    (
+                        cb.receipt -
+                        COALESCE(
+                            (
+                                SELECT SUM(cs.allocated_amount)
+                                FROM tbl_cashbook_splits cs
+                                WHERE cs.cashbook_id = cb.id
+                            ),
+                            0
+                        )
+                    ) AS unallocated
+
+                FROM tbl_cashbook cb
+
+                LEFT JOIN tbl_users tu
+                    ON tu.id = cb.customer_id
+
+                LEFT JOIN tbl_orders o
+                    ON o.id = cb.order_id
+
+                LEFT JOIN quote_invoice qi
+                    ON qi.order_id = o.id
+                    AND qi.is_deleted = 0
+
+                ${where}
+
+                ORDER BY
+                    tu.full_name ASC,
+                    cb.date ASC,
+                    cb.id ASC
+            `;
+
+            con.query(reportQuery, params, (err, rows) => {
+
+                if (err) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+
+                }
+
+                const grouped = {};
+
+                rows.forEach(row => {
+
+                    if (!grouped[row.customer_id]) {
+
+                        grouped[row.customer_id] = {
+
+                            customer_id: row.customer_id,
+                            customer: row.customer,
+                            invoice_for_country: row.invoice_for_country,
+
+                            totals: {
+                                receipt: 0,
+                                unallocated: 0
+                            },
+
+                            transactions: []
+
+                        };
+
+                    }
+
+                    grouped[row.customer_id].transactions.push({
+
+                        date: row.date,
+
+                        document_no: row.document_no,
+
+                        reference: row.reference,
+
+                        description: row.description,
+
+                        receipt: Number(row.receipt).toFixed(2),
+
+                        unallocated: Number(row.unallocated).toFixed(2)
+
+                    });
+
+                    grouped[row.customer_id].totals.receipt += Number(row.receipt);
+
+                    grouped[row.customer_id].totals.unallocated += Number(row.unallocated);
+
+                });
+
+                const data = Object.values(grouped).map(item => ({
+
+                    customer_id: item.customer_id,
+
+                    customer: item.customer,
+
+                    invoice_for_country: item.invoice_for_country,
+
+                    transactions: item.transactions,
+
+                    totals: {
+
+                        receipt: item.totals.receipt.toFixed(2),
+
+                        unallocated: item.totals.unallocated.toFixed(2)
+
+                    }
+
+                }));
+
+                return res.status(200).json({
+
+                    success: true,
+
+                    message: "Customer Unallocated Receipts Report fetched successfully",
+
+                    total_records: totalRecords,
+
+                    data
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+};
+
+const GetCustomerQuoteReportById = async (req, res) => {
+
+    try {
+
+        const { freight_quote_estimate_id } = req.body;
+
+        if (!freight_quote_estimate_id) {
+
+            return res.status(400).json({
+                success: false,
+                message: "freight_quote_estimate_id is required"
+            });
+
+        }
+
+        // =====================================
+        // GET QUOTE HEADER
+        // =====================================
+
+        const quoteQuery = `
+
+            SELECT
+
+                fqe.id,
+                fqe.reference_no,
+                fqe.quote_date,
+                fqe.quote_validity,
+                fqe.client_name,
+                fqe.client_id,
+                fqe.final_base_currency,
+                fqe.payment_terms,
+                fqe.sumof_totalcost,
+                fqe.sumof_finalamount,
+                fqe.sumof_vatincl,
+                fqe.invoice_for_country,
+                fqe.customer_invoice_no,
+                fqe.quote_type,
+
+                tf.freight_number,
+
+                tf.collection_from,
+                tf.delivery_to,
+
+                u.full_name AS customer_name
+
+            FROM freight_quote_estimate fqe
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = fqe.freight_id
+
+            LEFT JOIN tbl_users u
+                ON u.id = fqe.client_id
+
+            WHERE
+                fqe.id = ?
+                AND fqe.is_deleted = 0
+
+            LIMIT 1
+
+        `;
+
+        con.query(
+
+            quoteQuery,
+
+            [freight_quote_estimate_id],
+
+            (quoteErr, quoteResult) => {
+
+                if (quoteErr) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: quoteErr.message
+                    });
+
+                }
+
+                if (!quoteResult.length) {
+
+                    return res.status(404).json({
+                        success: false,
+                        message: "Quote not found"
+                    });
+
+                }
+
+                const quote = quoteResult[0];
+
+                // =====================================
+                // GET ALL QUOTE COMPONENTS
+                // =====================================
+
+                const detailsQuery = `
+
+                    SELECT
+
+                        fqed.id,
+
+                        fqed.admin_frieght_component_id,
+
+                        afc.code,
+
+                        afc.description,
+
+                        afc.name AS component_group,
+
+                        fqed.qty,
+
+                        fqed.currency,
+
+                        fqed.cost,
+
+                        fqed.unit_type,
+
+                        fqed.unit,
+
+                        fqed.total_cost,
+
+                        fqed.gp_percent,
+
+                        fqed.sales_price,
+
+                        fqed.roe,
+
+                        fqed.final_amount,
+
+                        fqed.vat_type,
+
+                        fqed.disc_percent,
+
+                        fqed.discount,
+
+                        fqed.exclusive,
+
+                        fqed.vat,
+
+                        fqed.vat_incl,
+
+                        fqed.comment
+
+                    FROM freight_quote_estimate_details fqed
+
+                    INNER JOIN admin_frieght_component afc
+                        ON afc.id = fqed.admin_frieght_component_id
+
+                    WHERE
+                        fqed.freight_quote_estimate_id = ?
+
+                    ORDER BY
+                        afc.name,
+                        afc.id,
+                        fqed.id
+
+                `;
+
+                con.query(
+
+                    detailsQuery,
+
+                    [freight_quote_estimate_id],
+
+                    (detailErr, detailResult) => {
+
+                        if (detailErr) {
+
+                            return res.status(500).json({
+                                success: false,
+                                message: detailErr.message
+                            });
+
+                        }
+
+                        // ===== PART 2 CONTINUES FROM HERE =====
+
+                        // =====================================
+                        // GROUP DATA
+                        // =====================================
+
+                        const groupedData = {
+
+                            "Origin Charges": [],
+                            "Freight Charges": [],
+                            "Destination Charges": [],
+                            "Customs Charges": [],
+                            "Transit Charges": [],
+                            "Admin Charges": []
+
+                        };
+
+                        detailResult.forEach(item => {
+
+                            if (!groupedData[item.component_group]) {
+
+                                groupedData[item.component_group] = [];
+
+                            }
+
+                            groupedData[item.component_group].push({
+
+                                component_id: item.admin_frieght_component_id,
+
+                                code: item.code,
+
+                                description: item.description,
+
+                                qty: Number(item.qty),
+
+                                currency: item.currency,
+
+                                cost: Number(item.cost),
+
+                                unit_type: item.unit_type,
+
+                                unit: Number(item.unit),
+
+                                total_cost: Number(item.total_cost),
+
+                                gp_percent: Number(item.gp_percent),
+
+                                sales_price: Number(item.sales_price),
+
+                                roe: Number(item.roe),
+
+                                final_amount: Number(item.final_amount),
+
+                                vat_type: item.vat_type,
+
+                                discount_percent: Number(item.disc_percent),
+
+                                discount: Number(item.discount),
+
+                                exclusive: Number(item.exclusive),
+
+                                vat: Number(item.vat),
+
+                                vat_inclusive: Number(item.vat_incl),
+
+                                comment: item.comment
+
+                            });
+
+                        });
+
+                        // =====================================
+                        // RESPONSE
+                        // =====================================
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message: "Customer Quote Report fetched successfully",
+
+                            data: {
+
+                                quote_information: {
+
+                                    freight_quote_estimate_id: quote.id,
+
+                                    reference_no: quote.reference_no,
+
+                                    freight_number: quote.freight_number,
+
+                                    customer_name:
+                                        quote.customer_name || quote.client_name,
+
+                                    customer_id: quote.client_id,
+
+                                    quote_date: quote.quote_date,
+
+                                    quote_validity: quote.quote_validity,
+
+                                    payment_terms: quote.payment_terms,
+
+                                    invoice_for_country: quote.invoice_for_country,
+
+                                    customer_invoice_no: quote.customer_invoice_no,
+
+                                    quote_type: quote.quote_type,
+
+                                    from_country: quote.collection_from,
+
+                                    to_country: quote.delivery_to,
+
+                                    currency: quote.final_base_currency
+
+                                },
+
+                                charges: groupedData,
+
+                                summary: {
+
+                                    exclusive:
+                                        Number(quote.sumof_totalcost).toFixed(2),
+
+                                    final_amount:
+                                        Number(quote.sumof_finalamount).toFixed(2),
+
+                                    grand_total:
+                                        Number(quote.sumof_vatincl).toFixed(2)
+
+                                }
+
+                            }
+
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getCustomerQuotesByItemReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            start_date,
+            end_date,
+
+            customer_from,
+            customer_to,
+
+            category_from,
+            category_to,
+
+            sales_rep_id,
+
+            document_status = "ALL",
+
+            status = "BOTH"
+
+        } = req.body;
+
+        // =====================================
+        // DATE FORMAT
+        // =====================================
+
+        const formatDate = (date) => {
+
+            if (!date) return null;
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return date;
+            }
+
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(date)) {
+
+                const [month, day, year] = date.split("/");
+
+                return `${year}-${month}-${day}`;
+
+            }
+
+            return null;
+
+        };
+
+        const formattedStartDate = formatDate(start_date);
+        const formattedEndDate = formatDate(end_date);
+
+        // =====================================
+        // WHERE
+        // =====================================
+
+        let where = `
+            WHERE
+                fqe.is_deleted = 0
+                AND afc.status = 1
+        `;
+
+        let params = [];
+
+        // =====================================
+        // DATE FILTER
+        // =====================================
+
+        if (formattedStartDate && formattedEndDate) {
+
+            where += `
+                AND fqe.quote_date
+                BETWEEN ? AND ?
+            `;
+
+            params.push(
+                formattedStartDate,
+                formattedEndDate
+            );
+
+        } else if (formattedStartDate) {
+
+            where += `
+                AND fqe.quote_date >= ?
+            `;
+
+            params.push(formattedStartDate);
+
+        } else if (formattedEndDate) {
+
+            where += `
+                AND fqe.quote_date <= ?
+            `;
+
+            params.push(formattedEndDate);
+
+        }
+
+        // =====================================
+        // CUSTOMER FILTER
+        // (Collection From Country)
+        // =====================================
+
+        if (customer_from) {
+
+            where += `
+                AND tf.collection_from = ?
+            `;
+
+            params.push(customer_from);
+
+        }
+
+        if (customer_to) {
+
+            where += `
+                AND tf.delivery_to = ?
+            `;
+
+            params.push(customer_to);
+
+        }
+
+        // =====================================
+        // CATEGORY FILTER
+        // invoice_for_country
+        // =====================================
+
+        if (category_from) {
+
+            where += `
+                AND fqe.invoice_for_country >= ?
+            `;
+
+            params.push(category_from);
+
+        }
+
+        if (category_to) {
+
+            where += `
+                AND fqe.invoice_for_country <= ?
+            `;
+
+            params.push(category_to);
+
+        }
+
+        // =====================================
+        // SALES REP
+        // =====================================
+
+        if (sales_rep_id) {
+
+            where += `
+                AND tf.sales_representative = ?
+            `;
+
+            params.push(sales_rep_id);
+
+        }
+
+        // =====================================
+        // ACTIVE / INACTIVE
+        // =====================================
+
+        if (status === "ACTIVE") {
+
+            where += `
+                AND tf.is_active = 1
+            `;
+
+        } else if (status === "INACTIVE") {
+
+            where += `
+                AND tf.is_active = 0
+            `;
+
+        }
+
+        // =====================================
+        // DOCUMENT STATUS
+        // =====================================
+
+        if (document_status === "INVOICED") {
+
+            where += `
+                AND qi.id IS NOT NULL
+            `;
+
+        }
+        else if (document_status === "PENDING") {
+
+            where += `
+                AND qi.id IS NULL
+                AND (
+                    fqe.quote_validity IS NULL
+                    OR CURDATE() <= DATE_ADD(
+                        fqe.quote_date,
+                        INTERVAL fqe.quote_validity DAY
+                    )
+                )
+            `;
+
+        }
+        else if (document_status === "EXPIRED") {
+
+            where += `
+                AND qi.id IS NULL
+                AND fqe.quote_validity IS NOT NULL
+                AND CURDATE() >
+                DATE_ADD(
+                    fqe.quote_date,
+                    INTERVAL fqe.quote_validity DAY
+                )
+            `;
+
+        }
+
+        // =====================================
+        // MAIN QUERY
+        // =====================================
+
+        const query = `
+
+            SELECT
+
+                afc.id AS component_id,
+
+                afc.code,
+
+                afc.description,
+
+                afc.name AS component_group,
+
+                fqe.id AS quote_id,
+
+                fqe.reference_no,
+
+                fqe.quote_date,
+
+                fqe.quote_validity,
+
+                fqe.invoice_for_country,
+
+                tf.freight_number,
+
+                tf.freight_type,
+
+                tf.collection_from,
+
+                tf.delivery_to,
+
+                c.full_name AS customer,
+
+                u.full_name AS sales_rep,
+
+                qd.qty,
+
+                qd.currency,
+
+                qd.total_cost,
+
+                qd.vat_incl,
+
+                (
+                    qd.vat_incl -
+                    qd.total_cost
+                ) AS gp_amount,
+
+                CASE
+
+                    WHEN qd.vat_incl = 0
+                    THEN 0
+
+                    ELSE ROUND(
+
+                        (
+                            (
+                                qd.vat_incl -
+                                qd.total_cost
+                            ) / qd.vat_incl
+                        ) * 100,
+
+                        2
+
+                    )
+
+                END AS gp_percent,
+
+                                CASE
+
+                    WHEN qi.id IS NOT NULL
+                    THEN 'Invoiced'
+
+                    WHEN fqe.quote_validity IS NULL
+                         OR fqe.quote_validity = 0
+                    THEN 'Pending'
+
+                    WHEN CURDATE() >
+                        DATE_ADD(
+                            fqe.quote_date,
+                            INTERVAL fqe.quote_validity DAY
+                        )
+                    THEN 'Expired'
+
+                    ELSE 'Pending'
+
+                END AS document_status
+
+            FROM freight_quote_estimate_details qd
+
+            INNER JOIN freight_quote_estimate fqe
+                ON fqe.id = qd.freight_quote_estimate_id
+
+            INNER JOIN admin_frieght_component afc
+                ON afc.id = qd.admin_frieght_component_id
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = fqe.freight_id
+
+            LEFT JOIN tbl_users c
+                ON c.id = fqe.client_id
+
+            LEFT JOIN tbl_users u
+                ON u.id = tf.sales_representative
+
+            LEFT JOIN quote_invoice qi
+                ON qi.freight_quote_estimate_id = fqe.id
+                AND qi.is_deleted = 0
+
+            ${where}
+
+            ORDER BY
+
+                afc.name ASC,
+                afc.description ASC,
+                fqe.quote_date ASC,
+                fqe.reference_no ASC
+
+        `;
+
+        con.query(query, params, (err, rows) => {
+
+            if (err) {
+
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+
+            }
+
+            const groups = {};
+            const grandTotal = {
+                qty: 0,
+                total_cost: 0,
+                total_selling: 0,
+                gp_amount: 0
+            };
+
+            rows.forEach(row => {
+
+                const key = `${row.component_group}-${row.description}`;
+
+                if (!groups[key]) {
+
+                    groups[key] = {
+
+                        component_group: row.component_group,
+                        component_code: row.code,
+                        component_name: row.description,
+
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        total_gp: 0,
+
+                        records: []
+
+                    };
+
+                }
+
+                groups[key].records.push({
+
+                    quote_id: row.quote_id,
+
+                    quote_date: row.quote_date,
+
+                    reference_no: row.reference_no,
+
+                    customer: row.customer,
+
+                    sales_rep: row.sales_rep,
+
+                    freight_number: row.freight_number,
+
+                    category: row.freight_type,
+
+                    invoice_for_country: row.invoice_for_country,
+
+                    qty: Number(row.qty),
+
+                    currency: row.currency,
+
+                    total_cost: Number(row.total_cost),
+
+                    total_selling: Number(row.vat_incl),
+
+                    gp_amount: Number(row.gp_amount),
+
+                    gp_percent: Number(row.gp_percent),
+
+                    expiry_date:
+                        row.quote_validity
+                            ? new Date(
+                                new Date(row.quote_date)
+                                    .getTime() +
+                                row.quote_validity *
+                                24 * 60 * 60 * 1000
+                            )
+                            : null,
+
+                    document_status: row.document_status
+
+                });
+
+                groups[key].total_qty += Number(row.qty);
+
+                groups[key].total_cost += Number(row.total_cost);
+
+                groups[key].total_selling += Number(row.vat_incl);
+
+                groups[key].total_gp += Number(row.gp_amount);
+
+                grandTotal.qty += Number(row.qty);
+
+                grandTotal.total_cost += Number(row.total_cost);
+
+                grandTotal.total_selling += Number(row.vat_incl);
+
+                grandTotal.gp_amount += Number(row.gp_amount);
+
+            });
+
+            return res.status(200).json({
+
+                success: true,
+
+                message:
+                    "Customer Quotes By Item Report fetched successfully",
+
+                grand_total: {
+
+                    qty: grandTotal.qty.toFixed(2),
+
+                    total_cost:
+                        grandTotal.total_cost.toFixed(2),
+
+                    total_selling:
+                        grandTotal.total_selling.toFixed(2),
+
+                    gp_amount:
+                        grandTotal.gp_amount.toFixed(2),
+
+                    gp_percent:
+                        grandTotal.total_selling > 0
+                            ? (
+                                (grandTotal.gp_amount /
+                                    grandTotal.total_selling) * 100
+                            ).toFixed(2)
+                            : "0.00"
+
+                },
+
+                data: Object.values(groups).map(group => ({
+
+                    component_group: group.component_group,
+
+                    component_code: group.component_code,
+
+                    component_name: group.component_name,
+
+                    totals: {
+
+                        qty:
+                            group.total_qty.toFixed(2),
+
+                        total_cost:
+                            group.total_cost.toFixed(2),
+
+                        total_selling:
+                            group.total_selling.toFixed(2),
+
+                        gp_amount:
+                            group.total_gp.toFixed(2),
+
+                        gp_percent:
+                            group.total_selling > 0
+                                ? (
+                                    (group.total_gp /
+                                        group.total_selling) * 100
+                                ).toFixed(2)
+                                : "0.00"
+
+                    },
+
+                    records: group.records
+
+                }))
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const getSalesByCustomerReport = async (req, res) => {
+    try {
+
+        const {
+            customer_from,
+            customer_to,
+            category_from,
+            category_to,
+            active = "BOTH",
+            start_date,
+            end_date,
+            include_credit_notes = true,
+            style = "DETAILED"
+        } = req.body;
+
+        if (!start_date || !end_date) {
+            return res.status(400).json({
+                success: false,
+                message: "start_date and end_date are required"
+            });
+        }
+
+        let where = `
+            WHERE
+                qi.is_deleted = 0
+                AND DATE(qi.quote_date) BETWEEN ? AND ?
+        `;
+
+        const params = [start_date, end_date];
+
+        // Customer Filter
+        if (customer_from) {
+            where += ` AND UPPER(LEFT(tu.full_name,1)) >= UPPER(?) `;
+            params.push(customer_from);
+        }
+
+        if (customer_to) {
+            where += ` AND UPPER(LEFT(tu.full_name,1)) <= UPPER(?) `;
+            params.push(customer_to);
+        }
+
+        // Category Filter
+        if (category_from) {
+            where += ` AND qi.invoice_for_country >= ? `;
+            params.push(category_from);
+        }
+
+        if (category_to) {
+            where += ` AND qi.invoice_for_country <= ? `;
+            params.push(category_to);
+        }
+
+        // Active Filter
+        if (active === "ACTIVE") {
+            where += ` AND tu.is_active = 1 `;
+        }
+
+        if (active === "INACTIVE") {
+            where += ` AND tu.is_active = 0 `;
+        }
+
+        // Credit Notes
+        if (!include_credit_notes) {
+            where += ` AND qi.is_credit_note = 0 `;
+        }
+
+        // Count Query
+        const countQuery = `
+            SELECT COUNT(DISTINCT qi.id) AS total
+            FROM quote_invoice qi
+            LEFT JOIN tbl_users tu
+                ON tu.id = qi.client_id
+            ${where}
+        `;
+
+        con.query(countQuery, params, (countErr, countResult) => {
+
+            if (countErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
+            }
+
+            const totalRecords = countResult[0].total;
+
+            const reportQuery = `
+                SELECT
+
+                    qi.id,
+                    qi.client_id,
+
+                    COALESCE(
+                        tu.full_name,
+                        qi.client_name
+                    ) AS customer,
+
+                    qi.reference_no,
+                    qi.quote_date,
+
+                    qid.description,
+                    qid.qty,
+                    qid.vat_incl AS total_selling,
+
+                    (
+                        SELECT SUM(vat_incl)
+                        FROM quote_invoice_details
+                        WHERE quote_invoice_id = qi.id
+                    ) AS invoice_total
+
+                FROM quote_invoice qi
+
+                INNER JOIN quote_invoice_details qid
+                    ON qid.quote_invoice_id = qi.id
+
+                LEFT JOIN tbl_users tu
+                    ON tu.id = qi.client_id
+
+                ${where}
+
+                ORDER BY
+                    customer,
+                    qi.quote_date,
+                    qi.reference_no,
+                    qid.id
+            `;
+
+            con.query(reportQuery, params, (err, rows) => {
+
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                const customers = {};
+
+                rows.forEach(row => {
+
+                    const customerKey = row.client_id || row.customer;
+
+                    if (!customers[customerKey]) {
+                        customers[customerKey] = {
+                            client_id: row.client_id,
+                            customer: row.customer,
+                            invoices: []
+                        };
+                    }
+
+                    let invoice = customers[customerKey].invoices.find(
+                        x => x.id === row.id
+                    );
+
+                    if (!invoice) {
+
+                        invoice = {
+                            id: row.id,
+                            reference_no: row.reference_no,
+                            quote_date: row.quote_date,
+                            invoice_total: Number(row.invoice_total).toFixed(2),
+                            items: []
+                        };
+
+                        customers[customerKey].invoices.push(invoice);
+                    }
+
+                    invoice.items.push({
+                        description: row.description,
+                        qty: Number(row.qty).toFixed(2),
+                        total_selling: Number(row.total_selling).toFixed(2)
+                    });
+
+                });
+
+                // SUMMARY STYLE
+                let data;
+
+                if (style === "SUMMARY") {
+
+                    data = Object.values(customers).map(customer => ({
+
+                        client_id: customer.client_id,
+                        customer: customer.customer,
+
+                        total_invoices: customer.invoices.length,
+
+                        total_amount: customer.invoices
+                            .reduce(
+                                (sum, inv) =>
+                                    sum + Number(inv.invoice_total),
+                                0
+                            )
+                            .toFixed(2)
+
+                    }));
+
+                } else {
+
+                    data = Object.values(customers);
+
+                }
+
+                return res.status(200).json({
+
+                    success: true,
+                    message: "Sales By Customer Report fetched successfully",
+
+                    totalRecords,
+
+                    totalCustomers: Object.keys(customers).length,
+
+                    style,
+
+                    data
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const getSalesByCustomerSummaryReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            customer_from,
+            customer_to,
+
+            category_from,
+            category_to,
+
+            active = "BOTH",
+
+            start_date,
+            end_date,
+
+            include_credit_notes = true
+
+        } = req.body;
+
+        // ==========================================
+        // Validation
+        // ==========================================
+
+        if (!start_date || !end_date) {
+
+            return res.status(400).json({
+                success: false,
+                message: "start_date and end_date are required."
+            });
+
+        }
+
+        // ==========================================
+        // WHERE
+        // ==========================================
+
+        let where = `
+            WHERE
+                qi.is_deleted = 0
+                AND DATE(qi.quote_date) BETWEEN ? AND ?
+        `;
+
+        let params = [
+            start_date,
+            end_date
+        ];
+
+        // ==========================================
+        // Customer Filter (A-Z)
+        // ==========================================
+
+        if (customer_from) {
+
+            where += `
+                AND UPPER(LEFT(u.full_name,1)) >= UPPER(?)
+            `;
+
+            params.push(customer_from);
+
+        }
+
+        if (customer_to) {
+
+            where += `
+                AND UPPER(LEFT(u.full_name,1)) <= UPPER(?)
+            `;
+
+            params.push(customer_to);
+
+        }
+
+        // ==========================================
+        // Category Filter
+        // invoice_for_country
+        // ==========================================
+
+        if (category_from) {
+
+            where += `
+                AND qi.invoice_for_country >= ?
+            `;
+
+            params.push(category_from);
+
+        }
+
+        if (category_to) {
+
+            where += `
+                AND qi.invoice_for_country <= ?
+            `;
+
+            params.push(category_to);
+
+        }
+
+        // ==========================================
+        // Active / Inactive
+        // ==========================================
+
+        if (active === "ACTIVE") {
+
+            where += `
+                AND u.is_active = 1
+            `;
+
+        }
+
+        if (active === "INACTIVE") {
+
+            where += `
+                AND u.is_active = 0
+            `;
+
+        }
+
+        // ==========================================
+        // Credit Notes
+        // ==========================================
+
+        if (!include_credit_notes) {
+
+            where += `
+                AND qi.sumof_vatincl >= 0
+            `;
+
+        }
+
+        // ==========================================
+        // Count Query
+        // ==========================================
+
+        const countQuery = `
+
+            SELECT
+
+                COUNT(DISTINCT qi.id) AS total
+
+            FROM quote_invoice qi
+
+            LEFT JOIN tbl_users u
+                ON u.id = qi.client_id
+
+            LEFT JOIN tbl_freight tf
+                ON tf.id = qi.freight_id
+
+            ${where}
+
+        `;
+
+        con.query(countQuery, params, (countErr, countResult) => {
+
+            if (countErr) {
+
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
+
+            }
+
+            const totalRecords = countResult[0].total;
+
+            // ==========================================
+            // Main Report Query
+            // ==========================================
+
+            const reportQuery = `
+
+                SELECT
+
+                    qi.id,
+
+                    qi.reference_no,
+
+                    DATE(qi.quote_date) AS invoice_date,
+
+                    qi.sumof_vatincl,
+
+                    qi.client_id,
+
+                    COALESCE(
+                        u.full_name,
+                        qi.client_name
+                    ) AS customer,
+
+                    SUM(qid.qty) AS qty
+
+                FROM quote_invoice qi
+
+                INNER JOIN quote_invoice_details qid
+                    ON qid.quote_invoice_id = qi.id
+
+                LEFT JOIN tbl_users u
+                    ON u.id = qi.client_id
+
+                LEFT JOIN tbl_freight tf
+                    ON tf.id = qi.freight_id
+
+                ${where}
+
+                GROUP BY
+                    qi.id
+
+                ORDER BY
+                    customer ASC,
+                    invoice_date ASC,
+                    qi.reference_no ASC
+
+            `;
+
+            con.query(reportQuery, params, (err, result) => {
+
+                // Continue in Part 2
+
+                if (err) {
+
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+
+                }
+
+                const customerMap = {};
+
+                let grandQty = 0;
+                let grandTotal = 0;
+
+                result.forEach(row => {
+
+                    const customer = row.customer || "Unknown Customer";
+
+                    if (!customerMap[customer]) {
+
+                        customerMap[customer] = {
+
+                            customer,
+
+                            customer_total_qty: 0,
+
+                            customer_total_selling: 0,
+
+                            invoices: []
+
+                        };
+
+                    }
+
+                    customerMap[customer].invoices.push({
+
+                        date: row.invoice_date,
+
+                        reference: row.reference_no,
+
+                        qty: Number(row.qty).toFixed(4),
+
+                        total_selling: Number(row.sumof_vatincl).toFixed(2)
+
+                    });
+
+                    customerMap[customer].customer_total_qty += Number(row.qty);
+
+                    customerMap[customer].customer_total_selling += Number(row.sumof_vatincl);
+
+                    grandQty += Number(row.qty);
+
+                    grandTotal += Number(row.sumof_vatincl);
+
+                });
+
+                const data = Object.values(customerMap).map(item => ({
+
+                    customer: item.customer,
+
+                    customer_total_qty: item.customer_total_qty.toFixed(4),
+
+                    customer_total_selling: item.customer_total_selling.toFixed(2),
+
+                    invoices: item.invoices
+
+                }));
+
+                return res.status(200).json({
+
+                    success: true,
+
+                    message: "Sales By Customer Summary Report fetched successfully.",
+
+                    total_records: totalRecords,
+
+                    filters: {
+
+                        customer_from,
+
+                        customer_to,
+
+                        category_from,
+
+                        category_to,
+
+                        active,
+
+                        start_date,
+
+                        end_date,
+
+                        include_credit_notes
+
+                    },
+
+                    summary: {
+
+                        grand_total_qty: grandQty.toFixed(4),
+
+                        grand_total_selling: grandTotal.toFixed(2)
+
+                    },
+
+                    data
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+const GetSalesByItemReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            start_date,
+            end_date,
+
+            item_from,
+            item_to,
+
+            category_from,
+            category_to,
+
+            status = "Both",
+            item_type = "Both",
+
+            include_credit_notes = true,
+
+            style = "Detailed",
+
+            cost = "Average"
+
+        } = req.body;
+
+        if (!start_date || !end_date) {
+
+            return res.status(400).json({
+                success: false,
+                message: "start_date and end_date are required."
+            });
+
+        }
+
+        let queryParams = [];
+
+        let query = `
+
+            SELECT
+
+                qi.id AS invoice_id,
+                qi.reference_no,
+                DATE(qi.quote_date) AS invoice_date,
+
+                qi.client_id,
+                qi.client_name,
+
+                qi.status,
+
+                qid.id AS detail_id,
+
+                qid.qty,
+                qid.total_cost,
+                qid.sales_price,
+                qid.final_amount,
+
+                afc.id AS component_id,
+                afc.code,
+                afc.description,
+                afc.name AS category_name,
+
+                (
+                    qid.final_amount -
+                    qid.total_cost
+                ) AS gp_amount,
+
+                CASE
+
+                    WHEN qid.final_amount <> 0
+
+                    THEN ROUND(
+
+                        (
+                            (
+                                qid.final_amount -
+                                qid.total_cost
+                            )
+
+                            /
+                            qid.final_amount
+
+                        ) * 100,
+
+                        4
+
+                    )
+
+                    ELSE 0
+
+                END AS gp_percent
+
+            FROM quote_invoice qi
+
+            INNER JOIN quote_invoice_details qid
+
+                ON qid.quote_invoice_id = qi.id
+
+            INNER JOIN admin_frieght_component afc
+
+                ON afc.id = qid.admin_frieght_component_id
+
+            WHERE qi.is_deleted = 0
+
+        `;
+
+        query += `
+
+            AND DATE(qi.quote_date)
+            BETWEEN ? AND ?
+
+        `;
+
+        queryParams.push(
+            start_date,
+            end_date
+        );
+
+        if (item_from) {
+
+            query += `
+                AND afc.description >= ?
+            `;
+
+            queryParams.push(item_from);
+
+        }
+
+        if (item_to) {
+
+            query += `
+                AND afc.description <= ?
+            `;
+
+            queryParams.push(item_to);
+
+        }
+
+        if (category_from) {
+
+            query += `
+                AND afc.name >= ?
+            `;
+
+            queryParams.push(category_from);
+
+        }
+
+        if (category_to) {
+
+            query += `
+                AND afc.name <= ?
+            `;
+
+            queryParams.push(category_to);
+
+        }
+
+        if (
+            status &&
+            status !== "Both"
+        ) {
+
+            query += `
+                AND qi.status = ?
+            `;
+
+            queryParams.push(
+                status.toLowerCase()
+            );
+
+        }
+
+        query += `
+
+            ORDER BY
+
+                afc.description ASC,
+
+                qi.quote_date ASC,
+
+                qi.reference_no ASC
+
+        `;
+
+        const reportData = await new Promise((resolve, reject) => {
+
+            con.query(
+
+                query,
+
+                queryParams,
+
+                (err, result) => {
+
+                    if (err)
+                        return reject(err);
+
+                    resolve(result);
+
+                }
+
+            );
+
+        });
+
+        // ---------- PART 2 CONTINUES ----------
+
+        // ---------- GROUPING ----------
+
+        const groupedData = {};
+
+        let grandQty = 0;
+        let grandCost = 0;
+        let grandSelling = 0;
+        let grandGPAmount = 0;
+
+        reportData.forEach(row => {
+
+            const itemName = `${row.code} - ${row.description}`;
+
+            if (!groupedData[itemName]) {
+
+                groupedData[itemName] = {
+
+                    item_name: itemName,
+
+                    rows: [],
+
+                    total: {
+
+                        qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0
+
+                    }
+
+                };
+
+            }
+
+            groupedData[itemName].rows.push({
+
+                date: row.invoice_date,
+
+                document_no: row.reference_no,
+
+                customer: row.client_name,
+
+                qty: Number(row.qty),
+
+                total_cost: Number(row.total_cost),
+
+                total_selling: Number(row.final_amount),
+
+                gp_amount: Number(row.gp_amount),
+
+                gp_percent: Number(row.gp_percent)
+
+            });
+
+            groupedData[itemName].total.qty += Number(row.qty);
+
+            groupedData[itemName].total.total_cost += Number(row.total_cost);
+
+            groupedData[itemName].total.total_selling += Number(row.final_amount);
+
+            groupedData[itemName].total.gp_amount += Number(row.gp_amount);
+
+        });
+
+        // ---------- ITEM TOTALS ----------
+
+        Object.values(groupedData).forEach(item => {
+
+            if (item.total.total_selling != 0) {
+
+                item.total.gp_percent = Number(
+
+                    (
+
+                        item.total.gp_amount
+
+                        /
+
+                        item.total.total_selling
+
+                    ) * 100
+
+                ).toFixed(4);
+
+            }
+
+            grandQty += item.total.qty;
+
+            grandCost += item.total.total_cost;
+
+            grandSelling += item.total.total_selling;
+
+            grandGPAmount += item.total.gp_amount;
+
+        });
+
+        let grandGPPercent = 0;
+
+        if (grandSelling != 0) {
+
+            grandGPPercent = Number(
+
+                (
+
+                    grandGPAmount
+
+                    /
+
+                    grandSelling
+
+                ) * 100
+
+            ).toFixed(4);
+
+        }
+
+        return res.status(200).json({
+
+            success: true,
+
+            style: style,
+
+            filters: {
+
+                start_date,
+                end_date,
+
+                item_from,
+                item_to,
+
+                category_from,
+                category_to,
+
+                status,
+
+                item_type,
+
+                include_credit_notes,
+
+                cost
+
+            },
+
+            data: Object.values(groupedData),
+
+            grand_total: {
+
+                qty: grandQty,
+
+                total_cost: Number(grandCost.toFixed(2)),
+
+                total_selling: Number(grandSelling.toFixed(2)),
+
+                gp_amount: Number(grandGPAmount.toFixed(2)),
+
+                gp_percent: Number(grandGPPercent)
+
+            }
+
+        });
+
+    } catch (error) {
+
+        console.error("GetSalesByItemReport Error :", error);
+
+        return res.status(500).json({
+
+            success: false,
+
+            message: "An unexpected error occurred.",
+
+            error: error.message
+
+        });
+
+    }
+
+};
+
+const getSalesBySalesRepReport = async (req, res) => {
+    try {
+
+        const {
+            start_date,
+            end_date,
+            sales_rep_from,
+            sales_rep_to,
+            include_credit_notes = true,
+            style = "Detailed"
+        } = req.body;
+
+        if (!start_date || !end_date) {
+            return res.status(400).json({
+                success: false,
+                message: "start_date and end_date are required."
+            });
+        }
+
+        let where = `
+            WHERE qi.is_deleted = 0
+            AND DATE(qi.quote_date) BETWEEN ? AND ?
+        `;
+
+        const queryParams = [
+            start_date,
+            end_date
+        ];
+
+        // Sales Rep From
+        if (sales_rep_from) {
+            where += `
+                AND UPPER(u.full_name) >= UPPER(?)
+            `;
+            queryParams.push(sales_rep_from);
+        }
+
+        // Sales Rep To
+        if (sales_rep_to) {
+            where += `
+                AND UPPER(u.full_name) <= UPPER(?)
+            `;
+            queryParams.push(sales_rep_to);
+        }
+
+        if (!include_credit_notes) {
+            where += `
+                AND qi.status <> 'credit_note'
+            `;
+        }
+
+        const sql = `
+            SELECT
+
+                u.id AS sales_rep_id,
+
+                u.full_name AS sales_rep_name,
+
+                DATE(qi.quote_date) AS invoice_date,
+
+                qi.reference_no,
+
+                qi.client_name,
+
+                afc.code,
+                afc.description,
+
+                qid.qty,
+                qid.total_cost,
+                qid.final_amount
+
+            FROM quote_invoice qi
+
+            INNER JOIN tbl_freight tf
+                ON tf.id = qi.freight_id
+
+            LEFT JOIN tbl_users u
+                ON u.id = tf.sales_representative
+
+            INNER JOIN quote_invoice_details qid
+                ON qid.quote_invoice_id = qi.id
+
+            LEFT JOIN admin_frieght_component afc
+                ON afc.id = qid.admin_frieght_component_id
+
+            ${where}
+
+            ORDER BY
+                sales_rep_name,
+                invoice_date,
+                qi.reference_no,
+                afc.description
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            const report = {};
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+
+            rows.forEach(row => {
+
+                const repName =
+                    row.sales_rep_name && row.sales_rep_name.trim() !== ""
+                        ? row.sales_rep_name.trim()
+                        : "Unassigned";
+
+                if (!report[repName]) {
+
+                    report[repName] = {
+                        sales_rep: repName,
+                        invoices: [],
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0
+                    };
+
+                }
+
+                const selling = Number(row.final_amount || 0);
+                const cost = Number(row.total_cost || 0);
+                const qty = Number(row.qty || 0);
+
+                const gp = selling - cost;
+
+                report[repName].invoices.push({
+
+                    date: row.invoice_date,
+                    reference: row.reference_no,
+                    customer: row.client_name,
+
+                    item: row.code
+                        ? `${row.code} - ${row.description}`
+                        : row.description,
+
+                    qty,
+                    total_cost: cost,
+                    total_selling: selling,
+                    gp_amount: gp,
+                    gp_percent:
+                        selling > 0
+                            ? Number(((gp / selling) * 100).toFixed(2))
+                            : 0
+                });
+
+                report[repName].total_qty += qty;
+                report[repName].total_cost += cost;
+                report[repName].total_selling += selling;
+
+                grandQty += qty;
+                grandCost += cost;
+                grandSelling += selling;
+
+            });
+
+            // Calculate Sales Rep Totals
+            Object.keys(report).forEach(rep => {
+
+                const data = report[rep];
+
+                data.gp_amount =
+                    Number(
+                        (
+                            data.total_selling -
+                            data.total_cost
+                        ).toFixed(2)
+                    );
+
+                data.gp_percent =
+                    data.total_selling > 0
+                        ? Number(
+                            (
+                                (
+                                    data.gp_amount /
+                                    data.total_selling
+                                ) * 100
+                            ).toFixed(2)
+                        )
+                        : 0;
+
+                data.total_qty =
+                    Number(data.total_qty.toFixed(2));
+
+                data.total_cost =
+                    Number(data.total_cost.toFixed(2));
+
+                data.total_selling =
+                    Number(data.total_selling.toFixed(2));
+
+            });
+
+            const grandGp =
+                grandSelling - grandCost;
+
+            const grandPercent =
+                grandSelling > 0
+                    ? Number(
+                        (
+                            (
+                                grandGp /
+                                grandSelling
+                            ) * 100
+                        ).toFixed(2)
+                    )
+                    : 0;
+
+            return res.status(200).json({
+
+                success: true,
+
+                filters: {
+
+                    start_date,
+                    end_date,
+                    sales_rep_from: sales_rep_from || null,
+                    sales_rep_to: sales_rep_to || null,
+                    include_credit_notes,
+                    style
+
+                },
+
+                data: Object.values(report),
+
+                grand_total: {
+
+                    qty:
+                        Number(grandQty.toFixed(2)),
+
+                    total_cost:
+                        Number(grandCost.toFixed(2)),
+
+                    total_selling:
+                        Number(grandSelling.toFixed(2)),
+
+                    gp_amount:
+                        Number(grandGp.toFixed(2)),
+
+                    gp_percent:
+                        grandPercent
+
+                }
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+
+        });
+
+    }
+};
+
+const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            run_at_date,
+            supplier_from,
+            supplier_to,
+            status = "Both",
+            style = "summary",
+            exclude_zero_balance = false,
+            use_foreign_currency = true
+
+        } = req.body;
+
+        if (!run_at_date) {
+
+            return res.status(400).json({
+
+                success: false,
+                message: "run_at_date is required."
+
+            });
+
+        }
+
+        let where = `
+            WHERE
+                sp.is_deleted = 0
+                AND ssi.status <> 'Cancelled'
+        `;
+
+        const queryParams = [];
+
+        // ---------- Supplier Filter ----------
+
+        if (supplier_from && supplier_to) {
+
+            where += `
+                AND sp.name >= ?
+                AND sp.name <= ?
+            `;
+
+            queryParams.push(
+                supplier_from,
+                supplier_to
+            );
+
+        }
+
+        // ---------- Status Filter ----------
+
+        if (status === "Active") {
+
+            where += ` AND sp.is_deleted = 0 `;
+
+        }
+        else if (status === "Inactive") {
+
+            where += ` AND sp.is_deleted = 1 `;
+
+        }
+
+        const sql = `
+
+        SELECT
+
+            sp.id,
+            sp.name AS supplier_name,
+
+            SUM(
+                CASE
+                    WHEN DATEDIFF(?, ssi.due_date) > 120
+                    THEN ssi.sumof_vatincl
+                    ELSE 0
+                END
+            ) AS days_120,
+
+            SUM(
+                CASE
+                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 91 AND 120
+                    THEN ssi.sumof_vatincl
+                    ELSE 0
+                END
+            ) AS days_90,
+
+            SUM(
+                CASE
+                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 61 AND 90
+                    THEN ssi.sumof_vatincl
+                    ELSE 0
+                END
+            ) AS days_60,
+
+            SUM(
+                CASE
+                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 31 AND 60
+                    THEN ssi.sumof_vatincl
+                    ELSE 0
+                END
+            ) AS days_30,
+
+            SUM(
+                CASE
+                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 0 AND 30
+                    THEN ssi.sumof_vatincl
+                    ELSE 0
+                END
+            ) AS current_due,
+
+            SUM(ssi.sumof_vatincl) AS total_due
+
+        FROM supplier_shipment_invoice ssi
+
+        INNER JOIN tbl_suppliers sp
+            ON sp.id = ssi.supplier_id
+
+        LEFT JOIN tbl_shipments ts
+            ON ts.id = ssi.shipment_id
+
+        ${where}
+
+        GROUP BY
+            sp.id,
+            sp.name
+
+        `;
+
+        const params = [
+
+            run_at_date,
+            run_at_date,
+            run_at_date,
+            run_at_date,
+            run_at_date,
+
+            ...queryParams
+
+        ];
+
+        con.query(sql, params, (err, rows) => {
+
+            if (err) {
+
+                return res.status(500).json({
+
+                    success: false,
+                    message: err.message
+
+                });
+
+            }
+
+            let data = [];
+
+            let grand120 = 0;
+            let grand90 = 0;
+            let grand60 = 0;
+            let grand30 = 0;
+            let grandCurrent = 0;
+            let grandTotal = 0;
+
+            rows.forEach(row => {
+
+                const supplier = {
+
+                    supplier_id: row.id,
+                    supplier_name: row.supplier_name,
+
+                    days_120: Number(row.days_120 || 0),
+                    days_90: Number(row.days_90 || 0),
+                    days_60: Number(row.days_60 || 0),
+                    days_30: Number(row.days_30 || 0),
+                    current: Number(row.current_due || 0),
+                    total_due: Number(row.total_due || 0)
+
+                };
+
+                if (
+                    exclude_zero_balance &&
+                    supplier.total_due === 0
+                ) {
+                    return;
+                }
+
+                grand120 += supplier.days_120;
+                grand90 += supplier.days_90;
+                grand60 += supplier.days_60;
+                grand30 += supplier.days_30;
+                grandCurrent += supplier.current;
+                grandTotal += supplier.total_due;
+
+                data.push(supplier);
+
+            });
+
+            return res.status(200).json({
+
+                success: true,
+
+                filters: {
+
+                    run_at_date,
+                    supplier_from: supplier_from || "All",
+                    supplier_to: supplier_to || "All",
+                    status,
+                    style,
+                    exclude_zero_balance,
+                    use_foreign_currency
+
+                },
+
+                data,
+
+                grand_total: {
+
+                    days_120: Number(grand120.toFixed(2)),
+                    days_90: Number(grand90.toFixed(2)),
+                    days_60: Number(grand60.toFixed(2)),
+                    days_30: Number(grand30.toFixed(2)),
+                    current: Number(grandCurrent.toFixed(2)),
+                    total_due: Number(grandTotal.toFixed(2))
+
+                }
+
+            });
+
+        });
+
+    }
+    catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+
+        });
+
+    }
+
+};
+
+const getSupplierInvoicesReport = async (req, res) => {
+
+    try {
+
+        const {
+
+            start_date,
+            end_date,
+            supplier_from,
+            supplier_to,
+            status = "Both",
+            style = "summary",
+            exclude_zero_balance = false,
+            use_foreign_currency = true
+
+        } = req.body;
+
+        if (!start_date || !end_date) {
+
+            return res.status(400).json({
+                success: false,
+                message: "start_date and end_date are required."
+            });
+
+        }
+
+        let where = `
+            WHERE
+                DATE(ssi.quote_date) BETWEEN ? AND ?
+        `;
+
+        const queryParams = [
+            start_date,
+            end_date
+        ];
+
+        // Supplier Filter
+
+        if (supplier_from && supplier_to) {
+
+            where += `
+                AND sp.name >= ?
+                AND sp.name <= ?
+            `;
+
+            queryParams.push(
+                supplier_from,
+                supplier_to
+            );
+
+        }
+
+        // Status Filter
+
+        if (status === "Active") {
+
+            where += ` AND sp.is_deleted = 0 `;
+
+        }
+        else if (status === "Inactive") {
+
+            where += ` AND sp.is_deleted = 1 `;
+
+        }
+
+        const sql = `
+
+            SELECT
+
+                ssi.id,
+
+                DATE_FORMAT(ssi.quote_date,'%Y-%m-%d') AS invoice_date,
+
+                ssi.reference_no,
+
+                ssi.customer_invoice_no,
+
+                sp.name AS supplier_name,
+
+                DATE_FORMAT(ssi.due_date,'%Y-%m-%d') AS due_date,
+
+                0 AS anticipated_payment,
+
+                ssi.sumof_finalamount AS exclusive,
+
+                (
+                    ssi.sumof_vatincl
+                    - ssi.sumof_finalamount
+                ) AS vat,
+
+                ssi.sumof_vatincl AS total_purchase,
+
+                ssi.sumof_vatincl AS total_outstanding,
+
+                ssi.final_base_currency
+
+            FROM supplier_shipment_invoice ssi
+
+            INNER JOIN tbl_suppliers sp
+                ON sp.id = ssi.supplier_id
+
+            LEFT JOIN tbl_shipments ts
+                ON ts.id = ssi.shipment_id
+
+            ${where}
+
+            ORDER BY
+                ssi.quote_date ASC,
+                ssi.reference_no ASC
+
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+
+            if (err) {
+
+                return res.status(500).json({
+
+                    success: false,
+                    message: err.message
+
+                });
+
+            }
+
+            let data = [];
+
+            let grandExclusive = 0;
+            let grandVat = 0;
+            let grandPurchase = 0;
+            let grandOutstanding = 0;
+
+            rows.forEach(row => {
+
+                const invoice = {
+
+                    id: row.id,
+
+                    date: row.invoice_date,
+
+                    document_no: row.reference_no,
+
+                    supplier_invoice_no: row.customer_invoice_no,
+
+                    supplier: row.supplier_name,
+
+                    due_date: row.due_date,
+
+                    anticipated_payment: Number(row.anticipated_payment || 0),
+
+                    currency: row.final_base_currency,
+
+                    exclusive: Number(row.exclusive || 0),
+
+                    vat: Number(row.vat || 0),
+
+                    total_purchase: Number(row.total_purchase || 0),
+
+                    total_outstanding: Number(row.total_outstanding || 0)
+
+                };
+
+                if (
+                    exclude_zero_balance &&
+                    invoice.total_outstanding === 0
+                ) {
+                    return;
+                }
+
+                grandExclusive += invoice.exclusive;
+                grandVat += invoice.vat;
+                grandPurchase += invoice.total_purchase;
+                grandOutstanding += invoice.total_outstanding;
+
+                data.push(invoice);
+
+            });
+
+            return res.status(200).json({
+
+                success: true,
+
+                filters: {
+
+                    start_date,
+                    end_date,
+                    supplier_from: supplier_from || "All",
+                    supplier_to: supplier_to || "All",
+                    status,
+                    style,
+                    exclude_zero_balance,
+                    use_foreign_currency
+
+                },
+
+                data,
+
+                grand_total: {
+
+                    exclusive: Number(grandExclusive.toFixed(2)),
+                    vat: Number(grandVat.toFixed(2)),
+                    total_purchase: Number(grandPurchase.toFixed(2)),
+                    total_outstanding: Number(grandOutstanding.toFixed(2))
+
+                }
+
+            });
+
+        });
+
+    }
+    catch (error) {
+
+        return res.status(500).json({
+
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+
+        });
+
+    }
+
+};
+
 module.exports = {
     AdminLogin, ChangePassword, PrivacyPolicy, GetPrivacy, TermCondition, GetTerms, Addfreight,
     GetFreightAdmin, GetReadyFreightAdmin, ManageFreightStatus, EditFreight, UploadFreightDocument, GetFreightById, DeleteFreight, AddCountryOrigin, getCountryOriginList,
@@ -18250,7 +30434,13 @@ module.exports = {
     InprocessCleranceOrder, StillToCleranceOrder, addWarehouse, editWarehouse, getWarehouse, getWarehouseBySupplierId, DeleteWarehouse, editWarehouseDetails, GetCountries,
     GetCitiesByCountry, RevertOrder, addWarehouseProduct, getWarehouseOrderProduct, getWarehouseProductById, updateWarehouseProduct, deleteWarehouseProduct, updateClientWarehouseProduct, DeleteWarehouseProduct, GetFreightImages,
     DeleteDocument, clearanceDocument, ShipmentDocument, GetDeliveredOrder, OrderInvoiceList, revertMovedFreight, createFreightFolders, GetShipEstimateSupplierId, ApproveShippingEstimate,
-    addEstimateShippingQuote, GetQuoteShipEstimateById, GetQuoteShipEstimateBySupplier, getAllFreightQuoteList, NewGetAllBatch, assignWarehouseSupplierToOrder, getAllAssignedOrdersToWarehouse, GetFreightAdminById,
+    addEstimateShippingQuote, deleteEstimateShippingQuote, GetQuoteShipEstimateById, GetQuoteShipEstimateBySupplier, getAllFreightQuoteList, NewGetAllBatch, assignWarehouseSupplierToOrder, getAllAssignedOrdersToWarehouse, GetFreightAdminById,
     getAllAssignedOrdersToWarehouseBySupplier, assignWarehouseOrderToSupplier, getAssignedOrdersBySupplier, updateWareHouseProductBySupplier,
-    addEstimatSupplierInvoice, getWaybillDropdown, getAllSupplierInvoices, deleteSupplierInvoice, getSupplierInvoiceById, copySupplierInvoice
+    addEstimatSupplierInvoice, getWaybillDropdown, getAllSupplierInvoices, deleteSupplierInvoice, getSupplierInvoiceById, copySupplierInvoice, addFreightQuoteInvoice, deleteFreightQuoteInvoice, GetFreightQuoteInvoiceById,
+    getAllFreightQuoteInvoiceList, GetFreightQuoteInvoiceBySupplier, getAdminFrieghtComponentList, addUpdateFreightQuotes, GetFreightQuoteEstimateById, GetFreightQuoteEstimateList, deleteFreightQuoteEstimateById,
+    approveRejectFreightQuote, getFreightQuoteEstimateBySupplier, addUpdateSupplierShipmentInvoice, GetSupplierShipmentInvoiceById, getAllSupplierShipmentInvoices, deleteSupplierShipmentInvoiceById, getFreightOrderList,
+    getCompanyAddresses, getCompanyAddressById, addUpdateCountryAddresses, deleteCountryAddress, addUpdateNewFreightQuoteInvoice, GetNewFreightQuoteInvoiceById, getAllNewFreightQuoteInvoices, deleteNewFreightQuoteInvoiceById, createQuoteInvoice,
+    getCompanyAddressWithBankDetails, confirmCollectionCompletion, addUpdateCollectionDelivery, getCustomerQuotesReport, getCustomerInvoicesReport, getCustomerBalancesOutstandingReport, getCustomerUnallocatedReceiptsReport,
+    GetCustomerQuoteReportById, getCustomerQuotesByItemReport, getSalesByCustomerReport, getSalesByCustomerSummaryReport, GetSalesByItemReport, getSalesBySalesRepReport, getSupplierBalancesDaysOutstandingReport,
+    getSupplierInvoicesReport
 }

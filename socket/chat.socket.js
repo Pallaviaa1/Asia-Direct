@@ -9,7 +9,7 @@ module.exports = (io) => {
 
         socket.on("sendMessage", (data) => {
             io.to("chat_" + data.conversation_id)
-                .emit("newMessage", data);
+                .emit("receiveMessage", data);
         });
 
         socket.on("disconnect", () => {
