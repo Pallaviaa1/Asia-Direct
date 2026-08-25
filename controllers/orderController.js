@@ -3777,93 +3777,429 @@ END AS Credit
 };
  */
 
+
+// const AddOrUpdateBookingInstruction = async (req, res) => {
+//     try {
+//         const {
+//             order_id, // check by this
+//             bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
+//             bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
+//             bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
+//             bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
+//             bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
+//             bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
+//             bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
+//             bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
+//             bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
+//             bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
+//             bk_loading_facilities, bk_desc_goods, bk_handling_req, billing_requirement_desc
+//         } = req.body;
+
+//         // Ensure all values fallback to empty string if null/undefined
+//         const values = [
+//             order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
+//             bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
+//             bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
+//             bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
+//             bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
+//             bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
+//             bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
+//             bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
+//             bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
+//             bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
+//             bk_loading_facilities, bk_desc_goods, bk_handling_req, billing_requirement_desc
+//         ].map(v => v != null ? v : "");
+
+//         // Check if booking_instruction exists for order_id
+//         con.query(`SELECT id FROM booking_instruction WHERE order_id = ?`, [order_id], (err, rows) => {
+//             if (err) throw err;
+
+//             if (rows.length > 0) {
+//                 // UPDATE existing record
+//                 const updateQuery = `
+//                     UPDATE booking_instruction SET
+//                         bk_shipper=?, bk_ship_add=?, bk_ship_contact=?, bk_ship_tel_email=?, bk_ship_poNo=?,
+//                         bk_ship_custCode=?, bk_ship_regNum=?, bk_ship_refNo=?, bk_consignee=?, bk_consg_add=?,
+//                         bk_consg_notfParty=?, bk_consg_ContPersn=?, bk_consg_tel=?, bk_consg_portDischg=?,
+//                         bk_xdoc_provider=?, bk_comm_Invoice=?, bk_count_CommInv=?, bk_packing_list=?,
+//                         bk_custm_doc=?, bk_trasprt_doc=?, bk_MSDS=?, bk_CuntyTrd_SADC=?, bk_letter_credit=?,
+//                         bk_track_contPersn=?, bk_podDoc_contPersn=?, bk_exprt_modTransport=?, bk_comTerm_sales=?,
+//                         bk_Instru_origin=?, bk_Instru_des=?, bk_Insur_cover=?, bk_estim_supp=?, bk_estim_ref=?,
+//                         bk_org_exptCharge=?, bk_charges_destination=?, bk_intenFreig_charge=?, bk_duties_taxes=?, bk_hazard_cargo=?,
+//                         bk_cargo_packed=?, bk_battery_MSDS=?, bk_cnsolid_mulShipp=?, bk_preship_insp=?,
+//                         bk_export_Import=?, bk_coll_dddress=?, bk_opening_times=?, bk_conName_tel=?,
+//                         bk_loading_facilities=?, bk_desc_goods=?, bk_handling_req=?, billing_requirement_desc=?
+//                     WHERE order_id=?
+//                 `;
+//                 const updateValues = values.slice(1).concat(order_id); // skip order_id for SET, but pass it in WHERE
+//                 con.query(updateQuery, updateValues, (err, result) => {
+//                     if (err) throw err;
+//                     res.status(200).send({ success: true, message: "Booking instruction updated successfully" });
+//                 });
+//             } else {
+//                 // INSERT new record
+//                 const insertQuery = `
+//                     INSERT INTO booking_instruction (
+//                         order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo, bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, 
+//                         bk_consg_add, bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg, bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list, bk_custm_doc,
+//                         bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
+//                         bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales, bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
+//                         bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
+//                         bk_cargo_packed, bk_battery_MSDS, 
+//                         bk_cnsolid_mulShipp, bk_preship_insp,
+//                         bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
+//                         bk_loading_facilities, bk_desc_goods, bk_handling_req, billing_requirement_desc
+//                     ) VALUES (
+//         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+//         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+//         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+//         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+//         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+//         ?
+//     )
+//                 `;
+//                 con.query(insertQuery, values, (err, result) => {
+//                     if (err) throw err;
+//                     res.status(200).send({ success: true, message: "Booking instruction added successfully" });
+//                 });
+//             }
+//         });
+//     } catch (error) {
+//         res.status(500).send({ success: false, message: error.message });
+//     }
+// };
+
+
 const AddOrUpdateBookingInstruction = async (req, res) => {
     try {
         const {
-            order_id, // check by this
-            bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
-            bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
-            bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
-            bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
-            bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-            bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
-            bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-            bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-            bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
-            bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-            bk_loading_facilities, bk_desc_goods, bk_handling_req
+            order_id,
+            bk_shipper,
+            bk_ship_add,
+            bk_ship_contact,
+            bk_ship_tel_email,
+            bk_ship_poNo,
+            bk_ship_custCode,
+            bk_ship_regNum,
+            bk_ship_refNo,
+            bk_consignee,
+            bk_consg_add,
+            bk_consg_notfParty,
+            bk_consg_ContPersn,
+            bk_consg_tel,
+            bk_consg_portDischg,
+            bk_xdoc_provider,
+            bk_comm_Invoice,
+            bk_count_CommInv,
+            bk_packing_list,
+            bk_custm_doc,
+            bk_trasprt_doc,
+            bk_MSDS,
+            bk_CuntyTrd_SADC,
+            bk_letter_credit,
+            bk_track_contPersn,
+            bk_podDoc_contPersn,
+            bk_exprt_modTransport,
+            bk_comTerm_sales,
+            bk_Instru_origin,
+            bk_Instru_des,
+            bk_Insur_cover,
+            bk_estim_supp,
+            bk_estim_ref,
+            bk_org_exptCharge,
+            bk_charges_destination,
+            bk_intenFreig_charge,
+            bk_duties_taxes,
+            bk_hazard_cargo,
+            bk_cargo_packed,
+            bk_battery_MSDS,
+            bk_cnsolid_mulShipp,
+            bk_preship_insp,
+            bk_export_Import,
+            bk_coll_dddress,
+            bk_opening_times,
+            bk_conName_tel,
+            bk_loading_facilities,
+            bk_desc_goods,
+            bk_handling_req,
+            billing_requirement_desc
         } = req.body;
 
-        // Ensure all values fallback to empty string if null/undefined
+        // Validate order_id
+        if (!order_id) {
+            return res.status(400).send({
+                success: false,
+                message: "order_id is required"
+            });
+        }
+
+        // All values in exact same order as database columns
         const values = [
-            order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
-            bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
-            bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
-            bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
-            bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-            bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
-            bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-            bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-            bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
-            bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-            bk_loading_facilities, bk_desc_goods, bk_handling_req
+            order_id,
+            bk_shipper,
+            bk_ship_add,
+            bk_ship_contact,
+            bk_ship_tel_email,
+            bk_ship_poNo,
+            bk_ship_custCode,
+            bk_ship_regNum,
+            bk_ship_refNo,
+            bk_consignee,
+
+            bk_consg_add,
+            bk_consg_notfParty,
+            bk_consg_ContPersn,
+            bk_consg_tel,
+            bk_consg_portDischg,
+            bk_xdoc_provider,
+            bk_comm_Invoice,
+            bk_count_CommInv,
+            bk_packing_list,
+            bk_custm_doc,
+
+            bk_trasprt_doc,
+            bk_MSDS,
+            bk_CuntyTrd_SADC,
+            bk_letter_credit,
+            bk_track_contPersn,
+            bk_podDoc_contPersn,
+            bk_exprt_modTransport,
+            bk_comTerm_sales,
+            bk_Instru_origin,
+            bk_Instru_des,
+
+            bk_Insur_cover,
+            bk_estim_supp,
+            bk_estim_ref,
+            bk_org_exptCharge,
+            bk_charges_destination,
+            bk_intenFreig_charge,
+            bk_duties_taxes,
+            bk_hazard_cargo,
+            bk_cargo_packed,
+            bk_battery_MSDS,
+
+            bk_cnsolid_mulShipp,
+            bk_preship_insp,
+            bk_export_Import,
+            bk_coll_dddress,
+            bk_opening_times,
+            bk_conName_tel,
+            bk_loading_facilities,
+            bk_desc_goods,
+            bk_handling_req,
+            billing_requirement_desc
         ].map(v => v != null ? v : "");
 
-        // Check if booking_instruction exists for order_id
-        con.query(`SELECT id FROM booking_instruction WHERE order_id = ?`, [order_id], (err, rows) => {
-            if (err) throw err;
+        // =========================================================
+        // DATABASE COLUMNS
+        // =========================================================
 
-            if (rows.length > 0) {
-                // UPDATE existing record
-                const updateQuery = `
-                    UPDATE booking_instruction SET
-                        bk_shipper=?, bk_ship_add=?, bk_ship_contact=?, bk_ship_tel_email=?, bk_ship_poNo=?,
-                        bk_ship_custCode=?, bk_ship_regNum=?, bk_ship_refNo=?, bk_consignee=?, bk_consg_add=?,
-                        bk_consg_notfParty=?, bk_consg_ContPersn=?, bk_consg_tel=?, bk_consg_portDischg=?,
-                        bk_xdoc_provider=?, bk_comm_Invoice=?, bk_count_CommInv=?, bk_packing_list=?,
-                        bk_custm_doc=?, bk_trasprt_doc=?, bk_MSDS=?, bk_CuntyTrd_SADC=?, bk_letter_credit=?,
-                        bk_track_contPersn=?, bk_podDoc_contPersn=?, bk_exprt_modTransport=?, bk_comTerm_sales=?,
-                        bk_Instru_origin=?, bk_Instru_des=?, bk_Insur_cover=?, bk_estim_supp=?, bk_estim_ref=?,
-                        bk_org_exptCharge=?, bk_charges_destination=?, bk_intenFreig_charge=?, bk_duties_taxes=?, bk_hazard_cargo=?,
-                        bk_cargo_packed=?, bk_battery_MSDS=?, bk_cnsolid_mulShipp=?, bk_preship_insp=?,
-                        bk_export_Import=?, bk_coll_dddress=?, bk_opening_times=?, bk_conName_tel=?,
-                        bk_loading_facilities=?, bk_desc_goods=?, bk_handling_req=?
-                    WHERE order_id=?
-                `;
-                const updateValues = values.slice(1).concat(order_id); // skip order_id for SET, but pass it in WHERE
-                con.query(updateQuery, updateValues, (err, result) => {
-                    if (err) throw err;
-                    res.status(200).send({ success: true, message: "Booking instruction updated successfully" });
-                });
-            } else {
-                // INSERT new record
-                const insertQuery = `
-                    INSERT INTO booking_instruction (
-                        order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo, bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, 
-                        bk_consg_add, bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg, bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list, bk_custm_doc,
-                        bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-                        bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales, bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-                        bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-                        bk_cargo_packed, bk_battery_MSDS, 
-                        bk_cnsolid_mulShipp, bk_preship_insp,
-                        bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-                        bk_loading_facilities, bk_desc_goods, bk_handling_req
-                    ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?
-                    )
-                `;
-                con.query(insertQuery, values, (err, result) => {
-                    if (err) throw err;
-                    res.status(200).send({ success: true, message: "Booking instruction added successfully" });
-                });
+        const columns = [
+            "order_id",
+            "bk_shipper",
+            "bk_ship_add",
+            "bk_ship_contact",
+            "bk_ship_tel_email",
+            "bk_ship_poNo",
+            "bk_ship_custCode",
+            "bk_ship_regNum",
+            "bk_ship_refNo",
+            "bk_consignee",
+
+            "bk_consg_add",
+            "bk_consg_notfParty",
+            "bk_consg_ContPersn",
+            "bk_consg_tel",
+            "bk_consg_portDischg",
+            "bk_xdoc_provider",
+            "bk_comm_Invoice",
+            "bk_count_CommInv",
+            "bk_packing_list",
+            "bk_custm_doc",
+
+            "bk_trasprt_doc",
+            "bk_MSDS",
+            "bk_CuntyTrd_SADC",
+            "bk_letter_credit",
+            "bk_track_contPersn",
+            "bk_podDoc_contPersn",
+            "bk_exprt_modTransport",
+            "bk_comTerm_sales",
+            "bk_Instru_origin",
+            "bk_Instru_des",
+
+            "bk_Insur_cover",
+            "bk_estim_supp",
+            "bk_estim_ref",
+            "bk_org_exptCharge",
+            "bk_charges_destination",
+            "bk_intenFreig_charge",
+            "bk_duties_taxes",
+            "bk_hazard_cargo",
+            "bk_cargo_packed",
+            "bk_battery_MSDS",
+
+            "bk_cnsolid_mulShipp",
+            "bk_preship_insp",
+            "bk_export_Import",
+            "bk_coll_dddress",
+            "bk_opening_times",
+            "bk_conName_tel",
+            "bk_loading_facilities",
+            "bk_desc_goods",
+            "bk_handling_req",
+            "billing_requirement_desc"
+        ];
+
+        // =========================================================
+        // SAFETY CHECK
+        // =========================================================
+
+        console.log("======================================");
+        console.log("Booking Instruction");
+        console.log("Columns count:", columns.length);
+        console.log("Values count:", values.length);
+        console.log("======================================");
+
+        if (columns.length !== values.length) {
+            return res.status(500).send({
+                success: false,
+                message: `Column/value count mismatch. Columns: ${columns.length}, Values: ${values.length}`
+            });
+        }
+
+        // Check if booking_instruction exists for this order_id
+        con.query(
+            `SELECT id FROM booking_instruction WHERE order_id = ? LIMIT 1`,
+            [order_id],
+            (err, rows) => {
+
+                if (err) {
+                    console.error("SELECT ERROR:", err);
+
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                // =====================================================
+                // UPDATE EXISTING RECORD
+                // =====================================================
+
+                if (rows.length > 0) {
+
+                    // Remove order_id from UPDATE SET
+                    const updateColumns = columns.filter(
+                        column => column !== "order_id"
+                    );
+
+                    // Generate:
+                    // bk_shipper = ?,
+                    // bk_ship_add = ?,
+                    // ...
+                    const updateSet = updateColumns
+                        .map(column => `${column} = ?`)
+                        .join(", ");
+
+                    // Values without order_id
+                    const updateValues = values.slice(1);
+
+                    // Add order_id for WHERE
+                    updateValues.push(order_id);
+
+                    const updateQuery = `
+                        UPDATE booking_instruction
+                        SET ${updateSet}
+                        WHERE order_id = ?
+                    `;
+
+                    console.log("UPDATE columns:", updateColumns.length);
+                    console.log("UPDATE values:", updateValues.length);
+
+                    con.query(
+                        updateQuery,
+                        updateValues,
+                        (err, result) => {
+
+                            if (err) {
+                                console.error("UPDATE ERROR:", err);
+
+                                return res.status(500).send({
+                                    success: false,
+                                    message: err.message
+                                });
+                            }
+
+                            return res.status(200).send({
+                                success: true,
+                                message: "Booking instruction updated successfully",
+                                data: result
+                            });
+                        }
+                    );
+
+                } else {
+
+                    // =====================================================
+                    // INSERT NEW RECORD
+                    // =====================================================
+
+                    // Automatically generate 50 placeholders
+                    const placeholders = values
+                        .map(() => "?")
+                        .join(", ");
+
+                    const insertQuery = `
+                        INSERT INTO booking_instruction (
+                            ${columns.join(", ")}
+                        )
+                        VALUES (
+                            ${placeholders}
+                        )
+                    `;
+
+                    console.log("INSERT columns:", columns.length);
+                    console.log("INSERT values:", values.length);
+                    console.log(
+                        "INSERT placeholders:",
+                        (insertQuery.match(/\?/g) || []).length
+                    );
+
+                    con.query(
+                        insertQuery,
+                        values,
+                        (err, result) => {
+
+                            if (err) {
+                                console.error("INSERT ERROR:", err);
+
+                                return res.status(500).send({
+                                    success: false,
+                                    message: err.message
+                                });
+                            }
+
+                            return res.status(200).send({
+                                success: true,
+                                message: "Booking instruction added successfully",
+                                data: result
+                            });
+                        }
+                    );
+                }
             }
-        });
+        );
+
     } catch (error) {
-        res.status(500).send({ success: false, message: error.message });
+
+        console.error("BOOKING INSTRUCTION ERROR:", error);
+
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
     }
 };
 

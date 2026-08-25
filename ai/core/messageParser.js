@@ -313,7 +313,9 @@ function extractStaffFocus(message) {
 
 function isStaffRequest(message) {
     const text = normalizeMessage(message).toLowerCase();
-    if (/\bstaff\s+assign|\bassign(?:ed)?\s+to\s+staff\b|\bstaff\s+kpi\b/.test(text)) return false;
+    if (/\bstaff\s+assign|\bassign(?:ed)?\s+to\s+staff\b|\bstaff\s+kpi\b|\bstaff\s+leaves?\b/.test(text)) {
+        return false;
+    }
     if (isCountStaffRequest(message)) return true;
     if (/\b(edit|manage)\s+staff\b/.test(text)) return true;
     if (/\bstaff\s+(profile|details?|directory|list|permissions?|member)\b/.test(text)) return true;
@@ -333,12 +335,14 @@ function isCountStaffRequest(message) {
     return (
         /\bstaff\b/.test(text) &&
         /\b(count|total|how\s*many|number\s+of)\b/.test(text) &&
-        !/\b(freights?|orders?|invoices?|permissions?)\b/.test(text)
+        !/\b(freights?|orders?|invoices?|permissions?|leaves?|leave\s+requests?)\b/.test(text)
     );
 }
 
 function extractClientKpiSearchTerm(message) {
     const text = normalizeMessage(message);
+    const estimateName = extractClientEstimateAmountName(message);
+    if (estimateName) return estimateName;
     const patterns = [
         /(?:client\s*)?kpi\s+(?:for|of|about|from)?\s*(.+)$/i,
         /(?:search|find|show|list)\s+(?:client\s*)?kpi\s+(?:for|of)?\s*(.+)$/i,
@@ -360,17 +364,78 @@ function extractClientKpiSearchTerm(message) {
 
 function extractClientKpiFocus(message) {
     const text = normalizeMessage(message).toLowerCase();
-    if (!/\bkpi\b/.test(text) && !/\bdelivered\s+orders?\b/.test(text)) return null;
+    if (
+        !/\bkpi\b/.test(text) &&
+        !/\bdelivered\s+orders?\b/.test(text) &&
+        !isClientEstimateAmountRequest(message)
+    ) {
+        return null;
+    }
     if (/\bdelivered\s+orders?\b|\bdelivered\b/.test(text)) return 'delivered_orders';
-    if (/\btotal\s+amount\b|\bamount\b/.test(text)) return 'total_amount';
+    if (
+        /\btotal\s+amount\b|\bamount\b|\bestimate\s+amount\b|\btotal\s+estimate\b/.test(text) ||
+        isClientEstimateAmountRequest(message)
+    ) {
+        return 'total_amount';
+    }
     if (/\bfreights?\b/.test(text)) return 'freight';
     if (/\borders?\b/.test(text)) return 'orders';
+    return null;
+}
+
+/** "Total estimate amount of TGOOD South Africa" → Client KPI total amount (not a single freight). */
+function isClientEstimateAmountRequest(message) {
+    const text = normalizeMessage(message).toLowerCase();
+    if (extractFreightNumber(message) || extractBatchNumber(message) || extractOrderNumber(message)) {
+        return false;
+    }
+    if (extractQuoteReference(message)) return false;
+    if (/\bof\s+f-\d/i.test(text)) return false;
+
+    const hasEstimateAmount =
+        /\btotal\s+estimate\s+amount\b/.test(text) ||
+        /\bestimate\s+amount\b/.test(text) ||
+        /\btotal\s+estimate\b/.test(text) ||
+        (/\btotal\s+amount\b/.test(text) && !/\binvoice\b|\bcashbook\b|\bsage\b/.test(text)) ||
+        (/\btotal\b/.test(text) && /\bestimate\b/.test(text) && /\bamount\b/.test(text));
+
+    if (!hasEstimateAmount) return false;
+
+    // Needs a client/person/company target: "of X" / "for X" / "client X"
+    if (/\b(?:of|for)\s+[a-z0-9]/i.test(text) || /\bclient\s+[a-z0-9]/i.test(text)) {
+        return true;
+    }
+    return false;
+}
+
+function extractClientEstimateAmountName(message) {
+    if (!isClientEstimateAmountRequest(message)) return null;
+    const text = normalizeMessage(message);
+    const patterns = [
+        /(?:total\s+)?estimate\s+amount\s+(?:of|for)\s+(?:client\s+)?(.+)$/i,
+        /total\s+estimate\s+(?:amount\s+)?(?:of|for)\s+(?:client\s+)?(.+)$/i,
+        /total\s+amount\s+(?:of|for)\s+(?:client\s+)?(.+)$/i,
+        /(?:estimate|amount)\s+(?:of|for)\s+(?:client\s+)?(.+)$/i,
+        /(?:of|for)\s+(?:client\s+)?(.+)$/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (!m?.[1]) continue;
+        let name = m[1]
+            .replace(/\b(please|thanks|kpi|module|client|customer)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (name && name.length >= 2 && !/^F-\d/i.test(name) && !/^OR0*\d/i.test(name)) {
+            return name;
+        }
+    }
     return null;
 }
 
 function isClientKpiRequest(message) {
     const text = normalizeMessage(message).toLowerCase();
     if (/\bstaff\s+kpi\b|\bkpi\s+dashboard\b|\bkpi\s+data\b/.test(text)) return false;
+    if (isClientEstimateAmountRequest(message)) return true;
     if (/\bclient\s*kpi\b|\bkpi\s*client\b|\bclients?\s+kpi\b/.test(text)) return true;
     if (/\bkpi\b/.test(text) && /\b(client|customer|tgood|show|list|search|module|table|report)\b/.test(text)) {
         return true;
@@ -382,7 +447,8 @@ function isClientKpiRequest(message) {
 function isCountClientKpiRequest(message) {
     const text = normalizeMessage(message).toLowerCase();
     if (!isClientKpiRequest(message)) return false;
-    if (/\btotal\s+amount\b/.test(text)) return false;
+    if (isClientEstimateAmountRequest(message)) return false;
+    if (/\btotal\s+amount\b|\bestimate\s+amount\b/.test(text)) return false;
     return /\b(count|how\s*many|number\s+of)\b/.test(text) || /\btotal\s+(client\s*)?kpi\b/.test(text);
 }
 
@@ -538,6 +604,11 @@ function extractFreightFocus(message) {
         isMyOrdersRequest(message) ||
         extractOrderNumber(message)
     ) {
+        return null;
+    }
+
+    // Client-level total estimate amount → Client KPI, not a single freight field
+    if (isClientEstimateAmountRequest(message) || isClientKpiRequest(message)) {
         return null;
     }
 
@@ -1852,6 +1923,118 @@ function isCountTaskRequest(message) {
     );
 }
 
+/** Leave Calendar / staff leave requests (tbl_leaves) */
+function isLeaveRequest(message) {
+    const text = normalizeMessage(message).toLowerCase();
+    if (/\bleave\s+blank\b|\bleave\s+empty\b|\bleave\s+as\s+is\b/.test(text)) return false;
+    if (isCountLeaveRequest(message)) return true;
+    if (/\bleave\s+calendar\b|\bleave\s+requests?\b|\bstaff\s+leaves?\b/.test(text)) return true;
+    if (/\b(?:my|pending|approved|rejected)\s+leaves?\b/.test(text)) return true;
+    if (/\bleaves?\s+(?:for|of|from|by|about|pending|approved|rejected|calendar|request)\b/.test(text)) {
+        return true;
+    }
+    if (/\b(?:show|list|find|search|get)\s+(?:all\s+)?(?:staff\s+)?leaves?\b/.test(text)) return true;
+    if (/\bleave\s*(?:id|#)?\s*\d+/i.test(text)) return true;
+    if (/^leaves?\b/.test(text.trim())) return true;
+    return false;
+}
+
+function isCountLeaveRequest(message) {
+    const text = normalizeMessage(message).toLowerCase();
+    if (/\bleave\s+blank\b/.test(text)) return false;
+    return (
+        /\b(count|total|how\s*many|number\s+of)\b/.test(text) &&
+        (/\bleaves?\b/.test(text) || /\bleave\s+(?:request|calendar)\b/.test(text))
+    );
+}
+
+function extractLeaveStatus(message) {
+    const text = normalizeMessage(message).toLowerCase();
+    if (/\bpending\b/.test(text)) return 'pending';
+    if (/\bapproved\b|\bapprove[d]?\b/.test(text) && isLeaveRequest(message)) return 'approved';
+    if (/\brejected\b|\breject(?:ed)?\b/.test(text) && isLeaveRequest(message)) return 'rejected';
+    return null;
+}
+
+function extractLeaveMonthYear(message) {
+    const text = normalizeMessage(message).toLowerCase();
+    const months = {
+        january: 1,
+        jan: 1,
+        february: 2,
+        feb: 2,
+        march: 3,
+        mar: 3,
+        april: 4,
+        apr: 4,
+        may: 5,
+        june: 6,
+        jun: 6,
+        july: 7,
+        jul: 7,
+        august: 8,
+        aug: 8,
+        september: 9,
+        sep: 9,
+        sept: 9,
+        october: 10,
+        oct: 10,
+        november: 11,
+        nov: 11,
+        december: 12,
+        dec: 12,
+    };
+    const named = text.match(
+        /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{4})\b/i
+    );
+    if (named) {
+        return { month: months[named[1].toLowerCase()], year: Number(named[2]) };
+    }
+    const numbered = text.match(/\b(?:month\s*)?(\d{1,2})[\/\-](\d{4})\b/);
+    if (numbered) {
+        const m = Number(numbered[1]);
+        const y = Number(numbered[2]);
+        if (m >= 1 && m <= 12) return { month: m, year: y };
+    }
+    const yearOnly = text.match(/\b(20\d{2})\b/);
+    const monthOnly = text.match(
+        /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b/i
+    );
+    if (monthOnly && yearOnly) {
+        return { month: months[monthOnly[1].toLowerCase()], year: Number(yearOnly[1]) };
+    }
+    if (monthOnly && isLeaveRequest(message)) {
+        const now = new Date();
+        return { month: months[monthOnly[1].toLowerCase()], year: now.getFullYear() };
+    }
+    return null;
+}
+
+function extractLeaveSearchTerm(message) {
+    const text = normalizeMessage(message);
+    const idMatch = text.match(/\bleave\s*(?:id|#|request)?\s*(\d{1,8})\b/i);
+    if (idMatch) return idMatch[1];
+    const patterns = [
+        /(?:leave\s+calendar|leave\s+requests?|staff\s+leaves?|leaves?)\s+(?:for|of|from|by|about)\s+(.+)$/i,
+        /(?:search|find|show|list)\s+(?:leave\s+calendar|leave\s+requests?|staff\s+leaves?|leaves?)\s+(?:for|of)?\s*(.+)$/i,
+        /(?:leave\s+calendar|leave\s+requests?|leaves?)\s+(.+)$/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m && m[1]) {
+            let name = m[1]
+                .replace(
+                    /\b(please|thanks|pending|approved|rejected|all|show|list|find|search|calendar|request|requests|leave|leaves|staff|august|january|february|march|april|may|june|july|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|\d{4})\b/gi,
+                    ' '
+                )
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (name && name.length >= 2) return name;
+        }
+    }
+    return null;
+}
+
 /** Contact Us Enquiries (tbl_contact_us) — not Customer Query / Dispute */
 function extractContactEnquiryNature(message) {
     const text = normalizeMessage(message).toLowerCase();
@@ -2171,6 +2354,8 @@ module.exports = {
     extractClientKpiFocus,
     isClientKpiRequest,
     isCountClientKpiRequest,
+    isClientEstimateAmountRequest,
+    extractClientEstimateAmountName,
     extractInvoiceClientName,
     extractFreightFocus,
     extractFreightListClientName,
@@ -2257,6 +2442,11 @@ module.exports = {
     extractTaskSearchTerm,
     isTaskManagerRequest,
     isCountTaskRequest,
+    isLeaveRequest,
+    isCountLeaveRequest,
+    extractLeaveStatus,
+    extractLeaveMonthYear,
+    extractLeaveSearchTerm,
     extractContactEnquiryNature,
     extractContactEnquiryFocus,
     extractContactEnquirySearchTerm,

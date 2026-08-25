@@ -54,6 +54,7 @@ const {
     countCollectionDelivery,
 } = require('../../services/data/collectionDeliveryService');
 const { searchTasks, getTaskById, countTasks } = require('../../services/data/taskManagerService');
+const { searchLeaves, getLeaveById, countLeaves } = require('../../services/data/leaveService');
 const {
     searchContactEnquiries,
     getContactEnquiryById,
@@ -116,6 +117,8 @@ const {
     formatCollectionDeliveryListResponse,
     formatTaskResponse,
     formatTaskListResponse,
+    formatLeaveResponse,
+    formatLeaveListResponse,
     formatContactEnquiryResponse,
     formatContactEnquiryListResponse,
     formatCountryOriginResponse,
@@ -169,6 +172,8 @@ const {
     isCountStaffRequest,
     isClientKpiRequest,
     isCountClientKpiRequest,
+    isClientEstimateAmountRequest,
+    extractClientEstimateAmountName,
     isDefaultHelpReply,
     isGreetingOrSmallTalk,
     greetingReply,
@@ -229,6 +234,11 @@ const {
     extractTaskSearchTerm,
     isTaskManagerRequest,
     isCountTaskRequest,
+    isLeaveRequest,
+    isCountLeaveRequest,
+    extractLeaveStatus,
+    extractLeaveMonthYear,
+    extractLeaveSearchTerm,
     extractContactEnquiryNature,
     extractContactEnquiryFocus,
     extractContactEnquirySearchTerm,
@@ -749,6 +759,45 @@ const TOOL_DEFINITIONS = [
         },
     },
     {
+        name: 'getLeaveDetails',
+        description:
+            'Get one Leave Calendar / staff leave request by leave id. Fields: Staff Name, Leave From, Leave To, Reason, Status, Admin Remark.',
+        parameters: {
+            type: 'object',
+            properties: {
+                leaveId: { type: 'number', description: 'Leave request id' },
+            },
+            required: ['leaveId'],
+        },
+    },
+    {
+        name: 'searchLeaves',
+        description:
+            'Leave Calendar list/search: staff leave requests (Staff Name, Leave From, Leave To, Reason, Status, Admin Remark). Filter by staff name, pending/approved/rejected, or calendar month/year.',
+        parameters: {
+            type: 'object',
+            properties: {
+                search: { type: 'string', description: 'Staff name or reason keyword' },
+                status: { type: 'string', description: 'pending, approved, or rejected' },
+                month: { type: 'number', description: 'Calendar month 1-12' },
+                year: { type: 'number', description: 'Calendar year e.g. 2026' },
+            },
+        },
+    },
+    {
+        name: 'countLeaves',
+        description: 'Count Leave Calendar / staff leave requests. Optional status and month/year.',
+        parameters: {
+            type: 'object',
+            properties: {
+                search: { type: 'string' },
+                status: { type: 'string' },
+                month: { type: 'number' },
+                year: { type: 'number' },
+            },
+        },
+    },
+    {
         name: 'getContactEnquiryDetails',
         description:
             'Get one Contact Us Enquiry by id. Fields: Name, Country, Email, Phone No, Subject, Nature of Enquiry, Message.',
@@ -944,8 +993,17 @@ const TOOL_DEFINITIONS = [
     },
     {
         name: 'countClients',
-        description: 'Count active clients visible in the system. Use for "how many clients", "count customers".',
-        parameters: { type: 'object', properties: {} },
+        description:
+            'Count clients/customers (user_type=3, not deleted). Matches dashboard total (active + inactive). Optional status: active or inactive.',
+        parameters: {
+            type: 'object',
+            properties: {
+                status: {
+                    type: 'string',
+                    description: 'Optional: active, inactive, or omit for all clients',
+                },
+            },
+        },
     },
     {
         name: 'getMyInvoices',
@@ -1302,12 +1360,18 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                                                                                                                                                                     ? 'searchTasks'
                                                                                                                                                                     : name === 'count_tasks' || name === 'counttasks' || name === 'count_task_manager'
                                                                                                                                                                         ? 'countTasks'
-                                                                                                                                                                        : name === 'get_contact_enquiry_details' || name === 'getcontactenquirydetails' || name === 'get_contact_enquiry' || name === 'get_enquiry'
-                                                                                                                                                                            ? 'getContactEnquiryDetails'
-                                                                                                                                                                            : name === 'search_contact_enquiries' || name === 'searchcontactenquiries' || name === 'list_contact_enquiries' || name === 'search_enquiries'
-                                                                                                                                                                                ? 'searchContactEnquiries'
-                                                                                                                                                                                : name === 'count_contact_enquiries' || name === 'countcontactenquiries' || name === 'count_enquiries'
-                                                                                                                                                                                    ? 'countContactEnquiries'
+                                                                                                                                                                        : name === 'get_leave_details' || name === 'getleavedetails' || name === 'get_leave'
+                                                                                                                                                                            ? 'getLeaveDetails'
+                                                                                                                                                                            : name === 'search_leaves' || name === 'searchleaves' || name === 'list_leaves' || name === 'search_leave_calendar' || name === 'leave_calendar'
+                                                                                                                                                                                ? 'searchLeaves'
+                                                                                                                                                                                : name === 'count_leaves' || name === 'countleaves' || name === 'count_leave_requests'
+                                                                                                                                                                                    ? 'countLeaves'
+                                                                                                                                                                                    : name === 'get_contact_enquiry_details' || name === 'getcontactenquirydetails' || name === 'get_contact_enquiry' || name === 'get_enquiry'
+                                                                                                                                                                                        ? 'getContactEnquiryDetails'
+                                                                                                                                                                                        : name === 'search_contact_enquiries' || name === 'searchcontactenquiries' || name === 'list_contact_enquiries' || name === 'search_enquiries'
+                                                                                                                                                                                            ? 'searchContactEnquiries'
+                                                                                                                                                                                            : name === 'count_contact_enquiries' || name === 'countcontactenquiries' || name === 'count_enquiries'
+                                                                                                                                                                                                ? 'countContactEnquiries'
                                                                                                                                                                                     : name === 'get_country_origin_details' || name === 'getcountryorigindetails' || name === 'get_country_origin'
                                                                                                                                                                                         ? 'getCountryOriginDetails'
                                                                                                                                                                                         : name === 'search_country_origins' || name === 'searchcountryorigins' || name === 'list_country_origins' || name === 'search_country_of_origin'
@@ -1333,6 +1397,25 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
             const freightNumber = args.freightNumber || args.freight_number;
             const data = await getFreightFullDetails(freightNumber, ctx);
             if (!data) {
+                const { getFreightByNumberUnscoped } = require('../../services/data/freightService');
+                const exists = await getFreightByNumberUnscoped(freightNumber);
+                if (exists && ctx.isCustomer) {
+                    return {
+                        reply:
+                            `Freight ${freightNumber} exists, but customer accounts can only view their own freights. ` +
+                            `This one belongs to another client. Your account freight example: ask about your own F-… number.`,
+                        data: null,
+                    };
+                }
+                if (exists && ctx.isStaff) {
+                    return {
+                        reply:
+                            `Freight ${freightNumber} exists, but it is outside your staff access ` +
+                            `(countries / assigned freights). Ask an admin to update your access countries, ` +
+                            `or use a staff user who covers China / South Africa for this shipment.`,
+                        data: null,
+                    };
+                }
                 return {
                     reply: `I could not find freight ${freightNumber}, or you may not have access to view it.`,
                     data: null,
@@ -1521,8 +1604,22 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
             }
 
             return {
+                // Full text reply is the source of truth for Order Freight Detail.
+                // Do not put `freight` / `orders` at the top level — React compact
+                // "Freight Details" cards (Status / Weight / POL) duplicate the reply.
                 reply: formatFreightResponse(data),
-                data,
+                data: {
+                    freightNumber: f.freight_number,
+                    client: data.client,
+                    estimateSummary: data.estimateSummary,
+                    estimateBreakdown: data.estimateBreakdown,
+                    freightOrder: data,
+                    uiHint: {
+                        preferReplyText: true,
+                        skipCompactFreightCard: true,
+                        cardType: 'freightOrder',
+                    },
+                },
             };
         }
 
@@ -1720,11 +1817,11 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                 }
                 if (focus === 'total_amount') {
                     return {
-                        reply: `Total amount for ${row.name}: ${row.total_amount_label}.`,
+                        reply: `Total estimate amount for ${row.name}: ${row.total_amount_label}.`,
                         data: {
                             focusedAnswer: {
                                 freightNumber: String(row.client_id),
-                                label: 'Total amount',
+                                label: 'Total estimate amount',
                                 value: String(row.total_amount_label),
                                 detail: null,
                             },
@@ -1831,14 +1928,32 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                 };
             }
 
-            const freights = await listFreightsByClientId(clientId, ctx);
+            // Staff/admin: align with Client KPI (freights that have orders).
+            // Customers still see all of their freights.
+            const kpiAligned = !ctx.isCustomer;
+            const [freights, kpiTotal, allTotal] = await Promise.all([
+                listFreightsByClientId(clientId, ctx, { kpiOnly: kpiAligned }),
+                kpiAligned ? countFreights(ctx, { clientId, kpiOnly: true }) : null,
+                countFreights(ctx, { clientId, kpiOnly: false }),
+            ]);
             if (freights[0]?.freight_number && sessionId) {
                 setLastFreightNumber(sessionId, freights[0].freight_number);
             }
 
             return {
-                reply: formatFreightListResponse(freights, client.full_name),
-                data: { client, freights },
+                reply: formatFreightListResponse(freights, client.full_name, {
+                    kpiAligned,
+                    kpiTotal: kpiTotal != null ? kpiTotal : freights.length,
+                    allTotal,
+                }),
+                data: {
+                    client,
+                    freights,
+                    count: {
+                        kpi: kpiTotal != null ? kpiTotal : freights.length,
+                        all: allTotal,
+                    },
+                },
             };
         }
 
@@ -1943,14 +2058,25 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                 };
             }
 
-            const orders = await listOrdersByClientId(clientId, ctx);
+            const kpiAligned = !ctx.isCustomer;
+            const [orders, kpiTotal] = await Promise.all([
+                listOrdersByClientId(clientId, ctx, { kpiOnly: kpiAligned }),
+                kpiAligned ? countOrders(ctx, { clientId, kpiOnly: true }) : null,
+            ]);
             if (orders[0]?.freight_number && sessionId) {
                 setLastFreightNumber(sessionId, orders[0].freight_number);
             }
 
             return {
-                reply: formatOrderListResponse(orders, client.full_name),
-                data: { client, orders },
+                reply: formatOrderListResponse(orders, client.full_name, {
+                    kpiAligned,
+                    kpiTotal: kpiTotal != null ? kpiTotal : orders.length,
+                }),
+                data: {
+                    client,
+                    orders,
+                    count: { kpi: kpiTotal != null ? kpiTotal : orders.length },
+                },
             };
         }
 
@@ -1976,11 +2102,12 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
 
         case 'countFreights': {
             const clientId = args.clientId || args.client_id ? Number(args.clientId || args.client_id) : null;
+            // Match dashboard /count-all language when counting the full visible set
             let scopeLabel = ctx.isCustomer
                 ? 'your account'
-                : ctx.isAdmin || ctx.hasFullAccess
+                : ctx.isAdmin || ctx.hasFullAccess || (ctx.isStaff && !ctx.accessCountries.length)
                     ? 'the system'
-                    : 'your accessible records';
+                    : 'your access countries';
 
             if (clientId) {
                 const client = await getClientById(clientId, ctx);
@@ -1993,10 +2120,21 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                 scopeLabel = client.full_name;
             }
 
-            const total = await countFreights(ctx, { clientId: clientId || undefined });
+            const total = await countFreights(ctx, {
+                clientId: clientId || undefined,
+                kpiOnly: !!(clientId && !ctx.isCustomer),
+            });
             const noun = total === 1 ? 'freight' : 'freights';
+            let reply;
+            if (clientId && !ctx.isCustomer) {
+                reply = `Total freights for ${scopeLabel} (Client KPI): ${total.toLocaleString()}.`;
+            } else if (clientId) {
+                reply = `Total ${noun} for ${scopeLabel}: ${total.toLocaleString()}.`;
+            } else {
+                reply = `Total ${noun}: ${total.toLocaleString()} (same basis as dashboard Freights card: not deleted).`;
+            }
             return {
-                reply: `Total ${noun} for ${scopeLabel}: ${total.toLocaleString()}.`,
+                reply,
                 data: {
                     count: {
                         entity: 'freights',
@@ -2027,10 +2165,17 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                 scopeLabel = client.full_name;
             }
 
-            const total = await countOrders(ctx, { clientId: clientId || undefined });
+            const total = await countOrders(ctx, {
+                clientId: clientId || undefined,
+                kpiOnly: !!(clientId && !ctx.isCustomer),
+            });
             const noun = total === 1 ? 'order' : 'orders';
+            const reply =
+                clientId && !ctx.isCustomer
+                    ? `Total ${noun} for ${scopeLabel} (Client KPI): ${total.toLocaleString()}.`
+                    : `Total ${noun} for ${scopeLabel}: ${total.toLocaleString()}.`;
             return {
-                reply: `Total ${noun} for ${scopeLabel}: ${total.toLocaleString()}.`,
+                reply,
                 data: {
                     count: {
                         entity: 'orders',
@@ -2049,10 +2194,29 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
                     data: { count: { entity: 'clients', total: 1, scope: 'your account' } },
                 };
             }
-            const total = await countClients(ctx);
+            const statusArg = args.status || null;
+            const result = await countClients(ctx, { status: statusArg || undefined });
+            const statusFilter = statusArg ? String(statusArg).toLowerCase() : null;
+            let reply;
+            if (statusFilter === 'active' || statusFilter === '1') {
+                reply = `Total active clients: ${result.total.toLocaleString()}.`;
+            } else if (statusFilter === 'inactive' || statusFilter === '0') {
+                reply = `Total inactive clients: ${result.total.toLocaleString()}.`;
+            } else {
+                reply = `Total clients: ${result.total.toLocaleString()} (Active: ${result.active.toLocaleString()}, Inactive: ${result.inactive.toLocaleString()}).`;
+            }
             return {
-                reply: `Total active clients: ${total.toLocaleString()}.`,
-                data: { count: { entity: 'clients', total, scope: 'the system' } },
+                reply,
+                data: {
+                    count: {
+                        entity: 'clients',
+                        total: result.total,
+                        active: result.active,
+                        inactive: result.inactive,
+                        status: statusFilter || 'all',
+                        scope: 'the system',
+                    },
+                },
             };
         }
 
@@ -2981,6 +3145,91 @@ async function executeTool(toolName, args = {}, ctx, sessionId) {
             };
         }
 
+        case 'getLeaveDetails': {
+            const leaveId = Number(args.leaveId || args.leave_id || args.id);
+            if (!Number.isFinite(leaveId)) {
+                return { reply: 'Please provide a leave request id.', data: null };
+            }
+            const row = await getLeaveById(leaveId, ctx);
+            if (!row) {
+                return {
+                    reply: `I could not find leave request #${leaveId}, or access is denied.`,
+                    data: null,
+                };
+            }
+            return {
+                reply: formatLeaveResponse(row),
+                data: { leave: row },
+            };
+        }
+
+        case 'searchLeaves': {
+            const search = args.search || args.name || null;
+            const status = args.status || null;
+            const month = args.month != null ? Number(args.month) : null;
+            const year = args.year != null ? Number(args.year) : null;
+            const rows = await searchLeaves(search || '', ctx, {
+                status: status || undefined,
+                month: Number.isFinite(month) ? month : undefined,
+                year: Number.isFinite(year) ? year : undefined,
+            });
+            const monthLabel =
+                Number.isFinite(month) && Number.isFinite(year)
+                    ? new Date(year, month - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' })
+                    : null;
+            const label =
+                [status, monthLabel, search].filter(Boolean).join(' · ') || 'Leave Calendar';
+            if (!rows.length) {
+                return {
+                    reply: `No leave requests found for ${label}.`,
+                    data: { leaves: [] },
+                };
+            }
+            if (rows.length === 1) {
+                return {
+                    reply: formatLeaveResponse(rows[0]),
+                    data: { leave: rows[0] },
+                };
+            }
+            return {
+                reply: formatLeaveListResponse(rows, label),
+                data: { leaves: rows, search: search || undefined, status, month, year },
+            };
+        }
+
+        case 'countLeaves': {
+            const search = args.search || null;
+            const status = args.status || null;
+            const month = args.month != null ? Number(args.month) : null;
+            const year = args.year != null ? Number(args.year) : null;
+            const result = await countLeaves(ctx, {
+                search: search || undefined,
+                status: status || undefined,
+                month: Number.isFinite(month) ? month : undefined,
+                year: Number.isFinite(year) ? year : undefined,
+            });
+            if (!result.ok) {
+                return { reply: result.message || 'Leave Calendar is not available.', data: null };
+            }
+            const monthLabel = result.month
+                ? new Date(result.month.year, result.month.month - 1, 1).toLocaleString('en', {
+                      month: 'long',
+                      year: 'numeric',
+                  })
+                : null;
+            const scopeBits = [status, monthLabel, search].filter(Boolean);
+            return {
+                reply: `Total leave requests${scopeBits.length ? ` (${scopeBits.join(', ')})` : ''}: ${result.total.toLocaleString()}.`,
+                data: {
+                    count: {
+                        entity: 'leaves',
+                        total: result.total,
+                        scope: scopeBits.length ? scopeBits.join(' · ') : 'the system',
+                    },
+                },
+            };
+        }
+
         case 'getContactEnquiryDetails': {
             const enquiryId = args.enquiryId || args.enquiry_id || args.id ? Number(args.enquiryId || args.enquiry_id || args.id) : null;
             const row = await getContactEnquiryById(enquiryId, ctx);
@@ -3681,6 +3930,58 @@ async function ruleBasedRoute(message, ctx, sessionId) {
         };
     }
 
+    // Leave Calendar / staff leave requests
+    if (isCountLeaveRequest(message)) {
+        const monthYear = extractLeaveMonthYear(message);
+        return executeTool(
+            'countLeaves',
+            {
+                search: extractLeaveSearchTerm(message) || undefined,
+                status: extractLeaveStatus(message) || undefined,
+                month: monthYear?.month,
+                year: monthYear?.year,
+            },
+            ctx,
+            sessionId
+        );
+    }
+    if (isLeaveRequest(message)) {
+        const leaveIdMatch = message.match(/\bleave\s*(?:id|#|request)?\s*(\d{1,8})\b/i);
+        if (leaveIdMatch) {
+            return executeTool(
+                'getLeaveDetails',
+                { leaveId: Number(leaveIdMatch[1]) },
+                ctx,
+                sessionId
+            );
+        }
+        const search = extractLeaveSearchTerm(message);
+        const status = extractLeaveStatus(message);
+        const monthYear = extractLeaveMonthYear(message);
+        if (
+            search ||
+            status ||
+            monthYear ||
+            /\b(show|list|all|leaves?|leave\s+calendar|leave\s+requests?)\b/i.test(message)
+        ) {
+            return executeTool(
+                'searchLeaves',
+                {
+                    search: search || undefined,
+                    status: status || undefined,
+                    month: monthYear?.month,
+                    year: monthYear?.year,
+                },
+                ctx,
+                sessionId
+            );
+        }
+        return {
+            reply: 'Which Leave Calendar view?\n\nExamples:\n- Leave calendar\n- Leave calendar August 2026\n- Pending leave requests\n- Leave for Gregory\n- My leaves\n- Count leave requests',
+            data: null,
+        };
+    }
+
     // Task Manager (freight / clearance / custom) — before freight/clearance modules
     if (isCountTaskRequest(message)) {
         return executeTool(
@@ -3727,13 +4028,19 @@ async function ruleBasedRoute(message, ctx, sessionId) {
     }
 
     // Client KPI module (before orders/client/staff — "orders of client KPI" must not hit order list)
+    // Also: "Total estimate amount of TGOOD…" → Client KPI total_amount
     if (isCountClientKpiRequest(message)) {
         const search = extractClientKpiSearchTerm(message);
         return executeTool('countClientKpi', { search: search || undefined }, ctx, sessionId);
     }
-    if (isClientKpiRequest(message)) {
-        const search = extractClientKpiSearchTerm(message) || '';
-        const focus = extractClientKpiFocus(message) || undefined;
+    if (isClientKpiRequest(message) || isClientEstimateAmountRequest(message)) {
+        const search =
+            extractClientEstimateAmountName(message) ||
+            extractClientKpiSearchTerm(message) ||
+            '';
+        const focus =
+            extractClientKpiFocus(message) ||
+            (isClientEstimateAmountRequest(message) ? 'total_amount' : undefined);
         return executeTool('searchClientKpi', { search, focus }, ctx, sessionId);
     }
 
@@ -4206,7 +4513,11 @@ async function ruleBasedRoute(message, ctx, sessionId) {
 
     // Client / customer profile lookup
     if (isCountClientsRequest(message)) {
-        return executeTool('countClients', {}, ctx, sessionId);
+        const text = String(message || '').toLowerCase();
+        let status;
+        if (/\binactive\b/.test(text)) status = 'inactive';
+        else if (/\bactive\b/.test(text) && !/\binactive\b/.test(text)) status = 'active';
+        return executeTool('countClients', status ? { status } : {}, ctx, sessionId);
     }
     if (isClientLookupRequest(message)) {
         const focus = extractClientFocus(message) || undefined;
@@ -4452,8 +4763,22 @@ async function ruleBasedRoute(message, ctx, sessionId) {
 
     // Ask for freight number when field is clear but no context yet
     if (focus && !freightNumber && !lastFreight && !extractBatchNumber(message)) {
+        if (isClientEstimateAmountRequest(message) || focus === 'estimate_amount') {
+            const clientName =
+                extractClientEstimateAmountName(message) ||
+                extractClientLookupName(message) ||
+                extractClientNameForEntity(message, 'client');
+            if (clientName) {
+                return executeTool(
+                    'searchClientKpi',
+                    { search: clientName, focus: 'total_amount' },
+                    ctx,
+                    sessionId
+                );
+            }
+        }
         return {
-            reply: `Which freight or batch is this about? Examples:\n- "What is the ${focus.replace(/_/g, ' ')} of F-2026xxxxxx?"\n- "Origin of batch ADAWBxxxxxxx"`,
+            reply: `Which freight or batch is this about? Examples:\n- "What is the ${focus.replace(/_/g, ' ')} of F-2026xxxxxx?"\n- "Origin of batch ADAWBxxxxxxx"\n- "Total estimate amount of TGOOD South Africa"`,
             data: null,
         };
     }

@@ -136,6 +136,7 @@ Examples users often ask:
 - **Supplier Invoice:** “Supplier invoice SUPINV10015”, “Supplier invoices for Nimbus”, “Unpaid supplier invoices”, “Waybill of SUPINV10015”, “Show supplier invoices”, “Count supplier invoices”
 - **Collection and Delivery:** “Collection of F-20260723003”, “Collection details OR0001283”, “Collections for Wahied”, “Pending collections”, “Show collection and delivery”, “Status of collection F-20260727009”, “Count collections”
 - **Task Manager:** “Freight tasks”, “Clearance tasks”, “Custom tasks”, “Pending tasks”, “Tasks for Santosh”, “Task manager F-20260721004”, “Count tasks”
+- **Leave Calendar:** “Leave calendar”, “Leave calendar August 2026”, “Pending leave requests”, “Leave for Gregory”, “My leaves”, “Count leave requests”
 - **Contact Us Enquiries:** “Contact us enquiries”, “Enquiry ttttt2@gmail.com”, “Nature of enquiry Sales”, “Contact us South Africa”, “Count contact enquiries”
 - **Country of Origin:** “Country of origin Austria”, “Cities of Austria origin”, “Sea ports of Zimbabwe”, “Show country of origin”, “Count countries of origin”
 - **Custom Agent / Freight Forwarder / Groupage Warehouse / Transporter:** “Custom agents”, “Custom agent Brett Lee”, “Freight forwarders”, “Groupage warehouses”, “Transporters”, “Transporter Micky”, “Count transporters”

@@ -1408,15 +1408,30 @@ body {
 
     function renderFreightCard(data) {
       if (data.focusedAnswer) return '';
-      const f = data.freight;
-      if (!f) return '';
+      // Prefer full Order Freight Detail card; skip when reply already has the dump
+      // and UI asked for text-only (React compact cards). Demo still renders freightOrder.
+      if (data.uiHint?.preferReplyText && data.uiHint?.skipCompactFreightCard && !data.freight) {
+        return '';
+      }
+      const bundle = data.freight ? data : data.freightOrder;
+      const f = data.freight || data.freightOrder?.freight;
+      if (!f || !bundle) return '';
       const status = f.status_label || f.status || 'Unknown';
-      const client = `${data.client?.full_name || f.client_name || '—'}${data.client?.client_number ? ' (' + data.client.client_number + ')' : ''}`;
+      const client = `${bundle.client?.full_name || data.client?.full_name || f.client_name || '—'}${
+        (bundle.client || data.client)?.client_number
+          ? ' (' + (bundle.client || data.client).client_number + ')'
+          : ''
+      }`;
       const mode = f.freight_option_label || f.freight
         ? `${f.freight_option_label || f.freight}${f.fcl_lcl_label || f.fcl_lcl ? ' · ' + (f.fcl_lcl_label || f.fcl_lcl) : ''}`
         : '';
-      const est = data.estimateSummary;
-      const br = data.estimateBreakdown;
+      const est = bundle.estimateSummary || data.estimateSummary;
+      const br = bundle.estimateBreakdown || data.estimateBreakdown;
+      const orders = bundle.orders || data.orders || [];
+      const clearance = bundle.clearance || data.clearance || [];
+      const shipments = bundle.shipments || data.shipments || [];
+      const invoices = bundle.invoices || data.invoices || [];
+      const invoicesAccess = bundle.invoices_access != null ? bundle.invoices_access : data.invoices_access;
 
       let html = `
         <div class="result-card">
@@ -1512,21 +1527,29 @@ body {
         html += detail('Invoice / packing list', f.attachment_estimate_label);
       }
 
-      if (data.clearance?.length) {
+      if (orders.length) {
+        html += `<div class="section-label">Orders</div>`;
+        orders.slice(0, 5).forEach((o) => {
+          const num = o.order_number || (o.id != null ? 'OR000' + o.id : 'Order');
+          html += `<div class="section-item"><strong>${esc(num)}</strong>${o.status_label ? ' · ' + esc(o.status_label) : ''}</div>`;
+        });
+      }
+
+      if (clearance.length) {
         html += `<div class="section-label">Clearance</div>`;
-        data.clearance.slice(0, 2).forEach((c) => {
+        clearance.slice(0, 2).forEach((c) => {
           html += `<div class="section-item"><strong>${esc(c.clearance_number || 'Clearance')}</strong> — ${esc(c.clearing_status || 'Pending')}</div>`;
         });
       }
-      if (data.shipments?.length) {
+      if (shipments.length) {
         html += `<div class="section-label">Shipment</div>`;
-        data.shipments.slice(0, 2).forEach((s) => {
+        shipments.slice(0, 2).forEach((s) => {
           html += `<div class="section-item"><strong>${esc(s.waybill || 'Shipment')}</strong> · ${esc(s.vessel || 'No vessel')} · ${esc(s.status || '—')}</div>`;
         });
       }
-      if (data.invoices_access && data.invoices?.length) {
+      if (invoicesAccess && invoices.length) {
         html += `<div class="section-label">Invoices</div>`;
-        data.invoices.slice(0, 3).forEach((inv) => {
+        invoices.slice(0, 3).forEach((inv) => {
           const num = inv.reference_no || inv.sage_invoice_number || inv.document_number || `Invoice #${inv.invoice_id}`;
           html += `<div class="section-item"><strong>${esc(num)}</strong>${inv.invoice_amt != null ? ' · ' + esc(inv.invoice_currency || '') + ' ' + esc(inv.invoice_amt) : ''}</div>`;
         });
@@ -2601,6 +2624,68 @@ body {
       return html;
     }
 
+    function renderLeaveCard(data) {
+      if (data.focusedAnswer || !data.leave || data.leaves) return '';
+      const r = data.leave;
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div class="head-main">
+              <div class="ref" title="${esc(r.staff_name || '')}">${esc(r.staff_name || 'Leave')}</div>
+              <div class="sub">Leave Calendar · #${esc(String(r.leave_id || r.id))}</div>
+            </div>
+            <span class="status-badge ${statusClass(r.status_label || '')}">${esc(r.status_label || '—')}</span>
+          </div>
+          <div class="result-card-body">`;
+      html += detail('Staff name', r.staff_name || '—');
+      html += detail('Leave from', r.leave_from_label || '—');
+      html += detail('Leave to', r.leave_to_label || '—');
+      html += detail('Reason', r.reason || '—');
+      html += detail('Status', r.status_label || '—');
+      html += detail('Admin remark', r.admin_remark || '—');
+      html += `</div></div>`;
+      return html;
+    }
+
+    function renderLeaveListCard(data) {
+      if (!data.leaves || data.leave || data.focusedAnswer) return '';
+      const rows = data.leaves || [];
+      const monthLabel =
+        data.month && data.year
+          ? new Date(data.year, data.month - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' })
+          : null;
+      const label = [data.status, monthLabel, data.search].filter(Boolean).join(' · ') || 'Leave Calendar';
+      let html = `
+        <div class="result-card">
+          <div class="result-card-head">
+            <div>
+              <div class="ref">Leave Calendar</div>
+              <div class="sub">${esc(label)} · ${rows.length} found</div>
+            </div>
+          </div>
+          <div class="result-card-body">`;
+      if (!rows.length) {
+        html += `<div class="empty-note">No leave requests found.</div>`;
+      } else {
+        rows.slice(0, 25).forEach((r) => {
+          const meta = [r.leave_from_label, r.leave_to_label ? '→ ' + r.leave_to_label : null, r.reason]
+            .filter(Boolean)
+            .join(' · ');
+          html += `
+            <div class="list-row">
+              <div class="list-row-top">
+                <div class="list-row-id">#${esc(String(r.leave_id || r.id))} · ${esc(r.staff_name || '—')}</div>
+                <span class="status-badge ${statusClass(r.status_label || '')}">${esc(r.status_label || '—')}</span>
+              </div>
+              ${meta ? `<div class="list-row-meta"><span>${esc(meta)}</span></div>` : ''}
+              ${r.admin_remark ? `<div class="list-row-meta"><span>Remark: ${esc(r.admin_remark)}</span></div>` : ''}
+            </div>`;
+        });
+      }
+      html += `</div></div>`;
+      return html;
+    }
+
     function renderContactEnquiryCard(data) {
       if (data.focusedAnswer || !data.contactEnquiry || data.contactEnquiries) return '';
       const e = data.contactEnquiry;
@@ -3537,6 +3622,8 @@ body {
           renderStaffListCard(data) +
           renderTaskCard(data) +
           renderTaskListCard(data) +
+          renderLeaveCard(data) +
+          renderLeaveListCard(data) +
           renderContactEnquiryCard(data) +
           renderContactEnquiryListCard(data) +
           renderCountryOriginCard(data) +
@@ -3755,6 +3842,16 @@ body {
         if (/^F-/i.test(value)) return `Task manager ${value}`;
         if (/^C-/i.test(value)) return `Clearance tasks for ${value}`;
         return `Tasks for ${value}`;
+      }
+      if (topic === 'leave_calendar') {
+        if (/^all$/i.test(value)) return `Leave calendar`;
+        if (/^pending$/i.test(value)) return `Pending leave requests`;
+        if (/^approved$/i.test(value)) return `Approved leave requests`;
+        if (/^rejected$/i.test(value)) return `Rejected leave requests`;
+        if (/^(january|february|march|april|may|june|july|august|september|october|november|december)/i.test(value)) {
+          return `Leave calendar ${value}`;
+        }
+        return `Leave for ${value}`;
       }
       if (topic === 'contact_enquiries') {
         if (/^all$/i.test(value)) return `Contact us enquiries`;

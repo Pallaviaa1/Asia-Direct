@@ -2170,6 +2170,7 @@ const updateOrderAndWarehouse = (req, res) => {
     );
 };
 
+
 // const GetSupplierCreatedWarehouseOrders = async (req, res) => {
 //     try {
 //         const {
@@ -2259,23 +2260,60 @@ const updateOrderAndWarehouse = (req, res) => {
 
 //         const total = totalResult[0]?.total || 0;
 
+//         // First tracking update from Freight / Batch / Shipment (via order_track)
+//         const trackingStartedAtSql = `
+//             (
+//                 SELECT MIN(ot.created_at)
+//                 FROM order_track ot
+//                 WHERE
+//                     (s.order_id IS NOT NULL AND s.order_id > 0 AND ot.order_id = s.order_id)
+//                     OR (NULLIF(s.batch_id, 0) IS NOT NULL AND ot.batch_id = s.batch_id)
+//             )
+//         `;
+
+//         const hasTrackingStartedSql = `
+//             (
+//                 ${trackingStartedAtSql} IS NOT NULL
+//                 OR (o.track_status IS NOT NULL AND o.track_status != '')
+//                 OR (b.track_status IS NOT NULL AND b.track_status != '')
+//             )
+//         `;
+
 //         // =========================
 //         // MAIN QUERY
 //         // =========================
 //         const query = `
-//             SELECT 
+//             SELECT
 //                 s.*,
 
-//                 CASE 
+//                 ${trackingStartedAtSql} AS tracking_started_at,
+
+//                 CASE
+//                     WHEN ${hasTrackingStartedSql} THEN 'Out'
+//                     ELSE 'In Store'
+//                 END AS warehouse_item_status,
+
+//                 CASE
 //                     WHEN s.date_received IS NULL THEN 0
 
-//                     WHEN b.date_dispatch IS NOT NULL 
-//                         THEN GREATEST(DATEDIFF(b.date_dispatch, s.date_received), 0)
+//                     WHEN ${trackingStartedAtSql} IS NOT NULL
+//                         THEN GREATEST(
+//                             DATEDIFF(DATE(${trackingStartedAtSql}), s.date_received),
+//                             0
+//                         )
 
-//                     WHEN s.dispatch_date IS NOT NULL 
-//                         THEN GREATEST(DATEDIFF(s.dispatch_date, s.date_received), 0)
+//                     WHEN (o.track_status IS NOT NULL AND o.track_status != '')
+//                         OR (b.track_status IS NOT NULL AND b.track_status != '')
+//                         THEN GREATEST(
+//                             COALESCE(
+//                                 DATEDIFF(b.date_dispatch, s.date_received),
+//                                 DATEDIFF(s.dispatch_date, s.date_received),
+//                                 0
+//                             ),
+//                             0
+//                         )
 
-//                     ELSE 
+//                     ELSE
 //                         GREATEST(DATEDIFF(CURDATE(), s.date_received), 0)
 //                 END AS days_in_warehouse,
 
@@ -2285,6 +2323,8 @@ const updateOrderAndWarehouse = (req, res) => {
 //                 w.warehouse_number,
 //                 su.name as supplier_name,
 //                 o.order_number,
+//                 o.track_status AS order_track_status,
+//                 b.track_status AS batch_track_status,
 //                 COALESCE(b.batch_number, '') AS batch_number
 
 //             FROM supplier_warehouse_orders s
@@ -2320,7 +2360,7 @@ const updateOrderAndWarehouse = (req, res) => {
 
 //         if (ids.length > 0) {
 //             const fileQuery = `
-//                 SELECT 
+//                 SELECT
 //                     id,
 //                     supplier_warehouse_id,
 //                     file_type,
@@ -2375,6 +2415,10 @@ const updateOrderAndWarehouse = (req, res) => {
 //             dispatch_date: row.dispatch_date,
 //             date_received: row.date_received,
 //             days_in_warehouse: row.days_in_warehouse,
+//             tracking_started_at: row.tracking_started_at || null,
+//             warehouse_item_status: row.warehouse_item_status || "In Store",
+//             order_track_status: row.order_track_status || null,
+//             batch_track_status: row.batch_track_status || null,
 
 //             customer_name: row.customer_name,
 //             customer_ref: row.customer_ref,
@@ -2435,20 +2479,88 @@ const updateOrderAndWarehouse = (req, res) => {
 
 const GetSupplierCreatedWarehouseOrders = async (req, res) => {
     try {
+
         const {
             supplier_id,
             search = "",
             page = 1,
-            limit = 10
+            limit = 10,
+            tab = "all",
+            sort_order
         } = req.body;
 
         const pageNo = Number(page);
         const pageSize = Number(limit);
         const offset = (pageNo - 1) * pageSize;
 
-        // =========================
+        // =========================================================
+        // TAB VALIDATION
+        // =========================================================
+
+        const normalizedTab = String(tab).toLowerCase();
+
+        if (
+            ![
+                "all",
+                "pending",
+                "assigned",
+                "out",
+                "instore"
+            ].includes(normalizedTab)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "tab must be all, pending, assigned, out or instore"
+            });
+        }
+
+        // =========================================================
+        // SORT ORDER
+        // =========================================================
+
+        let normalizedSortOrder;
+
+        if (sort_order) {
+
+            normalizedSortOrder =
+                String(sort_order).toLowerCase();
+
+        } else {
+
+            // Default sort based on tab
+            if (
+                normalizedTab === "pending" ||
+                normalizedTab === "assigned" ||
+                normalizedTab === "instore"
+            ) {
+                normalizedSortOrder = "oldest";
+            } else {
+                normalizedSortOrder = "newest";
+            }
+
+        }
+
+        if (
+            ![
+                "oldest",
+                "newest"
+            ].includes(normalizedSortOrder)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "sort_order must be oldest or newest"
+            });
+        }
+
+        const sortDirection =
+            normalizedSortOrder === "oldest"
+                ? "ASC"
+                : "DESC";
+
+        // =========================================================
         // WHERE CLAUSE
-        // =========================
+        // =========================================================
+
         let whereClause = `WHERE 1=1`;
         let queryParams = [];
 
@@ -2457,10 +2569,15 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
             queryParams.push(supplier_id);
         }
 
-        // =========================
+        // =========================================================
         // SEARCH FILTER
-        // =========================
-        if (search && search.trim() !== "") {
+        // =========================================================
+
+        if (
+            search &&
+            search.trim() !== ""
+        ) {
+
             whereClause += `
                 AND (
                     s.customer_name LIKE ?
@@ -2478,7 +2595,8 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
                 )
             `;
 
-            const searchValue = `%${search}%`;
+            const searchValue =
+                `%${search.trim()}%`;
 
             queryParams.push(
                 searchValue,
@@ -2496,244 +2614,656 @@ const GetSupplierCreatedWarehouseOrders = async (req, res) => {
             );
         }
 
-        // =========================
-        // COUNT QUERY
-        // =========================
-        const countQuery = `
-            SELECT COUNT(*) AS total
-            FROM supplier_warehouse_orders s
- 
-            LEFT JOIN countries c ON c.id = s.destination_country
-            LEFT JOIN countries cd ON cd.id = s.collection_from
-            LEFT JOIN warehouse_tbl w ON w.id = s.warehouse_id
-            LEFT JOIN tbl_suppliers su ON su.id = s.supplier_id
-            LEFT JOIN tbl_orders o ON o.id = s.order_id
-            LEFT JOIN batches b ON b.id = NULLIF(s.batch_id, 0)
- 
-            ${whereClause}
-        `;
+        // =========================================================
+        // TRACKING SQL
+        // =========================================================
 
-        const totalResult = await new Promise((resolve, reject) => {
-            con.query(countQuery, queryParams, (err, rows) => {
-                if (err) return reject(err);
-                resolve(rows);
-            });
-        });
-
-        const total = totalResult[0]?.total || 0;
-
-        // First tracking update from Freight / Batch / Shipment (via order_track)
         const trackingStartedAtSql = `
             (
                 SELECT MIN(ot.created_at)
                 FROM order_track ot
                 WHERE
-                    (s.order_id IS NOT NULL AND s.order_id > 0 AND ot.order_id = s.order_id)
-                    OR (NULLIF(s.batch_id, 0) IS NOT NULL AND ot.batch_id = s.batch_id)
+                    (
+                        s.order_id IS NOT NULL
+                        AND s.order_id > 0
+                        AND ot.order_id = s.order_id
+                    )
+
+                    OR
+
+                    (
+                        NULLIF(s.batch_id, 0) IS NOT NULL
+                        AND ot.batch_id = s.batch_id
+                    )
             )
         `;
 
         const hasTrackingStartedSql = `
             (
                 ${trackingStartedAtSql} IS NOT NULL
-                OR (o.track_status IS NOT NULL AND o.track_status != '')
-                OR (b.track_status IS NOT NULL AND b.track_status != '')
+
+                OR
+
+                (
+                    o.track_status IS NOT NULL
+                    AND o.track_status != ''
+                )
+
+                OR
+
+                (
+                    b.track_status IS NOT NULL
+                    AND b.track_status != ''
+                )
             )
         `;
 
-        // =========================
+        // =========================================================
+        // TAB FILTER
+        // =========================================================
+
+        /*
+         * Pending
+         *
+         * move_to_adminWarhouse = 0 / NULL
+         * warehouse status can be In Store or Out
+         */
+
+        if (normalizedTab === "pending") {
+
+            whereClause += `
+                AND COALESCE(
+                    s.move_to_adminWarhouse,
+                    0
+                ) = 0
+            `;
+
+        }
+
+        /*
+         * Assigned
+         *
+         * move_to_adminWarhouse = 1
+         * warehouse status can be In Store or Out
+         */
+
+        else if (normalizedTab === "assigned") {
+
+            whereClause += `
+                AND s.move_to_adminWarhouse = 1
+            `;
+
+        }
+
+        /*
+         * Out
+         *
+         * warehouse_item_status = Out
+         * move_to_adminWarhouse can be anything
+         */
+
+        else if (normalizedTab === "out") {
+
+            whereClause += `
+                AND (
+                    ${hasTrackingStartedSql}
+                )
+            `;
+
+        }
+
+        /*
+         * In Store
+         *
+         * warehouse_item_status = In Store
+         * move_to_adminWarhouse can be anything
+         */
+
+        else if (normalizedTab === "instore") {
+
+            whereClause += `
+                AND NOT (
+                    ${hasTrackingStartedSql}
+                )
+            `;
+
+        }
+
+        // all => no additional filter
+
+        // =========================================================
+        // COUNT QUERY
+        // =========================================================
+
+        const countQuery = `
+            SELECT COUNT(*) AS total
+
+            FROM supplier_warehouse_orders s
+
+            LEFT JOIN countries c
+                ON c.id = s.destination_country
+
+            LEFT JOIN countries cd
+                ON cd.id = s.collection_from
+
+            LEFT JOIN warehouse_tbl w
+                ON w.id = s.warehouse_id
+
+            LEFT JOIN tbl_suppliers su
+                ON su.id = s.supplier_id
+
+            LEFT JOIN tbl_orders o
+                ON o.id = s.order_id
+
+            LEFT JOIN batches b
+                ON b.id = NULLIF(
+                    s.batch_id,
+                    0
+                )
+
+            ${whereClause}
+        `;
+
+        const totalResult = await new Promise(
+            (resolve, reject) => {
+
+                con.query(
+                    countQuery,
+                    queryParams,
+                    (err, rows) => {
+
+                        if (err) {
+                            return reject(err);
+                        }
+
+                        resolve(rows);
+                    }
+                );
+
+            }
+        );
+
+        const total =
+            Number(
+                totalResult[0]?.total || 0
+            );
+
+        // =========================================================
+        // SORT FIELD
+        // =========================================================
+
+        let sortDateField;
+
+        if (normalizedTab === "out") {
+
+            sortDateField = `
+                COALESCE(
+                    s.dispatch_date,
+                    s.date_received,
+                    s.created_at
+                )
+            `;
+
+        } else {
+
+            sortDateField = `
+                COALESCE(
+                    s.date_received,
+                    s.created_at
+                )
+            `;
+
+        }
+
+        // =========================================================
         // MAIN QUERY
-        // =========================
+        // =========================================================
+
         const query = `
             SELECT
+
                 s.*,
- 
-                ${trackingStartedAtSql} AS tracking_started_at,
- 
+
+                ${trackingStartedAtSql}
+                    AS tracking_started_at,
+
                 CASE
-                    WHEN ${hasTrackingStartedSql} THEN 'Out'
+
+                    WHEN ${hasTrackingStartedSql}
+                    THEN 'Out'
+
                     ELSE 'In Store'
+
                 END AS warehouse_item_status,
- 
+
                 CASE
-                    WHEN s.date_received IS NULL THEN 0
- 
+
+                    WHEN s.date_received IS NULL
+                    THEN 0
+
                     WHEN ${trackingStartedAtSql} IS NOT NULL
-                        THEN GREATEST(
-                            DATEDIFF(DATE(${trackingStartedAtSql}), s.date_received),
-                            0
+
+                    THEN GREATEST(
+                        DATEDIFF(
+                            DATE(${trackingStartedAtSql}),
+                            s.date_received
+                        ),
+                        0
+                    )
+
+                    WHEN
+                        (
+                            o.track_status IS NOT NULL
+                            AND o.track_status != ''
                         )
- 
-                    WHEN (o.track_status IS NOT NULL AND o.track_status != '')
-                        OR (b.track_status IS NOT NULL AND b.track_status != '')
-                        THEN GREATEST(
-                            COALESCE(
-                                DATEDIFF(b.date_dispatch, s.date_received),
-                                DATEDIFF(s.dispatch_date, s.date_received),
-                                0
+
+                        OR
+
+                        (
+                            b.track_status IS NOT NULL
+                            AND b.track_status != ''
+                        )
+
+                    THEN GREATEST(
+
+                        COALESCE(
+
+                            DATEDIFF(
+                                b.date_dispatch,
+                                s.date_received
+                            ),
+
+                            DATEDIFF(
+                                s.dispatch_date,
+                                s.date_received
+                            ),
+
+                            0
+
+                        ),
+
+                        0
+
+                    )
+
+                    ELSE
+
+                        GREATEST(
+                            DATEDIFF(
+                                CURDATE(),
+                                s.date_received
                             ),
                             0
                         )
- 
-                    ELSE
-                        GREATEST(DATEDIFF(CURDATE(), s.date_received), 0)
+
                 END AS days_in_warehouse,
- 
+
                 c.name AS destination_country_name,
+
                 cd.name AS collection_country_name,
+
                 w.warehouse_name,
+
                 w.warehouse_number,
-                su.name as supplier_name,
+
+                su.name AS supplier_name,
+
                 o.order_number,
+
                 o.track_status AS order_track_status,
+
                 b.track_status AS batch_track_status,
-                COALESCE(b.batch_number, '') AS batch_number
- 
+
+                COALESCE(
+                    b.batch_number,
+                    ''
+                ) AS batch_number
+
             FROM supplier_warehouse_orders s
- 
-            LEFT JOIN countries c ON c.id = s.destination_country
-            LEFT JOIN countries cd ON cd.id = s.collection_from
-            LEFT JOIN warehouse_tbl w ON w.id = s.warehouse_id
-            LEFT JOIN tbl_suppliers su ON su.id = s.supplier_id
-            LEFT JOIN tbl_orders o ON o.id = s.order_id
-            LEFT JOIN batches b ON b.id = NULLIF(s.batch_id, 0)
- 
+
+            LEFT JOIN countries c
+                ON c.id = s.destination_country
+
+            LEFT JOIN countries cd
+                ON cd.id = s.collection_from
+
+            LEFT JOIN warehouse_tbl w
+                ON w.id = s.warehouse_id
+
+            LEFT JOIN tbl_suppliers su
+                ON su.id = s.supplier_id
+
+            LEFT JOIN tbl_orders o
+                ON o.id = s.order_id
+
+            LEFT JOIN batches b
+                ON b.id = NULLIF(
+                    s.batch_id,
+                    0
+                )
+
             ${whereClause}
- 
-            ORDER BY s.created_at DESC
+
+            ORDER BY
+                ${sortDateField} ${sortDirection},
+                s.id ${sortDirection}
+
             LIMIT ? OFFSET ?
         `;
 
-        const dataParams = [...queryParams, pageSize, offset];
+        const dataParams = [
+            ...queryParams,
+            pageSize,
+            offset
+        ];
 
-        const rows = await new Promise((resolve, reject) => {
-            con.query(query, dataParams, (err, rows) => {
-                if (err) return reject(err);
-                resolve(rows);
-            });
-        });
+        const rows = await new Promise(
+            (resolve, reject) => {
 
-        // =========================
+                con.query(
+                    query,
+                    dataParams,
+                    (err, rows) => {
+
+                        if (err) {
+                            return reject(err);
+                        }
+
+                        resolve(rows);
+                    }
+                );
+
+            }
+        );
+
+        // =========================================================
         // FETCH FILES
-        // =========================
-        const ids = rows.map(r => r.id);
+        // =========================================================
+
+        const ids =
+            rows.map(
+                r => r.id
+            );
 
         let fileMap = new Map();
 
         if (ids.length > 0) {
+
             const fileQuery = `
                 SELECT
                     id,
                     supplier_warehouse_id,
                     file_type,
                     file_name
+
                 FROM supplier_warehouse_files
+
                 WHERE supplier_warehouse_id IN (?)
             `;
 
-            const files = await new Promise((resolve, reject) => {
-                con.query(fileQuery, [ids], (err, rows) => {
-                    if (err) return reject(err);
-                    resolve(rows);
-                });
-            });
+            const files = await new Promise(
+                (resolve, reject) => {
+
+                    con.query(
+                        fileQuery,
+                        [ids],
+                        (err, rows) => {
+
+                            if (err) {
+                                return reject(err);
+                            }
+
+                            resolve(rows);
+                        }
+                    );
+
+                }
+            );
 
             files.forEach(file => {
-                if (!fileMap.has(file.supplier_warehouse_id)) {
-                    fileMap.set(file.supplier_warehouse_id, []);
+
+                if (
+                    !fileMap.has(
+                        file.supplier_warehouse_id
+                    )
+                ) {
+
+                    fileMap.set(
+                        file.supplier_warehouse_id,
+                        []
+                    );
+
                 }
 
-                fileMap.get(file.supplier_warehouse_id).push({
-                    id: file.id,
-                    type: file.file_type,
-                    file: file.file_name
-                });
+                fileMap
+                    .get(
+                        file.supplier_warehouse_id
+                    )
+                    .push({
+
+                        id:
+                            file.id,
+
+                        type:
+                            file.file_type,
+
+                        file:
+                            file.file_name
+
+                    });
+
             });
+
         }
 
-        // =========================
+        // =========================================================
         // FINAL RESPONSE
-        // =========================
+        // =========================================================
+
         const result = rows.map(row => ({
-            id: row.id,
-            supplier_id: row.supplier_id,
-            warehouse_id: row.warehouse_id,
-            client_id: row.client_id,
-            order_id: row.order_id,
-            batch_id: row.batch_id,
-            batch_number: row.batch_number || "",
-            warehouse_name: row.warehouse_name,
-            warehouse_number: row.warehouse_number,
-            order_number: row.order_number,
 
-            destination_country: row.destination_country,
-            destination_country_name: row.destination_country_name,
-            collection_from_name: row.collection_country_name,
-            collection_from: row.collection_from,
+            id:
+                row.id,
 
-            warehouse_order_id: row.warehouse_order_id,
-            courier_waybill_ref: row.courier_waybill_ref,
+            supplier_id:
+                row.supplier_id,
 
-            dispatch_date: row.dispatch_date,
-            date_received: row.date_received,
-            days_in_warehouse: row.days_in_warehouse,
-            tracking_started_at: row.tracking_started_at || null,
-            warehouse_item_status: row.warehouse_item_status || "In Store",
-            order_track_status: row.order_track_status || null,
-            batch_track_status: row.batch_track_status || null,
+            warehouse_id:
+                row.warehouse_id,
 
-            customer_name: row.customer_name,
-            customer_ref: row.customer_ref,
+            client_id:
+                row.client_id,
 
-            box_marking: row.box_marking,
-            goods_description: row.goods_description,
-            package_type: row.package_type,
-            hazardous: row.hazardous,
-            hazard_description: row.hazard_description,
+            order_id:
+                row.order_id,
 
-            total_packages: row.total_packages,
-            total_cbm: row.total_cbm,
-            total_weight: row.total_weight,
+            batch_id:
+                row.batch_id,
 
-            package_comment: row.package_comment,
-            damaged_goods: row.damaged_goods,
-            damaged_pkg_qty: row.damaged_pkg_qty,
-            damage_comment: row.damage_comment,
+            batch_number:
+                row.batch_number || "",
 
-            supplier_company: row.supplier_company,
-            supplier_person: row.supplier_person,
-            supplier_contact: row.supplier_contact,
-            supplier_address: row.supplier_address,
-            supplier_name: row.supplier_name,
+            warehouse_name:
+                row.warehouse_name,
 
-            warehouse_collect: row.warehouse_collect,
-            costs_to_collect: row.costs_to_collect,
-            warehouse_storage: row.warehouse_storage,
-            warehouse_cost: row.warehouse_cost,
-            handling_required: row.handling_required,
-            handling_cost: row.handling_cost,
-            warehouse_dispatch: row.warehouse_dispatch,
-            cost_to_dispatch: row.cost_to_dispatch,
+            warehouse_number:
+                row.warehouse_number,
 
-            warehouse_comment: row.warehouse_comment,
-            created_at: row.created_at,
-            move_to_adminWarhouse: row.move_to_adminWarhouse,
+            order_number:
+                row.order_number,
 
-            files: fileMap.get(row.id) || []
+            destination_country:
+                row.destination_country,
+
+            destination_country_name:
+                row.destination_country_name,
+
+            collection_from_name:
+                row.collection_country_name,
+
+            collection_from:
+                row.collection_from,
+
+            warehouse_order_id:
+                row.warehouse_order_id,
+
+            courier_waybill_ref:
+                row.courier_waybill_ref,
+
+            dispatch_date:
+                row.dispatch_date,
+
+            date_received:
+                row.date_received,
+
+            days_in_warehouse:
+                row.days_in_warehouse,
+
+            tracking_started_at:
+                row.tracking_started_at || null,
+
+            warehouse_item_status:
+                row.warehouse_item_status ||
+                "In Store",
+
+            order_track_status:
+                row.order_track_status ||
+                null,
+
+            batch_track_status:
+                row.batch_track_status ||
+                null,
+
+            customer_name:
+                row.customer_name,
+
+            customer_ref:
+                row.customer_ref,
+
+            box_marking:
+                row.box_marking,
+
+            goods_description:
+                row.goods_description,
+
+            package_type:
+                row.package_type,
+
+            hazardous:
+                row.hazardous,
+
+            hazard_description:
+                row.hazard_description,
+
+            total_packages:
+                row.total_packages,
+
+            total_cbm:
+                row.total_cbm,
+
+            total_weight:
+                row.total_weight,
+
+            package_comment:
+                row.package_comment,
+
+            damaged_goods:
+                row.damaged_goods,
+
+            damaged_pkg_qty:
+                row.damaged_pkg_qty,
+
+            damage_comment:
+                row.damage_comment,
+
+            supplier_company:
+                row.supplier_company,
+
+            supplier_person:
+                row.supplier_person,
+
+            supplier_contact:
+                row.supplier_contact,
+
+            supplier_address:
+                row.supplier_address,
+
+            supplier_name:
+                row.supplier_name,
+
+            warehouse_collect:
+                row.warehouse_collect,
+
+            costs_to_collect:
+                row.costs_to_collect,
+
+            warehouse_storage:
+                row.warehouse_storage,
+
+            warehouse_cost:
+                row.warehouse_cost,
+
+            handling_required:
+                row.handling_required,
+
+            handling_cost:
+                row.handling_cost,
+
+            warehouse_dispatch:
+                row.warehouse_dispatch,
+
+            cost_to_dispatch:
+                row.cost_to_dispatch,
+
+            warehouse_comment:
+                row.warehouse_comment,
+
+            created_at:
+                row.created_at,
+
+            move_to_adminWarhouse:
+                row.move_to_adminWarhouse,
+
+            files:
+                fileMap.get(row.id) || []
+
         }));
 
+        // =========================================================
+        // RESPONSE
+        // =========================================================
+        // IMPORTANT:
+        // Response structure is unchanged.
+        // =========================================================
+
         return res.status(200).json({
+
             success: true,
+
             total,
+
             page: pageNo,
+
             limit: pageSize,
+
             data: result
+
         });
 
     } catch (err) {
+
+        console.error(
+            "GetSupplierCreatedWarehouseOrders Error:",
+            err
+        );
+
         return res.status(500).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message
+
         });
     }
 };
@@ -7255,30 +7785,49 @@ const MoveSupplierWarehouseOrder = (req, res) => {
         function handleWarehouse(order_id, data) {
 
             con.query(
-                `SELECT id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
+                `SELECT id, freight_id FROM tbl_orders WHERE id=? LIMIT 1`,
                 [order_id],
-                (err, warehouseRows) => {
+                (err, orderInfoRows) => {
 
                     if (err) {
-
-                        console.log("WAREHOUSE CHECK ERROR:", err);
-
+                        console.log("ORDER FREIGHT LOOKUP ERROR:", err);
                         return res.status(500).json({
                             success: false,
                             message: err.message
                         });
                     }
 
-                    // =====================================================
-                    // CREATE WAREHOUSE
-                    // =====================================================
+                    const orderFreightId =
+                        (orderInfoRows[0] && orderInfoRows[0].freight_id) ||
+                        data.freight_id ||
+                        0;
 
-                    if (!warehouseRows.length) {
+                    con.query(
+                        `SELECT id, freight_id FROM warehouse_assign_order WHERE order_id=? ORDER BY id DESC LIMIT 1`,
+                        [order_id],
+                        (err, warehouseRows) => {
 
-                        const warehouseSql = `
+                            if (err) {
+
+                                console.log("WAREHOUSE CHECK ERROR:", err);
+
+                                return res.status(500).json({
+                                    success: false,
+                                    message: err.message
+                                });
+                            }
+
+                            // =====================================================
+                            // CREATE WAREHOUSE
+                            // =====================================================
+
+                            if (!warehouseRows.length) {
+
+                                const warehouseSql = `
                             INSERT INTO warehouse_assign_order
                             (
                                 order_id,
+                                freight_id,
                                 warehouse_status,
                                 supplier_id,
                                 courier_waybill_ref,
@@ -7316,96 +7865,121 @@ const MoveSupplierWarehouseOrder = (req, res) => {
                                 ?,?,?,?,?,?,?,?,?,?,
                                 ?,?,?,?,?,?,?,?,?,?,
                                 ?,?,?,?,?,?,?,?,?,?,
-                                ?,?,?
+                                ?,?,?,?
                             )
                         `;
 
-                        const warehouseValues = [
-                            order_id,
-                            1,
-                            data.supplier_id,
-                            data.courier_waybill_ref,
-                            data.date_entry_created,
-                            data.dispatch_date,
-                            data.warehouse_comment,
-                            data.customer_ref,
-                            data.box_marking,
-                            data.package_type,
-                            data.hazardous,
-                            data.total_packages,
-                            data.hazard_description,
-                            data.package_comment,
-                            data.damaged_goods,
-                            data.damaged_pkg_qty,
-                            data.damage_comment,
-                            data.supplier_company,
-                            data.supplier_person,
-                            data.supplier_address,
-                            data.supplier_contact,
-                            data.batch_id || null,
-                            data.batch_id ? 1 : 0,
-                            data.warehouse_order_id,
-                            data.warehouse_collect,
-                            data.costs_to_collect,
-                            data.warehouse_storage,
-                            data.warehouse_cost,
-                            data.handling_required,
-                            data.handling_cost,
-                            data.warehouse_dispatch,
-                            data.cost_to_dispatch,
-                            user_id || 1
-                        ];
-
-                        con.query(
-                            warehouseSql,
-                            warehouseValues,
-                            (err, warehouseResult) => {
-
-                                if (err) {
-
-                                    console.log("WAREHOUSE INSERT ERROR:", err);
-
-                                    return res.status(500).json({
-                                        success: false,
-                                        message: err.message
-                                    });
-                                }
-
-                                const warehouseId = warehouseResult.insertId;
-
-                                // UPDATE ORDER
+                                const warehouseValues = [
+                                    order_id,
+                                    orderFreightId || 0,
+                                    1,
+                                    data.supplier_id,
+                                    data.courier_waybill_ref,
+                                    data.date_entry_created,
+                                    data.dispatch_date,
+                                    data.warehouse_comment,
+                                    data.customer_ref,
+                                    data.box_marking,
+                                    data.package_type,
+                                    data.hazardous,
+                                    data.total_packages,
+                                    data.hazard_description,
+                                    data.package_comment,
+                                    data.damaged_goods,
+                                    data.damaged_pkg_qty,
+                                    data.damage_comment,
+                                    data.supplier_company,
+                                    data.supplier_person,
+                                    data.supplier_address,
+                                    data.supplier_contact,
+                                    data.batch_id || null,
+                                    data.batch_id ? 1 : 0,
+                                    data.warehouse_order_id,
+                                    data.warehouse_collect,
+                                    data.costs_to_collect,
+                                    data.warehouse_storage,
+                                    data.warehouse_cost,
+                                    data.handling_required,
+                                    data.handling_cost,
+                                    data.warehouse_dispatch,
+                                    data.cost_to_dispatch,
+                                    user_id || 1
+                                ];
 
                                 con.query(
-                                    `UPDATE tbl_orders 
-                                     SET warehouse_status=?, client_name=? 
-                                     WHERE id=?`,
-                                    [1, data.customer_name, order_id],
-                                    (err) => {
+                                    warehouseSql,
+                                    warehouseValues,
+                                    (err, warehouseResult) => {
 
                                         if (err) {
-                                            console.log("ORDER UPDATE ERROR:", err);
+
+                                            console.log("WAREHOUSE INSERT ERROR:", err);
+
+                                            return res.status(500).json({
+                                                success: false,
+                                                message: err.message
+                                            });
                                         }
 
-                                        moveFilesAndProducts(
-                                            data,
-                                            warehouseId,
-                                            order_id
+                                        const warehouseId = warehouseResult.insertId;
+
+                                        // UPDATE ORDER
+
+                                        con.query(
+                                            `UPDATE tbl_orders 
+                                     SET warehouse_status=?, client_name=? 
+                                     WHERE id=?`,
+                                            [1, data.customer_name, order_id],
+                                            (err) => {
+
+                                                if (err) {
+                                                    console.log("ORDER UPDATE ERROR:", err);
+                                                }
+
+                                                moveFilesAndProducts(
+                                                    data,
+                                                    warehouseId,
+                                                    order_id
+                                                );
+                                            }
                                         );
                                     }
                                 );
+
+                            } else {
+
+                                const warehouseId = warehouseRows[0].id;
+                                const existingFreightId = warehouseRows[0].freight_id;
+
+                                // Backfill freight_id when older moves left it empty
+                                if (
+                                    orderFreightId &&
+                                    (!existingFreightId || Number(existingFreightId) === 0)
+                                ) {
+                                    con.query(
+                                        `UPDATE warehouse_assign_order SET freight_id=? WHERE id=?`,
+                                        [orderFreightId, warehouseId],
+                                        (err) => {
+                                            if (err) {
+                                                console.log("FREIGHT_ID BACKFILL ERROR:", err);
+                                            }
+                                            moveFilesAndProducts(
+                                                data,
+                                                warehouseId,
+                                                order_id
+                                            );
+                                        }
+                                    );
+                                } else {
+                                    moveFilesAndProducts(
+                                        data,
+                                        warehouseId,
+                                        order_id
+                                    );
+                                }
                             }
-                        );
-
-                    } else {
-
-                        const warehouseId = warehouseRows[0].id;
-
-                        moveFilesAndProducts(
-                            data,
-                            warehouseId,
-                            order_id
-                        );
-                    }
+                        }
+                    );
                 }
             );
         }

@@ -83,6 +83,9 @@ admin_route.post(
     ]),
     adminController.addUpdateCollectionDelivery
 );
+admin_route.post("/GetCollectionDelivery", adminController.GetCollectionDelivery);
+admin_route.post("/GetCollectionDeliveryDetails", adminController.GetCollectionDeliveryDetails);
+admin_route.post("/assignCollectionDeliveryToSupplier", adminController.assignCollectionDeliveryToSupplier);
 
 admin_route.post("/ManageFreightStatus", adminController.ManageFreightStatus);
 admin_route.post('/freight-list-byId', adminController.GetFreightAdminById);
@@ -273,5 +276,8 @@ admin_route.post("/getSalesByItemReport", adminController.GetSalesByItemReport);
 admin_route.post("/getSalesBySalesRepReport", adminController.getSalesBySalesRepReport);
 admin_route.post("/getSupplierBalancesDaysOutstandingReport", adminController.getSupplierBalancesDaysOutstandingReport);
 admin_route.post("/getSupplierInvoicesReport", adminController.getSupplierInvoicesReport);
+
+admin_route.post("/qouteEstimateDetailsByFreight", adminController.qouteEstimateDetailsByFreight);    // for PDF
+admin_route.get("/getBatchReport/:batch_id", adminController.getBatchReport);
 
 module.exports = admin_route;

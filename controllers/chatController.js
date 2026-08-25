@@ -1077,122 +1077,386 @@ exports.sendFileMessage = (req, res) => {
 
 //============================== Leaves =========================//
 
-exports.applyStaffLeave = (req, res) => {
-    try {
-        const { staff_id, leave_from, leave_to, reason } = req.body;
+// exports.applyStaffLeave = (req, res) => {
+//     try {
+//         const { staff_id, leave_from, leave_to, reason } = req.body;
 
-        if (!staff_id || !leave_from || !leave_to || !reason) {
+//         if (!staff_id || !leave_from || !leave_to || !reason) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "All fields are required"
+//             });
+//         }
+
+//         const startDate = new Date(leave_from);
+//         const endDate = new Date(leave_to);
+
+//         if (isNaN(startDate) || isNaN(endDate)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Invalid date format"
+//             });
+//         }
+
+//         if (endDate < startDate) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "End date cannot be before start date"
+//             });
+//         }
+
+//         const q = `
+//             INSERT INTO tbl_leaves
+//             (staff_id, leave_from, leave_to, reason)
+//             VALUES (?, ?, ?, ?)
+//         `;
+
+//         db.query(
+//             q,
+//             [staff_id, leave_from, leave_to, reason],
+//             (err, result) => {
+//                 if (err) {
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: "Internal server error",
+//                         error: err.message
+//                     });
+//                 }
+
+//                 res.status(200).json({
+//                     success: true,
+//                     message: "Leave request submitted successfully",
+//                     leave_id: result.insertId
+//                 });
+//             }
+//         );
+
+//     } catch (error) {
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
+
+exports.applyStaffLeave = (req, res) => {
+
+    try {
+
+        const {
+            staff_id,
+            leave_type,
+            leave_from,
+            leave_to,
+            reason,
+            comments,
+            reference,
+            next_approver
+        } = req.body;
+
+        // ---------------------------------------------------------
+        // 1. Required fields validation
+        // ---------------------------------------------------------
+
+        if (
+            !staff_id ||
+            !leave_type ||
+            !leave_from ||
+            !leave_to ||
+            !reason
+        ) {
+
             return res.status(400).json({
                 success: false,
-                message: "All fields are required"
+                message:
+                    "Staff ID, leave type, leave from, leave to and reason are required"
             });
+
         }
+
+        // ---------------------------------------------------------
+        // 2. Validate dates
+        // ---------------------------------------------------------
 
         const startDate = new Date(leave_from);
         const endDate = new Date(leave_to);
 
-        if (isNaN(startDate) || isNaN(endDate)) {
+        if (
+            isNaN(startDate.getTime()) ||
+            isNaN(endDate.getTime())
+        ) {
+
             return res.status(400).json({
                 success: false,
                 message: "Invalid date format"
             });
+
         }
 
+        // ---------------------------------------------------------
+        // 3. Validate date range
+        // ---------------------------------------------------------
+
         if (endDate < startDate) {
+
             return res.status(400).json({
                 success: false,
                 message: "End date cannot be before start date"
             });
+
         }
+
+        // ---------------------------------------------------------
+        // 4. Attachment
+        // ---------------------------------------------------------
+
+        let attachment = null;
+
+        if (req.file) {
+            attachment = req.file.filename;
+        }
+
+        // ---------------------------------------------------------
+        // 5. Insert leave
+        // ---------------------------------------------------------
 
         const q = `
             INSERT INTO tbl_leaves
-            (staff_id, leave_from, leave_to, reason)
-            VALUES (?, ?, ?, ?)
+            (
+                staff_id,
+                leave_type,
+                leave_from,
+                leave_to,
+                reason,
+                comments,
+                reference,
+                attachment,
+                next_approver
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         db.query(
             q,
-            [staff_id, leave_from, leave_to, reason],
+            [
+                staff_id,
+                leave_type,
+                leave_from,
+                leave_to,
+                reason,
+                comments || null,
+                reference || null,
+                attachment,
+                next_approver || null
+            ],
             (err, result) => {
                 if (err) {
+                    console.error(
+                        "applyStaffLeave Error:",
+                        err
+                    );
                     return res.status(500).json({
                         success: false,
                         message: "Internal server error",
                         error: err.message
                     });
+
                 }
 
-                res.status(200).json({
+                return res.status(200).json({
+
                     success: true,
-                    message: "Leave request submitted successfully",
-                    leave_id: result.insertId
+
+                    message:
+                        "Leave request submitted successfully",
+
+                    leave_id:
+                        result.insertId,
+
+                    attachment:
+                        attachment
+
                 });
+
             }
         );
 
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error(
+            "applyStaffLeave Error:",
+            error
+        );
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
     }
+
 };
+
+// exports.getAllStaffLeaveRequests = (req, res) => {
+//     try {
+//         let { search, status, page, limit } = req.body;
+
+//         page = page ? parseInt(page) : 1;
+//         limit = limit ? parseInt(limit) : 10;
+//         const offset = (page - 1) * limit;
+
+//         let where = `WHERE l.is_deleted = 0`;
+//         let params = [];
+
+//         if (status) {
+//             where += ` AND l.status = ?`;
+//             params.push(status);
+//         }
+
+//         if (search) {
+//             where += `
+//                 AND (
+//                     s.full_name LIKE ?
+//                     OR l.reason LIKE ?
+//                 )
+//             `;
+//             const val = `%${search}%`;
+//             params.push(val, val);
+//         }
+
+//         const countQ = `
+//             SELECT COUNT(*) AS total
+//             FROM tbl_leaves l
+//             JOIN tbl_users s ON s.id = l.staff_id
+//             ${where}
+//         `;
+
+//         db.query(countQ, params, (e1, cRes) => {
+//             if (e1) {
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: e1.message
+//                 });
+//             }
+
+//             const total = cRes[0].total;
+
+//             const dataQ = `
+//                 SELECT
+//                     l.id as leave_id,
+//                     l.leave_from,
+//                     l.leave_to,
+//                     l.reason,
+//                     l.status,
+//                     l.admin_remark,
+//                     l.created_at,
+//                     s.id AS staff_id,
+//                     s.full_name AS staff_name
+//                 FROM tbl_leaves l
+//                 JOIN tbl_users s ON s.id = l.staff_id
+//                 ${where}
+//                 ORDER BY l.id DESC
+//                 LIMIT ? OFFSET ?
+//             `;
+
+//             db.query(
+//                 dataQ,
+//                 [...params, limit, offset],
+//                 (e2, rows) => {
+//                     if (e2) {
+//                         return res.status(500).json({
+//                             success: false,
+//                             message: e2.message
+//                         });
+//                     }
+
+//                     res.status(200).json({
+//                         success: true,
+//                         message: "Leave requests fetched successfully",
+//                         data: rows,
+//                         total: total,
+//                         page,
+//                         limit
+//                     });
+//                 }
+//             );
+//         });
+
+//     } catch (err) {
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+
 
 exports.getAllStaffLeaveRequests = (req, res) => {
     try {
-        let { search, status, page, limit } = req.body;
+        let { search, status, page = 1, limit = 10 } = req.body;
 
         page = page ? parseInt(page) : 1;
         limit = limit ? parseInt(limit) : 10;
+
+        if (page < 1) page = 1;
+        if (limit < 1) limit = 10;
+
         const offset = (page - 1) * limit;
 
         let where = `WHERE l.is_deleted = 0`;
         let params = [];
 
-        if (status) {
+        if (status !== undefined && status !== null && status !== "") {
             where += ` AND l.status = ?`;
             params.push(status);
         }
 
-        if (search) {
+        if (search !== undefined && search !== null && search.trim() !== "") {
             where += `
                 AND (
                     s.full_name LIKE ?
                     OR l.reason LIKE ?
+                    OR l.leave_type LIKE ?
+                    OR l.reference LIKE ?
+                    OR l.comments LIKE ?
                 )
             `;
-            const val = `%${search}%`;
-            params.push(val, val);
+
+            const val = `%${search.trim()}%`;
+            params.push(val, val, val, val, val);
         }
 
         const countQ = `
             SELECT COUNT(*) AS total
             FROM tbl_leaves l
-            JOIN tbl_users s ON s.id = l.staff_id
+            INNER JOIN tbl_users s ON s.id = l.staff_id
             ${where}
         `;
 
         db.query(countQ, params, (e1, cRes) => {
             if (e1) {
+                console.error("getAllStaffLeaveRequests Count Error:", e1);
                 return res.status(500).json({
                     success: false,
                     message: e1.message
                 });
             }
 
-            const total = cRes[0].total;
+            const total = Number(cRes[0].total) || 0;
+            const totalPages = Math.ceil(total / limit);
 
             const dataQ = `
                 SELECT
-                    l.id as leave_id,
+                    l.id AS leave_id,
+                    l.staff_id,
+                    l.leave_type,
                     l.leave_from,
                     l.leave_to,
                     l.reason,
+                    l.comments,
+                    l.reference,
+                    l.attachment,
+                    l.next_approver,
                     l.status,
                     l.admin_remark,
                     l.created_at,
+                    l.updated_at,
                     s.id AS staff_id,
                     s.full_name AS staff_name
                 FROM tbl_leaves l
-                JOIN tbl_users s ON s.id = l.staff_id
+                INNER JOIN tbl_users s ON s.id = l.staff_id
                 ${where}
                 ORDER BY l.id DESC
                 LIMIT ? OFFSET ?
@@ -1203,32 +1467,47 @@ exports.getAllStaffLeaveRequests = (req, res) => {
                 [...params, limit, offset],
                 (e2, rows) => {
                     if (e2) {
+                        console.error("getAllStaffLeaveRequests Data Error:", e2);
                         return res.status(500).json({
                             success: false,
                             message: e2.message
                         });
                     }
 
-                    res.status(200).json({
+                    return res.status(200).json({
                         success: true,
                         message: "Leave requests fetched successfully",
                         data: rows,
-                        total: total,
+                        total,
+                        total_pages: totalPages,
                         page,
                         limit
                     });
                 }
             );
         });
-
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error("getAllStaffLeaveRequests Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
 exports.updateStaffLeaveStatus = (req, res) => {
     try {
-        const { leave_id, status, admin_remark } = req.body;
+
+        const {
+            leave_id,
+            status,
+            admin_remark
+        } = req.body;
+
+
+        // ---------------------------------------------------------
+        // 1. Validation
+        // ---------------------------------------------------------
 
         if (!leave_id || status === undefined) {
             return res.status(400).json({
@@ -1237,57 +1516,286 @@ exports.updateStaffLeaveStatus = (req, res) => {
             });
         }
 
-        if (![0, 1, 2].includes(Number(status))) {
+
+        // ---------------------------------------------------------
+        // 2. Validate new status
+        // ---------------------------------------------------------
+
+        const newStatus = Number(status);
+
+        if (![0, 1, 2].includes(newStatus)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid status (0=Pending,1=Approved,2=Rejected)"
             });
         }
 
-        const q = `
-            UPDATE tbl_leaves
-            SET status = ?, admin_remark = ?
-            WHERE id = ? AND is_deleted = 0
+
+        // ---------------------------------------------------------
+        // 3. Get current leave status
+        // ---------------------------------------------------------
+
+        const getLeaveQuery = `
+            SELECT
+                id,
+                status
+            FROM tbl_leaves
+            WHERE id = ?
+              AND is_deleted = 0
+            LIMIT 1
         `;
 
+
         db.query(
-            q,
-            [status, admin_remark || null, leave_id],
-            (err, result) => {
-                if (err) {
+            getLeaveQuery,
+            [leave_id],
+            (selectErr, rows) => {
+
+                if (selectErr) {
                     return res.status(500).json({
                         success: false,
-                        message: err.message
+                        message: selectErr.message
                     });
                 }
 
-                if (result.affectedRows === 0) {
+
+                // -------------------------------------------------
+                // Leave not found
+                // -------------------------------------------------
+
+                if (!rows || rows.length === 0) {
                     return res.status(404).json({
                         success: false,
                         message: "Leave request not found"
                     });
                 }
 
-                res.status(200).json({
-                    success: true,
-                    message:
-                        status == 1
-                            ? "Leave approved successfully"
-                            : status == 2
-                                ? "Leave rejected successfully"
-                                : "Leave set to pending"
-                });
+
+                const currentStatus =
+                    Number(rows[0].status);
+
+
+                // -------------------------------------------------
+                // 4. Current status must be Pending
+                // -------------------------------------------------
+
+                if (currentStatus !== 0) {
+
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            currentStatus === 1
+                                ? "Approved leave request cannot be changed"
+                                : "Rejected leave request cannot be changed"
+                    });
+
+                }
+
+
+                // -------------------------------------------------
+                // 5. Pending cannot be kept as Pending
+                // -------------------------------------------------
+
+                if (newStatus === 0) {
+
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Pending leave request can only be changed to Approved or Rejected"
+                    });
+
+                }
+
+
+                // -------------------------------------------------
+                // 6. Update status
+                // -------------------------------------------------
+
+                const updateQuery = `
+                    UPDATE tbl_leaves
+                    SET
+                        status = ?,
+                        admin_remark = ?,
+                        updated_at = NOW()
+                    WHERE id = ?
+                      AND is_deleted = 0
+                      AND status = 0
+                `;
+
+
+                db.query(
+                    updateQuery,
+                    [
+                        newStatus,
+                        admin_remark || null,
+                        leave_id
+                    ],
+                    (updateErr, result) => {
+
+                        if (updateErr) {
+                            return res.status(500).json({
+                                success: false,
+                                message: updateErr.message
+                            });
+                        }
+
+
+                        if (result.affectedRows === 0) {
+                            return res.status(400).json({
+                                success: false,
+                                message:
+                                    "Leave request status could not be updated"
+                            });
+                        }
+
+
+                        // -------------------------------------------------
+                        // 7. Success response
+                        // -------------------------------------------------
+
+                        return res.status(200).json({
+
+                            success: true,
+
+                            message:
+                                newStatus === 1
+                                    ? "Leave approved successfully"
+                                    : "Leave rejected successfully"
+
+                        });
+
+                    }
+                );
+
             }
         );
 
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+
+        console.error(
+            "updateStaffLeaveStatus Error:",
+            error
+        );
+
+        return res.status(500).json({
+
+            success: false,
+            message: error.message
+
+        });
+
     }
 };
 
+// exports.getMystaffLeaves = (req, res) => {
+//     try {
+//         let { staff_id, status, page = 1, limit = 10 } = req.body;
+
+//         if (!staff_id) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "staff_id is required"
+//             });
+//         }
+
+//         page = page ? parseInt(page) : 1;
+//         limit = limit ? parseInt(limit) : 10;
+//         const offset = (page - 1) * limit;
+
+//         let where = `
+//             WHERE is_deleted = 0
+//             AND staff_id = ?
+//         `;
+//         let params = [staff_id];
+
+//         if (status !== undefined) {
+//             where += ` AND status = ?`;
+//             params.push(status);
+//         }
+
+//         /* ================= COUNT QUERY ================= */
+//         const countQuery = `
+//             SELECT COUNT(*) AS total
+//             FROM tbl_leaves
+//             ${where}
+//         `;
+
+//         db.query(countQuery, params, (countErr, countRes) => {
+//             if (countErr) {
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: countErr.message
+//                 });
+//             }
+
+//             const totalRecords = countRes[0].total;
+//             const totalPages = Math.ceil(totalRecords / limit);
+
+//             /* ================= DATA QUERY ================= */
+//             const dataQuery = `
+//                 SELECT
+//                     id as leave_id,
+//                     leave_from,
+//                     leave_to,
+//                     reason,
+//                     status,
+//                     admin_remark,
+//                     created_at,
+//                     updated_at
+//                 FROM tbl_leaves
+//                 ${where}
+//                 ORDER BY id DESC
+//                 LIMIT ? OFFSET ?
+//             `;
+
+//             db.query(
+//                 dataQuery,
+//                 [...params, limit, offset],
+//                 (dataErr, rows) => {
+//                     if (dataErr) {
+//                         return res.status(500).json({
+//                             success: false,
+//                             message: dataErr.message
+//                         });
+//                     }
+
+//                     res.status(200).json({
+//                         success: true,
+//                         message: "My leaves fetched successfully",
+//                         data: rows,
+//                         total: totalRecords,
+//                         total_pages: totalPages,
+//                         page,
+//                         limit
+//                     });
+//                 }
+//             );
+//         });
+
+//     } catch (error) {
+//         res.status(500).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+// ============================ Feedbacks ======================== //
+
+
 exports.getMystaffLeaves = (req, res) => {
     try {
-        let { staff_id, status, page=1, limit=10 } = req.body;
+
+        let {
+            staff_id,
+            status,
+            page = 1,
+            limit = 10
+        } = req.body;
+
+        // ---------------------------------------------------------
+        // 1. Validate staff_id
+        // ---------------------------------------------------------
 
         if (!staff_id) {
             return res.status(400).json({
@@ -1296,89 +1804,288 @@ exports.getMystaffLeaves = (req, res) => {
             });
         }
 
+        // ---------------------------------------------------------
+        // 2. Pagination
+        // ---------------------------------------------------------
+
         page = page ? parseInt(page) : 1;
         limit = limit ? parseInt(limit) : 10;
+
+        if (page < 1) {
+            page = 1;
+        }
+
+        if (limit < 1) {
+            limit = 10;
+        }
+
         const offset = (page - 1) * limit;
+
+        // ---------------------------------------------------------
+        // 3. Where condition
+        // ---------------------------------------------------------
 
         let where = `
             WHERE is_deleted = 0
             AND staff_id = ?
         `;
+
         let params = [staff_id];
 
-        if (status !== undefined) {
+        // ---------------------------------------------------------
+        // 4. Status filter
+        // ---------------------------------------------------------
+
+        if (
+            status !== undefined &&
+            status !== null &&
+            status !== ""
+        ) {
+
             where += ` AND status = ?`;
+
             params.push(status);
+
         }
 
-        /* ================= COUNT QUERY ================= */
+        // ---------------------------------------------------------
+        // 5. Count Query
+        // ---------------------------------------------------------
+
         const countQuery = `
             SELECT COUNT(*) AS total
             FROM tbl_leaves
             ${where}
         `;
 
-        db.query(countQuery, params, (countErr, countRes) => {
-            if (countErr) {
+        db.query(
+            countQuery,
+            params,
+            (countErr, countRes) => {
+                if (countErr) {
+                    console.error(
+                        "getMystaffLeaves Count Error:",
+                        countErr
+                    );
+                    return res.status(500).json({
+                        success: false,
+                        message: countErr.message
+                    });
+
+                }
+
+                const totalRecords =
+                    Number(countRes[0].total) || 0;
+
+                const totalPages =
+                    Math.ceil(totalRecords / limit);
+
+                // -------------------------------------------------
+                // 6. Data Query
+                // -------------------------------------------------
+
+                const dataQuery = `
+                    SELECT
+                        id AS leave_id,
+                        staff_id,
+                        leave_type,
+                        leave_from,
+                        leave_to,
+                        reason,
+                        comments,
+                        reference,
+                        attachment,
+                        next_approver,
+                        status,
+                        admin_remark,
+                        created_at,
+                        updated_at
+                    FROM tbl_leaves
+                    ${where}
+                    ORDER BY id DESC
+                    LIMIT ? OFFSET ?
+                `;
+
+                db.query(
+                    dataQuery,
+                    [
+                        ...params,
+                        limit,
+                        offset
+                    ],
+                    (dataErr, rows) => {
+                        if (dataErr) {
+                            console.error(
+                                "getMystaffLeaves Data Error:",
+                                dataErr
+                            );
+                            return res.status(500).json({
+                                success: false,
+                                message: dataErr.message
+                            });
+
+                        }
+
+                        // -------------------------------------------------
+                        // 7. Response
+                        // -------------------------------------------------
+
+                        return res.status(200).json({
+                            success: true,
+                            message: "Leaves fetched successfully",
+                            data: rows,
+                            total: totalRecords,
+                            total_pages: totalPages,
+                            page: page,
+                            limit: limit
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+    } catch (error) {
+        console.error("getMystaffLeaves Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+exports.getStaffLeaveById = (req, res) => {
+    try {
+        const { leave_id } = req.params;
+
+        if (!leave_id) {
+            return res.status(400).json({
+                success: false,
+                message: "leave_id is required"
+            });
+        }
+
+        if (isNaN(Number(leave_id))) {
+            return res.status(400).json({
+                success: false,
+                message: "leave_id must be a valid number"
+            });
+        }
+
+        const query = `
+            SELECT
+                l.id AS leave_id,
+                l.staff_id,
+                l.leave_type,
+                l.leave_from,
+                l.leave_to,
+                l.reason,
+                l.comments,
+                l.reference,
+                l.attachment,
+                l.next_approver,
+                l.status,
+                l.admin_remark,
+                l.created_at,
+                l.updated_at,
+                s.id AS staff_user_id,
+                s.full_name AS staff_name
+            FROM tbl_leaves l
+            LEFT JOIN tbl_users s ON s.id = l.staff_id
+            WHERE l.id = ?
+            AND l.is_deleted = 0
+            LIMIT 1
+        `;
+
+        db.query(query, [Number(leave_id)], (err, rows) => {
+            if (err) {
+                console.error("getStaffLeaveById Error:", err);
                 return res.status(500).json({
                     success: false,
-                    message: countErr.message
+                    message: err.message
                 });
             }
 
-            const totalRecords = countRes[0].total;
-            const totalPages = Math.ceil(totalRecords / limit);
+            if (!rows || rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Leave request not found"
+                });
+            }
 
-            /* ================= DATA QUERY ================= */
-            const dataQuery = `
-                SELECT
-                    id as leave_id,
-                    leave_from,
-                    leave_to,
-                    reason,
-                    status,
-                    admin_remark,
-                    created_at,
-                    updated_at
-                FROM tbl_leaves
-                ${where}
-                ORDER BY id DESC
-                LIMIT ? OFFSET ?
-            `;
-
-            db.query(
-                dataQuery,
-                [...params, limit, offset],
-                (dataErr, rows) => {
-                    if (dataErr) {
-                        return res.status(500).json({
-                            success: false,
-                            message: dataErr.message
-                        });
-                    }
-
-                    res.status(200).json({
-                        success: true,
-                        message: "My leaves fetched successfully",
-                        data: rows,
-                        total: totalRecords,
-                        total_pages: totalPages,
-                        page,
-                        limit
-                    });
-                }
-            );
+            return res.status(200).json({
+                success: true,
+                message: "Leave details fetched successfully",
+                data: rows[0]
+            });
         });
-
     } catch (error) {
-        res.status(500).json({
+        console.error("getStaffLeaveById Exception:", error);
+        return res.status(500).json({
             success: false,
             message: error.message
         });
     }
 };
 
-// ============================ Feedbacks ======================== //
+exports.deleteStaffLeave = (req, res) => {
+    try {
+        const { leave_id } = req.body;
+
+        if (!leave_id) {
+            return res.status(400).json({
+                success: false,
+                message: "leave_id is required"
+            });
+        }
+
+        if (isNaN(Number(leave_id))) {
+            return res.status(400).json({
+                success: false,
+                message: "leave_id must be a valid number"
+            });
+        }
+
+        const query = `
+            UPDATE tbl_leaves
+            SET
+                is_deleted = 1,
+                updated_at = NOW()
+            WHERE id = ?
+            AND is_deleted = 0
+        `;
+
+        db.query(query, [Number(leave_id)], (err, result) => {
+            if (err) {
+                console.error("deleteStaffLeave Error:", err);
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Leave request not found"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Leave request deleted successfully"
+            });
+        });
+    } catch (error) {
+        console.error("deleteStaffLeave Exception:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 exports.addFeedback = (req, res) => {
     try {

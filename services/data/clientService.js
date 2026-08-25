@@ -304,13 +304,33 @@ async function getClientByCustomerId(customerId, ctx, { includeFreights = false 
     return client;
 }
 
-async function countClients(ctx) {
-    if (ctx.isCustomer) return 1;
+async function countClients(ctx, { status } = {}) {
+    if (ctx.isCustomer) return { total: 1, active: 1, inactive: 0 };
+
+    // Dashboard countAll: user_type=3 AND is_deleted=0 (active + inactive).
+    const conditions = ['user_type = 3', 'is_deleted = 0'];
+    const params = [];
+    const statusFilter = status == null || status === '' ? null : String(status).toLowerCase();
+    if (statusFilter === 'active' || statusFilter === '1') {
+        conditions.push('status = 1');
+    } else if (statusFilter === 'inactive' || statusFilter === '0') {
+        conditions.push('(status = 0 OR status IS NULL OR status != 1)');
+    }
+
     const rows = await query(
-        `SELECT COUNT(*) AS total FROM tbl_users
-         WHERE user_type = 3 AND is_deleted = 0 AND status = 1`
+        `SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status = 1 THEN 0 ELSE 1 END) AS inactive
+         FROM tbl_users
+         WHERE ${conditions.join(' AND ')}`,
+        params
     );
-    return Number(rows[0]?.total || 0);
+    return {
+        total: Number(rows[0]?.total || 0),
+        active: Number(rows[0]?.active || 0),
+        inactive: Number(rows[0]?.inactive || 0),
+    };
 }
 
 module.exports = {

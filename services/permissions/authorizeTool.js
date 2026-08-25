@@ -31,18 +31,19 @@ function canAccessFreight(ctx, freight) {
     }
 
     if (ctx.isStaff) {
+        // Staff with assigned countries: freights in those countries only.
         if (ctx.accessCountries.length) {
             const origin = Number(freight.collection_from);
             const destination = Number(freight.delivery_to);
-            const inScope = ctx.accessCountries.includes(origin) || ctx.accessCountries.includes(destination);
-            if (!inScope) return false;
+            return (
+                ctx.accessCountries.includes(origin) ||
+                ctx.accessCountries.includes(destination)
+            );
         }
 
-        const ownsRecord =
-            Number(freight.user_id) === Number(ctx.userId) ||
-            Number(freight.sales_representative) === Number(ctx.userId);
-
-        return ownsRecord || !ctx.accessCountries.length;
+        // No access_country list = no geographic limit → staff can view freights
+        // (empty array must not fall back to "ownership only", which hides most records).
+        return true;
     }
 
     return false;

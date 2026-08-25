@@ -168,10 +168,12 @@ async function processChatMessage({ message, userId, sessionId }) {
     let triedGemini = false;
     const preferRules = shouldPreferRulesFastPath(trimmedMessage);
 
-    if ((waitingForChoice && isSelectionReply(trimmedMessage)) || preferRules) {
+    // If Gemini is available, we let it handle reference lookups to behave more conversationally.
+    // We only force the rule-based fast path if Gemini is NOT available, or if waiting for a choice selection.
+    if ((waitingForChoice && isSelectionReply(trimmedMessage)) || (!isGeminiAvailable() && preferRules)) {
         result = await ruleBasedRoute(trimmedMessage, ctx, sid);
         result.provider = result.provider || 'rules';
-        if (preferRules && !isWeakAiResult(result)) {
+        if (!isWeakAiResult(result)) {
             addMessage(sid, 'assistant', result.reply);
             await persistTurn({ userId, sessionId: sid, userText: trimmedMessage, result });
             return buildSuccess(result, ctx, sid);

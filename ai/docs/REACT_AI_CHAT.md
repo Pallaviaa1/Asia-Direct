@@ -83,6 +83,8 @@ Response:
 
 `data` drives rich cards (same shapes the HTML demo already renders). If you skip cards at first, just show `reply`.
 
+**Freight full details:** when `data.uiHint.preferReplyText` / `skipCompactFreightCard` is set (or there is no top-level `data.freight`), show only the `reply` text. Do **not** also render a compact “Freight Details” card (Status / Weight / POL) — that duplicates the reply. Full payload is under `data.freightOrder` if you build a full Order Freight Detail card later.
+
 ### `GET /api/ai-chat/status`
 
 Optional health check (Gemini available / cooldown).

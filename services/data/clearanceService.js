@@ -348,6 +348,12 @@ async function listClearanceOrders(ctx, { clientId, clearanceNumber, search, lim
 }
 
 async function countClearanceOrders(ctx, { clientId } = {}) {
+    // Dashboard countAll: SELECT COUNT(*) FROM clearance_order (no is_deleted / join filters).
+    if (!clientId && !ctx.isCustomer) {
+        const rows = await query(`SELECT COUNT(*) AS total FROM clearance_order`);
+        return Number(rows[0]?.total || 0);
+    }
+
     const conditions = ['COALESCE(co.is_deleted, 0) = 0', 'cl.is_deleted = 0'];
     const params = [];
     if (ctx.isCustomer) {

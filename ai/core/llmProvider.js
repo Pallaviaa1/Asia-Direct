@@ -72,6 +72,9 @@ const {
     extractTaskStatus,
     extractTaskFocus,
     extractTaskSearchTerm,
+    extractLeaveStatus,
+    extractLeaveMonthYear,
+    extractLeaveSearchTerm,
     extractContactEnquiryNature,
     extractContactEnquiryFocus,
     extractContactEnquirySearchTerm,
@@ -159,9 +162,86 @@ function getModelCandidates() {
     return [...new Set([primary, ...fallbacks])];
 }
 
-function toGeminiTools() {
+function toGeminiTools(message = '') {
+    const text = String(message).toLowerCase();
+    
+    // Core tools always included for lookup resolution
+    const coreTools = ['findClientsByName', 'getClientDetails', 'countClients'];
+    const includedTools = new Set(coreTools);
+
+    if (text.includes('freight') || text.includes('f-') || text.includes('route') || text.includes('waybill')) {
+        ['getFreightFullDetails', 'countFreights', 'getFreightsByClient', 'getOrdersByFreight'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('order') || text.includes('or0')) {
+        ['getOrderDetails', 'countOrders', 'getOrdersByClient', 'getOrdersByFreight', 'getWarehouseOrderDetails', 'getWarehouseOrders', 'countWarehouseOrders'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('invoice') || text.includes('adinv') || text.includes('supinv') || text.includes('sage') || text.includes('adzwinv')) {
+        ['getFreightInvoiceDetails', 'searchFreightInvoices', 'countFreightInvoices', 'getSupplierInvoiceDetails', 'searchSupplierInvoices', 'countSupplierInvoices', 'getSageInvoiceDetails', 'searchSageInvoices', 'countSageInvoices', 'getInvoicesByClient', 'getMyInvoices'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('warehouse')) {
+        ['getWarehouseOrderDetails', 'getWarehouseOrders', 'countWarehouseOrders'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('batch') || text.includes('adawb')) {
+        ['getBatchDetails', 'listBatches', 'countBatches'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('shipment') || text.includes('dl26')) {
+        ['getShipmentDetails', 'getShipments', 'countShipments'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('clearance') || text.includes('c-')) {
+        ['getClearanceDetails', 'getClearances', 'countClearances', 'getClearanceOrders', 'countClearanceOrders'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('quote') || text.includes('quotation') || text.includes('adqo')) {
+        ['getQuoteDetails', 'searchQuotes', 'countQuotes'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('dispute') || text.includes('d-')) {
+        ['getDisputeDetails', 'searchDisputes', 'countDisputes'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('release')) {
+        ['getReleaseDashboardDetails', 'searchReleaseDashboard', 'countReleaseDashboard'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('cashbook')) {
+        ['getCashbookDetails', 'searchCashbook', 'countCashbook'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('collection') || text.includes('deliver')) {
+        ['getCollectionDeliveryDetails', 'searchCollectionDelivery', 'countCollectionDelivery'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('task')) {
+        ['getTaskDetails', 'searchTasks', 'countTasks'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('leave') || text.includes('calendar')) {
+        ['getLeaveDetails', 'searchLeaves', 'countLeaves'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('enquiry') || text.includes('contact')) {
+        ['getContactEnquiryDetails', 'searchContactEnquiries', 'countContactEnquiries'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('country') || text.includes('origin')) {
+        ['getCountryOriginDetails', 'searchCountryOrigins', 'countCountryOrigins'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('partner') || text.includes('agent') || text.includes('forwarder') || text.includes('transporter')) {
+        ['getPartnerDetails', 'searchPartners', 'countPartners'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('company') || text.includes('address')) {
+        ['getCompanyAddressDetails', 'searchCompanyAddresses', 'countCompanyAddresses'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('supplier')) {
+        ['findSupplier', 'getSupplierDetails', 'countSuppliers'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('staff')) {
+        ['getStaffDetails', 'searchStaff', 'countStaff'].forEach(t => includedTools.add(t));
+    }
+    if (text.includes('kpi')) {
+        ['searchClientKpi', 'getClientKpiDetails', 'countClientKpi'].forEach(t => includedTools.add(t));
+    }
+
+    let filteredTools = TOOL_DEFINITIONS.filter(t => includedTools.has(t.name));
+    
+    // Fallback: If no intent matched, send all tools so the bot isn't completely disabled
+    if (filteredTools.length <= coreTools.length) {
+        filteredTools = TOOL_DEFINITIONS;
+    }
+
     return [{
-        functionDeclarations: TOOL_DEFINITIONS.map((tool) => ({
+        functionDeclarations: filteredTools.map((tool) => ({
             name: tool.name,
             description: tool.description,
             parameters: tool.parameters,
@@ -194,7 +274,7 @@ Tools:
 - getFreightFullDetails — Order Freight Detail by number (F-20260722005). Pass focus for: product_desc, estimate_amount, paid, supplier, client, route, status, sales_rep, commodity, waybill, freight_number, shipper, consignee, weight, dimension, packages, package_type, hazardous, volumetric_weight, chargeable_weight, port_of_loading, port_of_discharge, pickup_address, delivery_address, incoterm.
 - getOrderDetails — one order by number (OR000253). Pass focus="status" for status-only questions.
 - findClientsByName — resolve a person/company name. Set intent to client, freights, invoices, orders, warehouse_orders, batches, shipments, clearances, clearance_orders, or count_* variants.
-- getClientDetails / countClients — Customer Profile Details by Customer ID (CE21170 / S20832), Client ID, name, or email: address, phones, contact person, company/importer/tax refs, country, related freights.
+- getClientDetails / countClients — Customer Profile Details by Customer ID (CE21170 / S20832), Client ID, name, or email: address, phones, contact person, company/importer/tax refs, country, related freights. countClients matches dashboard (active + inactive); optional status active/inactive.
 - getSageInvoiceDetails / searchSageInvoices / countSageInvoices — Sage Invoice list (ADZWINV…: document number, customer name, customer ref, date, total, upload, Invoice AD).
 - getDisputeDetails / searchDisputes / countDisputes — Customer Query / Dispute (D-202638, name search, Pending/Resolved).
 - getReleaseDashboardDetails / searchReleaseDashboard / countReleaseDashboard — Release Dashboard (OR000893: clearing, cargo inspection, payment, release instruction, delivery, Open/Close).
@@ -204,6 +284,7 @@ Tools:
 - getSupplierInvoiceDetails / searchSupplierInvoices / countSupplierInvoices — Supplier Shipment Invoice (SUPINV10015: supplier, waybill, total, amount due, unpaid/paid, carrier/vessel, routing, charge groups).
 - getCollectionDeliveryDetails / searchCollectionDelivery / countCollectionDelivery — Collection and Delivery module (F-… / OR000…: type, collection/delivery flags, supplier, countries, mode, Pending status, pickup/packages/costs form).
 - getTaskDetails / searchTasks / countTasks — Task Manager (freight tasks: Name, Freight Number, Due Date, Notes, Status, Action Required; clearance tasks: Clearance Number; custom tasks: Title).
+- getLeaveDetails / searchLeaves / countLeaves — Leave Calendar / staff leave requests (Staff Name, Leave From, Leave To, Reason, Status Pending/Approved/Rejected, Admin Remark). Admin sees all; staff see own.
 - getContactEnquiryDetails / searchContactEnquiries / countContactEnquiries — Contact Us Enquiries (Name, Country, Email, Phone No, Subject, Nature of Enquiry, Message). Not the same as Customer Query / Dispute.
 - getCountryOriginDetails / searchCountryOrigins / countCountryOrigins — Country of Origin module (Country Name, Cities, Sea Ports, Air Ports, Land Ports). Not freight/supplier "country of origin" field unless a freight/supplier is named.
 - getPartnerDetails / searchPartners / countPartners — Custom Agent, Freight Forwarder, Groupage Warehouse, Transporter (Email, Full Name, Phone Number, Country, Address). Pass partnerType.
@@ -233,6 +314,7 @@ Examples:
 - "find client Simon" / "customer CE21170" / "client 20135" / "customer profile central agriculture" → getClientDetails or findClientsByName(intent="client")
 - "contact person of customer CE21170" / "related freights for CE21170" → getClientDetails with focus
 - "count clients" → countClients()
+- "count active clients" / "count inactive clients" → countClients(status)
 - "sage invoice ADZWINV000637" → getSageInvoiceDetails
 - "total of ADZWINV000637" / "customer ref of ADZWINV000637" → getSageInvoiceDetails with focus
 - "find sage invoice Quantrix" / "sage invoices for Cash Client" → searchSageInvoices
@@ -262,6 +344,9 @@ Examples:
 - "freight tasks" / "clearance tasks" / "custom tasks" / "pending tasks" → searchTasks
 - "tasks for Santosh" / "task manager F-20260721004" → searchTasks
 - "count tasks" → countTasks()
+- "leave calendar" / "leave calendar August 2026" / "pending leave requests" → searchLeaves
+- "leave for Gregory" / "my leaves" → searchLeaves
+- "count leave requests" → countLeaves()
 - "contact us enquiries" / "enquiry ttttt2@gmail.com" / "nature of enquiry Sales" → searchContactEnquiries
 - "count contact enquiries" → countContactEnquiries()
 - "country of origin Austria" / "cities of Austria origin" / "sea ports of Zimbabwe" → getCountryOriginDetails / searchCountryOrigins
@@ -272,6 +357,7 @@ Examples:
 - "company addresses" / "company address South Africa" / "company address Asia Direct" → searchCompanyAddresses
 - "count company addresses" → countCompanyAddresses()
 - "count clients" → countClients()
+- "count active clients" / "count inactive clients" → countClients(status)
 - "count total freight" → countFreights()
 - "show all freights of client Sarah" → findClientsByName(name="Sarah", intent="freights")
 - "show orders for John" → findClientsByName(name="John", intent="orders")
@@ -283,6 +369,7 @@ Examples:
 - "count staff" → countStaff()
 - "client KPI" / "show client KPI" / "client KPI for TGOOD" → searchClientKpi
 - "total amount of client KPI for TGOOD" / "delivered orders of client KPI …" → searchClientKpi with focus
+- "total estimate amount of TGOOD South Africa" → searchClientKpi(focus="total_amount")
 - "count client KPI" → countClientKpi()
 - "what is estimation amount of F-20260730008?" → getFreightFullDetails(..., focus="estimate_amount")
 
@@ -658,6 +745,37 @@ function enrichToolArgs(callName, args, message, sessionId) {
         if (!next.status) next.status = extractTaskStatus(message) || undefined;
     }
 
+    if (callName === 'getLeaveDetails' || callName === 'get_leave_details') {
+        if (!next.leaveId && !next.leave_id) {
+            const m = String(message || '').match(/\bleave\s*(?:id|#|request)?\s*(\d{1,8})\b/i);
+            if (m) next.leaveId = Number(m[1]);
+        }
+    }
+
+    if (callName === 'searchLeaves' || callName === 'search_leaves') {
+        if (!next.search) next.search = extractLeaveSearchTerm(message) || undefined;
+        if (!next.status) next.status = extractLeaveStatus(message) || undefined;
+        if (next.month == null || next.year == null) {
+            const my = extractLeaveMonthYear(message);
+            if (my) {
+                if (next.month == null) next.month = my.month;
+                if (next.year == null) next.year = my.year;
+            }
+        }
+    }
+
+    if (callName === 'countLeaves' || callName === 'count_leaves') {
+        if (!next.search) next.search = extractLeaveSearchTerm(message) || undefined;
+        if (!next.status) next.status = extractLeaveStatus(message) || undefined;
+        if (next.month == null || next.year == null) {
+            const my = extractLeaveMonthYear(message);
+            if (my) {
+                if (next.month == null) next.month = my.month;
+                if (next.year == null) next.year = my.year;
+            }
+        }
+    }
+
     if (callName === 'getContactEnquiryDetails' || callName === 'get_contact_enquiry_details') {
         if (!next.enquiryId && !next.enquiry_id) {
             const m = String(message || '').match(/\b(?:enquiry|enquir(?:y|ies)|contact)\s*(?:id|#)?\s*(\d{1,8})\b/i);
@@ -913,7 +1031,7 @@ function isGeminiAvailable() {
 async function runChatWithModel(client, modelName, message, history, ctx, sessionId) {
     const model = client.getGenerativeModel({
         model: modelName,
-        tools: toGeminiTools(),
+        tools: toGeminiTools(message),
         systemInstruction: buildSystemInstruction(ctx),
     });
 

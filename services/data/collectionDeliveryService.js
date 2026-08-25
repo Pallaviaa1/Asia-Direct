@@ -66,8 +66,7 @@ function buildScope(ctx) {
             );
             params.push(...ctx.accessCountries, ...ctx.accessCountries);
         }
-        conditions.push('(f.user_id = ? OR f.sales_representative = ?)');
-        params.push(ctx.userId, ctx.userId);
+        // empty access_country → no ownership cage
     }
 
     return { conditions, params };

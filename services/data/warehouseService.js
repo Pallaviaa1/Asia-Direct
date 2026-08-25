@@ -25,7 +25,8 @@ function formatDate(value) {
 function clean(text) {
     if (text == null || text === '') return null;
     const s = String(text).replace(/\s+/g, ' ').trim();
-    return s || null;
+    if (!s || /^undefined$/i.test(s) || /^null$/i.test(s)) return null;
+    return s;
 }
 
 function mapWarehouseRow(row) {
@@ -111,10 +112,7 @@ function buildScope(ctx, freightAlias = 'f', orderAlias = 'o') {
                 ...ctx.accessCountries
             );
         }
-        conditions.push(
-            `(${freightAlias}.user_id = ? OR ${freightAlias}.sales_representative = ? OR ${orderAlias}.client_id = ?)`
-        );
-        params.push(ctx.userId, ctx.userId, ctx.userId);
+        // empty access_country → no ownership cage
     }
 
     return { conditions, params };
@@ -308,12 +306,17 @@ async function getWarehouseOrderById(id, ctx) {
     const rows = await query(`SELECT ${SELECT} ${FROM} WHERE ${conditions.join(' AND ')} LIMIT 1`, params);
     const row = mapWarehouseRow(rows[0]);
     if (!row || !canSee(ctx, row)) return null;
-    row.packages_detail = await listWarehouseProducts(row.id);
+    row.packages_detail = await listWarehouseProducts(row.id, row);
     return row;
 }
 
-async function listWarehouseProducts(warehouseOrderId) {
+/**
+ * Package details match Warehouse Order Manage / getWarehouseProductById:
+ * freight cargo line first (when freight_id is set), then warehouse_products rows.
+ */
+async function listWarehouseProducts(warehouseOrderId, warehouseRow = null) {
     if (!warehouseOrderId) return [];
+    let products = [];
     try {
         const rows = await query(
             `SELECT
@@ -332,8 +335,9 @@ async function listWarehouseProducts(warehouseOrderId) {
              LIMIT 50`,
             [warehouseOrderId]
         );
-        return rows.map((p) => ({
+        products = rows.map((p) => ({
             ...p,
+            source: 'warehouse_product',
             product_description: clean(p.product_description),
             waybill: clean(p.waybill),
             warehouse_ref: clean(p.warehouse_ref),
@@ -347,6 +351,53 @@ async function listWarehouseProducts(warehouseOrderId) {
         console.error('warehouse_products lookup error:', err.message);
         return [];
     }
+
+    const freightId = Number(warehouseRow?.freight_id || 0);
+    if (!freightId) return products;
+
+    try {
+        const freightRows = await query(
+            `SELECT
+                product_desc AS product_description,
+                date AS date_received,
+                hazardous,
+                package_type,
+                no_of_packages AS packages,
+                dimension,
+                weight
+             FROM tbl_freight
+             WHERE id = ?
+             LIMIT 1`,
+            [freightId]
+        );
+        if (!freightRows.length) return products;
+        const f = freightRows[0];
+        const freightLine = {
+            id: null,
+            source: 'freight',
+            product_description: clean(f.product_description),
+            waybill: null,
+            warehouse_ref: null,
+            date_received: f.date_received,
+            date_received_label: formatDate(f.date_received),
+            package_type: clean(f.package_type),
+            packages: num(f.packages),
+            dimension: num(f.dimension),
+            weight: num(f.weight),
+            hazardous: f.hazardous,
+        };
+        if (
+            freightLine.product_description ||
+            freightLine.packages ||
+            freightLine.weight ||
+            freightLine.dimension
+        ) {
+            return [freightLine, ...products];
+        }
+    } catch (err) {
+        console.error('freight package line lookup error:', err.message);
+    }
+    return products;
 }
 
 async function listWarehouseOrdersByClientId(clientId, ctx, { limit = 25 } = {}) {
@@ -499,12 +550,40 @@ async function runListWithCtx(ctx, conditions, params, limit = 25) {
 async function countWarehouseOrders(ctx, { clientId } = {}) {
     const { conditions, params } = buildScope(ctx);
     if (clientId) {
-        conditions.push('(o.client_id = ? OR f.client_id = ?)');
-        params.push(clientId, clientId);
+        // Same client match as listWarehouseOrdersByClientId / GetWarehouseOrders
+        conditions.push(
+            `(o.client_id = ? OR f.client_id = ? OR (
+                NULLIF(o.client_id, 0) IS NULL AND NULLIF(f.client_id, 0) IS NULL
+                AND LOWER(TRIM(ws.customer_name)) = (
+                    SELECT LOWER(TRIM(full_name)) FROM tbl_users WHERE id = ? LIMIT 1
+                )
+            ))`
+        );
+        params.push(clientId, clientId, clientId);
     }
     const rows = await query(
-        `SELECT COUNT(*) AS total ${FROM} WHERE ${conditions.join(' AND ')}`,
+        `SELECT COUNT(DISTINCT ws.id) AS total ${FROM} WHERE ${conditions.join(' AND ')}`,
         params
+    );
+    return Number(rows[0]?.total || 0);
+}
+
+/**
+ * Freights marked Send/Assign to Warehouse for a client (may be higher than assigned warehouse orders).
+ */
+async function countFreightsMarkedForWarehouse(clientId) {
+    if (!clientId) return 0;
+    const rows = await query(
+        `SELECT COUNT(*) AS total
+         FROM tbl_freight f
+         WHERE f.is_deleted = 0
+           AND f.client_id = ?
+           AND (
+             LOWER(TRIM(f.send_to_warehouse)) = 'yes'
+             OR LOWER(TRIM(f.assign_warehouse)) = 'yes'
+             OR f.warehouse_status = 1
+           )`,
+        [Number(clientId)]
     );
     return Number(rows[0]?.total || 0);
 }
@@ -517,6 +596,7 @@ module.exports = {
     listWarehouseOrdersByBatchNumber,
     listWarehouseProducts,
     countWarehouseOrders,
+    countFreightsMarkedForWarehouse,
     buildFreightWarehouseFallback,
     listWarehouseCandidateFreightsByClientId,
     mapWarehouseRow,

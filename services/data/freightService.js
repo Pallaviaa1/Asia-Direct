@@ -7,13 +7,15 @@ function buildFreightScopeCondition(ctx) {
     const params = [];
 
     if (!ctx.hasFullAccess && ctx.isStaff) {
+        // Country-scoped staff → only those countries.
+        // Empty access_country → no extra filter (all freights).
         if (ctx.accessCountries.length) {
             const placeholders = ctx.accessCountries.map(() => '?').join(',');
-            conditions.push(`(f.collection_from IN (${placeholders}) OR f.delivery_to IN (${placeholders}))`);
+            conditions.push(
+                `(f.collection_from IN (${placeholders}) OR f.delivery_to IN (${placeholders}))`
+            );
             params.push(...ctx.accessCountries, ...ctx.accessCountries);
         }
-        conditions.push('(f.user_id = ? OR f.sales_representative = ?)');
-        params.push(ctx.userId, ctx.userId);
     }
 
     if (ctx.isCustomer) {
@@ -161,12 +163,19 @@ async function getFreightById(freightId, ctx) {
     return freight;
 }
 
-async function listFreightsByClientId(clientId, ctx, { limit = 25 } = {}) {
+async function listFreightsByClientId(clientId, ctx, { limit = 25, kpiOnly = false } = {}) {
     if (!clientId) return [];
 
     const { conditions, params } = buildFreightScopeCondition(ctx);
     conditions.push('f.client_id = ?');
     params.push(clientId);
+
+    // Client KPI: only freights that have at least one order
+    if (kpiOnly) {
+        conditions.push(
+            'f.id IN (SELECT DISTINCT freight_id FROM tbl_orders WHERE freight_id IS NOT NULL AND freight_id != 0)'
+        );
+    }
 
     const rows = await query(
         `SELECT f.id, f.freight_number, f.status, f.order_status, f.isConfirmed,
@@ -204,12 +213,18 @@ async function listFreightsByClientId(clientId, ctx, { limit = 25 } = {}) {
 /**
  * Count freights visible to the current user (permission-scoped).
  * Optional clientId narrows to that client's freights.
+ * kpiOnly: match Client KPI (freights that have orders).
  */
-async function countFreights(ctx, { clientId } = {}) {
+async function countFreights(ctx, { clientId, kpiOnly = false } = {}) {
     const { conditions, params } = buildFreightScopeCondition(ctx);
     if (clientId) {
         conditions.push('f.client_id = ?');
         params.push(clientId);
+    }
+    if (kpiOnly) {
+        conditions.push(
+            'f.id IN (SELECT DISTINCT freight_id FROM tbl_orders WHERE freight_id IS NOT NULL AND freight_id != 0)'
+        );
     }
 
     const rows = await query(
@@ -219,9 +234,23 @@ async function countFreights(ctx, { clientId } = {}) {
     return Number(rows[0]?.total || 0);
 }
 
+async function getFreightByNumberUnscoped(freightNumber) {
+    if (!freightNumber) return null;
+    const rows = await query(
+        `SELECT id, freight_number, client_id, user_id, sales_representative,
+                collection_from, delivery_to
+         FROM tbl_freight
+         WHERE is_deleted = 0 AND LOWER(TRIM(freight_number)) = LOWER(TRIM(?))
+         LIMIT 1`,
+        [freightNumber]
+    );
+    return rows[0] || null;
+}
+
 module.exports = {
     getFreightByNumber,
     getFreightById,
+    getFreightByNumberUnscoped,
     listFreightsByClientId,
     countFreights,
     buildFreightScopeCondition,

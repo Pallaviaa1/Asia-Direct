@@ -5869,6 +5869,14 @@ const AddShipment = (req, res) => {
         detailALL1 = detailsArray.join(',');
     }
 
+    console.log("================================");
+    console.log("AddShipment API Called");
+    console.log("Time:", new Date());
+    console.log("Waybill:", waybill);
+    console.log("Container:", container);
+    console.log("Body:", req.body);
+    console.log("================================");
+
     const shipmentQuery = `
         INSERT INTO tbl_shipments 
         (waybill, freight, carrier, vessel, ETD, ATD, date_of_dispatch, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal,
@@ -5925,7 +5933,7 @@ const AddShipment = (req, res) => {
                 shipmentId,
                 data.order_id,
                 data.batch_id || null,
-                data.clearance_id || null,
+                data.batch_id ? null : (data.clearance_id || null),
             ]);
 
             con.query(detailsQuery, [detailsValues], async (detailsErr) => {
@@ -6341,6 +6349,7 @@ const getShipment = async (req, res) => {
             });
         }
 
+        const numericUserId = Number(user_id);
         const pageNumber = parseInt(page);
         const pageLimit = parseInt(limit);
         const offset = (pageNumber - 1) * pageLimit;
@@ -6348,8 +6357,47 @@ const getShipment = async (req, res) => {
         // Users with all access
         const ALL_ACCESS_USERS = [1, 19855];
 
+        /* ==================== USER ACCESS COUNTRIES ==================== */
+        let accessCountries = [];
+
+        if (!ALL_ACCESS_USERS.includes(numericUserId)) {
+            const rows = await new Promise((resolve, reject) => {
+                con.query(
+                    `SELECT access_country FROM tbl_users WHERE id = ? AND is_deleted = 0`,
+                    [numericUserId],
+                    (err, result) => err ? reject(err) : resolve(result)
+                );
+            });
+
+            if (!rows.length) {
+                return res.status(404).send({
+                    success: false,
+                    message: "User not found"
+                });
+            }
+
+            if (rows[0].access_country) {
+                accessCountries = rows[0].access_country
+                    .split(',')
+                    .map(id => Number(id.trim()))
+                    .filter(Boolean);
+            }
+        }
+
+        /* ==================== BUILD CONDITIONS ==================== */
         let condition = '';
         let params = [];
+
+        if (!ALL_ACCESS_USERS.includes(numericUserId) && accessCountries.length) {
+            const placeholders = accessCountries.map(() => '?').join(',');
+            condition += `
+                AND (
+                    tbl_shipments.origin_country_id IN (${placeholders})
+                    OR tbl_shipments.des_country_id IN (${placeholders})
+                )
+            `;
+            params.push(...accessCountries, ...accessCountries);
+        }
 
         // Search fields
         if (search) {
@@ -6372,19 +6420,9 @@ const getShipment = async (req, res) => {
             `;
             const searchValue = `%${search}%`;
             params.push(
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue,
-                searchValue
+                searchValue, searchValue, searchValue, searchValue, searchValue,
+                searchValue, searchValue, searchValue, searchValue, searchValue,
+                searchValue, searchValue, searchValue
             );
         }
 
@@ -6416,92 +6454,16 @@ const getShipment = async (req, res) => {
             `;
         }
 
-        // =============== ALL ACCESS: full data ===============
-        if (ALL_ACCESS_USERS.includes(Number(user_id))) {
-            const countQuery = `
-                SELECT COUNT(*) as total
-                FROM tbl_shipments
-                LEFT JOIN countries AS c ON c.id = tbl_shipments.des_country_id
-                LEFT JOIN countries AS co ON co.id = tbl_shipments.origin_country_id
-                WHERE 1=1 ${condition}
-            `;
-
-            const total = await new Promise((resolve, reject) => {
-                con.query(countQuery, params, (err, rows) => {
-                    if (err) return reject(err);
-                    resolve(rows[0].total);
-                });
-            });
-
-            const query = `
-                SELECT 
-                    tbl_shipments.*,
-                    c.name AS des_country_name,
-                    co.name AS origin_country_name
-                FROM tbl_shipments
-                LEFT JOIN countries AS c 
-                    ON c.id = tbl_shipments.des_country_id
-                LEFT JOIN countries AS co 
-                    ON co.id = tbl_shipments.origin_country_id
-                WHERE 1=1 ${condition}
-                ${getOrderClause()}
-                LIMIT ? OFFSET ?
-            `;
-
-            const finalParams = [...params, pageLimit, offset];
-
-            const data = await new Promise((resolve, reject) => {
-                con.query(query, finalParams, (err, result) => {
-                    if (err) return reject(err);
-                    resolve(result);
-                });
-            });
-
-            return res.status(200).send({
-                success: true,
-                total: total,
-                limit: limit,
-                page: pageNumber,
-                data
-            });
-        }
-
-        // =============== Country-restricted: user country ===============
-        const userCountryQuery = `
-            SELECT country 
-            FROM tbl_users 
-            WHERE id = ? AND is_deleted = 0
-        `;
-
-        const userData = await new Promise((resolve, reject) => {
-            con.query(userCountryQuery, [user_id], (err, rows) => {
-                if (err) return reject(err);
-                resolve(rows);
-            });
-        });
-
-        if (!userData.length || !userData[0].country) {
-            return res.status(404).send({
-                success: false,
-                message: "User country not found"
-            });
-        }
-
-        const userCountry = userData[0].country;
-
         const countQuery = `
             SELECT COUNT(*) as total
             FROM tbl_shipments
             LEFT JOIN countries AS c ON c.id = tbl_shipments.des_country_id
             LEFT JOIN countries AS co ON co.id = tbl_shipments.origin_country_id
-            WHERE 
-                (tbl_shipments.origin_country_id = ?
-                OR tbl_shipments.des_country_id = ?)
-                ${condition}
+            WHERE 1=1 ${condition}
         `;
 
         const total = await new Promise((resolve, reject) => {
-            con.query(countQuery, [userCountry, userCountry, ...params], (err, rows) => {
+            con.query(countQuery, params, (err, rows) => {
                 if (err) return reject(err);
                 resolve(rows[0].total);
             });
@@ -6517,21 +6479,12 @@ const getShipment = async (req, res) => {
                 ON c.id = tbl_shipments.des_country_id
             LEFT JOIN countries AS co 
                 ON co.id = tbl_shipments.origin_country_id
-            WHERE 
-                (tbl_shipments.origin_country_id = ?
-                OR tbl_shipments.des_country_id = ?)
-                ${condition}
+            WHERE 1=1 ${condition}
             ${getOrderClause()}
             LIMIT ? OFFSET ?
         `;
 
-        const finalParams = [
-            userCountry,
-            userCountry,
-            ...params,
-            pageLimit,
-            offset
-        ];
+        const finalParams = [...params, pageLimit, offset];
 
         const data = await new Promise((resolve, reject) => {
             con.query(query, finalParams, (err, result) => {
@@ -7026,7 +6979,15 @@ const UpdateShipment = async (req, res) => {
                 }
             }
 
-            // Step 1: Delete existing shipment details
+            // Step 1: Get existing orders and unassign them before deleting
+            const getOldOrdersQuery = `SELECT order_id FROM shipment_details WHERE shipment_id = ?`;
+            const oldOrders = await executeQuery(getOldOrdersQuery, [shipment_id]);
+            if (oldOrders.length > 0) {
+                const oldOrderIds = oldOrders.map(o => o.order_id);
+                await executeQuery(`UPDATE tbl_orders SET assign_to_shipment = 0 WHERE id IN (?)`, [oldOrderIds]);
+                await executeQuery(`UPDATE freight_assig_to_batch SET is_assign_shipment = 0 WHERE order_id IN (?)`, [oldOrderIds]);
+            }
+
             const deleteDetailsQuery = `DELETE FROM shipment_details WHERE shipment_id = ?`;
             await executeQuery(deleteDetailsQuery, [shipment_id]);
 
@@ -7039,7 +7000,7 @@ const UpdateShipment = async (req, res) => {
                 shipment_id,
                 data.order_id,
                 data.batch_id || null,
-                data.clearance_id || null,
+                data.batch_id ? null : (data.clearance_id || null),
             ]);
 
             await executeQuery(insertDetailsQuery, [detailsValues]);
@@ -7413,6 +7374,11 @@ const DeleteShipment = async (req, res) => {
                 const updateOrdersQuery = `UPDATE tbl_orders SET assign_to_shipment = 0 WHERE id IN (?)`;
 
                 con.query(updateOrdersQuery, [orderIds], (err) => {
+                    if (err) throw err;
+                });
+
+                const updateBatchOrderQuery = `UPDATE freight_assig_to_batch SET is_assign_shipment = 0 WHERE order_id IN (?)`;
+                con.query(updateBatchOrderQuery, [orderIds], (err) => {
                     if (err) throw err;
                 });
             }
@@ -7942,7 +7908,7 @@ const getAssignShipmentList = async (req, res) => {
         } else if (type == 2) {
             query = `SELECT
                       b.id,
-                      b.freight_id,
+                      f.id AS freight_id,
                       b.batch_id,
                       b.assigned_at,
                       COALESCE(b.order_id, o.id) AS order_id,
@@ -8138,6 +8104,7 @@ const AllBatchNumbers = async (req, res) => {
         AND (
             b.track_status IS NULL 
             OR b.track_status = ''
+            Or b.track_status = 'Goods are in transit'
         )`, [origin_country_id, des_country_id, freight], (err, data) => {
             if (err) throw err;
 

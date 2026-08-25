@@ -9,6 +9,7 @@ const {
     listWarehouseOrdersByOrderNumber,
     listWarehouseOrdersByBatchNumber,
     countWarehouseOrders,
+    countFreightsMarkedForWarehouse,
     listWarehouseProducts,
     listWarehouseCandidateFreightsByClientId,
 } = require('../../services/data/warehouseService');
@@ -311,7 +312,7 @@ async function resolveClientThen(sessionId, ctx, name, pendingTool, intentLabel)
 async function enrichWarehouseRow(row) {
     if (!row || row.source === 'supplier_warehouse') return row;
     if (row.packages_detail) return row;
-    row.packages_detail = await listWarehouseProducts(row.id);
+    row.packages_detail = await listWarehouseProducts(row.id, row);
     return row;
 }
 
@@ -466,9 +467,24 @@ async function executeLogisticsTool(toolName, args = {}, ctx, sessionId) {
                 scope = client.full_name;
             }
             const total = await countWarehouseOrders(ctx, { clientId: clientId || undefined });
+            let reply = `Total warehouse orders for ${scope}: ${total.toLocaleString()} (from Warehouse Order Manage).`;
+            let marked = null;
+            if (clientId) {
+                marked = await countFreightsMarkedForWarehouse(clientId);
+                if (marked !== total) {
+                    reply += ` Freights marked Send/Assign to Warehouse: ${marked.toLocaleString()}.`;
+                }
+            }
             return {
-                reply: `Total warehouse orders for ${scope}: ${total.toLocaleString()}.`,
-                data: { count: { entity: 'warehouse_orders', total, scope } },
+                reply,
+                data: {
+                    count: {
+                        entity: 'warehouse_orders',
+                        total,
+                        markedFreights: marked,
+                        scope,
+                    },
+                },
             };
         }
         case 'getBatchDetails': {

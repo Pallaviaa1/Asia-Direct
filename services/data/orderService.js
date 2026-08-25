@@ -60,10 +60,7 @@ function buildOrderScopeCondition(ctx, alias = 'o', freightAlias = 'f') {
             );
             params.push(...ctx.accessCountries, ...ctx.accessCountries);
         }
-        conditions.push(
-            `(${freightAlias}.user_id = ? OR ${freightAlias}.sales_representative = ? OR ${alias}.client_id = ?)`
-        );
-        params.push(ctx.userId, ctx.userId, ctx.userId);
+        // empty access_country → no ownership cage
     }
 
     return { conditions, params };
@@ -171,12 +168,19 @@ async function getOrderByNumber(orderNumber, ctx) {
     return order;
 }
 
-async function listOrdersByClientId(clientId, ctx, { limit = 25 } = {}) {
+async function listOrdersByClientId(clientId, ctx, { limit = 25, kpiOnly = false } = {}) {
     if (!clientId) return [];
 
     const { conditions, params } = buildOrderScopeCondition(ctx);
-    conditions.push('(o.client_id = ? OR f.client_id = ?)');
-    params.push(clientId, clientId);
+    if (kpiOnly) {
+        // Client KPI: orders linked to this client's non-deleted freights
+        conditions.push('f.client_id = ?');
+        conditions.push('COALESCE(f.is_deleted, 0) = 0');
+        params.push(clientId);
+    } else {
+        conditions.push('(o.client_id = ? OR f.client_id = ?)');
+        params.push(clientId, clientId);
+    }
 
     const rows = await query(
         `SELECT ${ORDER_SELECT}
@@ -223,15 +227,21 @@ async function listOrdersByFreightNumber(freightNumber, ctx, { limit = 25 } = {}
         .filter((order) => canAccessOrder(ctx, order));
 }
 
-async function countOrders(ctx, { clientId } = {}) {
+async function countOrders(ctx, { clientId, kpiOnly = false } = {}) {
     const { conditions, params } = buildOrderScopeCondition(ctx);
     if (clientId) {
-        conditions.push('(o.client_id = ? OR f.client_id = ?)');
-        params.push(clientId, clientId);
+        if (kpiOnly) {
+            conditions.push('f.client_id = ?');
+            conditions.push('COALESCE(f.is_deleted, 0) = 0');
+            params.push(clientId);
+        } else {
+            conditions.push('(o.client_id = ? OR f.client_id = ?)');
+            params.push(clientId, clientId);
+        }
     }
 
     const rows = await query(
-        `SELECT COUNT(*) AS total
+        `SELECT COUNT(DISTINCT o.id) AS total
          FROM tbl_orders o
          LEFT JOIN tbl_freight f ON f.id = o.freight_id
          WHERE ${conditions.join(' AND ')}`,

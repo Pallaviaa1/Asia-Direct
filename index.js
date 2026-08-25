@@ -19,7 +19,19 @@ const clearance_route = require('./routes/clearanceRoute');
 const upload_route = require('./routes/uploadRoute')
 const invoice_route = require('./routes/invoiceRoute')
 const chatRoutes = require('./routes/chatRoute');
-const { router: aiChatRoute, startCleanup: startAiChatCleanup, demoHtmlPath } = require('./ai');
+
+// Workspace AI (optional at boot — missing folder/deps must not crash the whole app)
+let aiChatRoute = null;
+let startAiChatCleanup = () => {};
+let demoHtmlPath = null;
+try {
+  const ai = require('./ai');
+  aiChatRoute = ai.router;
+  startAiChatCleanup = ai.startCleanup;
+  demoHtmlPath = ai.demoHtmlPath;
+} catch (err) {
+  console.error('Workspace AI failed to load (server will run without AI):', err.message);
+}
 
 
 var PORT = process.env.PORT || 7000
@@ -35,9 +47,11 @@ app.use(bodyparser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Workspace AI demo UI (lives under ai/demo; React app will replace this later)
-app.get('/ai-chat.html', (req, res) => {
-  res.sendFile(demoHtmlPath);
-});
+if (demoHtmlPath) {
+  app.get('/ai-chat.html', (req, res) => {
+    res.sendFile(demoHtmlPath);
+  });
+}
 
 
 // ============================
@@ -66,6 +80,7 @@ app.get('/check', async (req, res) => {
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).send('Failed to send message');
+    
   }
 });
 
@@ -190,10 +205,14 @@ app.use('/api', clearance_route);
 app.use('/api', upload_route)
 app.use('/api', invoice_route)
 app.use('/api', chatRoutes);
-app.use('/api', aiChatRoute);
-
-// AI chat history: purge sessions past inactivity TTL (expires_at)
-startAiChatCleanup();
+if (aiChatRoute) {
+  app.use('/api', aiChatRoute);
+  // AI chat history: purge sessions past inactivity TTL (expires_at)
+  startAiChatCleanup();
+  console.log('Workspace AI routes enabled');
+} else {
+  console.warn('Workspace AI routes disabled — check ./ai folder and npm packages');
+}
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error:', err); // ✅ log all unhandled errors

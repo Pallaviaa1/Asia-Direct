@@ -75,7 +75,6 @@ function formatFreightResponse(data) {
         if (est.vat_incl != null) {
             lines.push(`VAT incl: ${est.currency || ''} ${Number(est.vat_incl).toLocaleString()}`.trim());
         }
-        if (est.chargeable != null) lines.push(`Chargeable: ${est.chargeable}`);
     } else {
         lines.push('Estimate: Not available yet');
     }
@@ -302,7 +301,7 @@ function formatClientListResponse(clients, label) {
     return `Clients for ${label} (${clients.length} found):\n\n${lines.join('\n')}${more}`;
 }
 
-function formatFreightListResponse(freights, clientName) {
+function formatFreightListResponse(freights, clientName, meta = {}) {
     if (!freights.length) {
         return `No freights found for ${clientName}.`;
     }
@@ -312,7 +311,21 @@ function formatFreightListResponse(freights, clientName) {
         return `• ${f.freight_number} · ${f.status_label || f.status || '—'}${mode ? ` · ${mode}` : ''} · ${route}`;
     });
     const more = freights.length > 20 ? `\n…and ${freights.length - 20} more.` : '';
-    return `Freights for ${clientName} (${freights.length} found):\n\n${lines.join('\n')}${more}`;
+    const totalLabel =
+        meta.kpiTotal != null ? meta.kpiTotal : freights.length;
+    let header = meta.kpiAligned
+        ? `Freights for ${clientName} (Client KPI: ${Number(totalLabel).toLocaleString()} — freights with orders):`
+        : `Freights for ${clientName} (${freights.length} found):`;
+    let note = '';
+    if (
+        meta.kpiAligned &&
+        meta.allTotal != null &&
+        Number(meta.allTotal) > Number(totalLabel)
+    ) {
+        const extra = Number(meta.allTotal) - Number(totalLabel);
+        note = `\n\nAlso ${extra.toLocaleString()} freight${extra === 1 ? '' : 's'} without orders (not counted in Client KPI).`;
+    }
+    return `${header}\n\n${lines.join('\n')}${more}${note}`;
 }
 
 function formatOrderResponse(order) {
@@ -357,7 +370,7 @@ function formatOrderResponse(order) {
     return lines.join('\n');
 }
 
-function formatOrderListResponse(orders, label) {
+function formatOrderListResponse(orders, label, meta = {}) {
     if (!orders.length) {
         return `No orders found for ${label}.`;
     }
@@ -370,7 +383,11 @@ function formatOrderListResponse(orders, label) {
         return `• ${o.order_number} · ${status}${freight}${goods}`;
     });
     const more = orders.length > 20 ? `\n…and ${orders.length - 20} more.` : '';
-    return `Orders for ${label} (${orders.length} found):\n\n${lines.join('\n')}${more}`;
+    const totalLabel = meta.kpiTotal != null ? meta.kpiTotal : orders.length;
+    const header = meta.kpiAligned
+        ? `Orders for ${label} (Client KPI: ${Number(totalLabel).toLocaleString()}):`
+        : `Orders for ${label} (${orders.length} found):`;
+    return `${header}\n\n${lines.join('\n')}${more}`;
 }
 
 function formatWarehouseResponse(row, packagesDetail = []) {
@@ -1206,6 +1223,40 @@ function formatTaskListResponse(rows, label) {
     return `Task Manager · ${label} (${rows.length} found):\n\n${lines.join('\n')}${more}`;
 }
 
+function formatLeaveResponse(row) {
+    if (!row) return 'Leave request not found.';
+    return [
+        `Leave Calendar · Leave #${row.leave_id || row.id}:`,
+        '',
+        `Staff name: ${row.staff_name || '—'}`,
+        `Leave from: ${row.leave_from_label || '—'}`,
+        `Leave to: ${row.leave_to_label || '—'}`,
+        `Reason: ${row.reason || '—'}`,
+        `Status: ${row.status_label || '—'}`,
+        `Admin remark: ${row.admin_remark || '—'}`,
+    ].join('\n');
+}
+
+function formatLeaveListResponse(rows, label) {
+    if (!rows.length) return `No leave requests found for ${label}.`;
+    const lines = rows.slice(0, 25).map((r) =>
+        [
+            `${r.sr_no}.`,
+            r.staff_name || '—',
+            r.leave_from_label || '—',
+            '→',
+            r.leave_to_label || '—',
+            r.reason || null,
+            r.status_label || '—',
+            r.admin_remark || null,
+        ]
+            .filter(Boolean)
+            .join(' · ')
+    );
+    const more = rows.length > 25 ? `\n…and ${rows.length - 25} more.` : '';
+    return `Leave Calendar · ${label} (${rows.length} found):\n\n${lines.join('\n')}${more}`;
+}
+
 function formatContactEnquiryResponse(row) {
     if (!row) return 'Contact enquiry not found.';
     return [
@@ -1383,6 +1434,8 @@ module.exports = {
     formatStaffListResponse,
     formatTaskResponse,
     formatTaskListResponse,
+    formatLeaveResponse,
+    formatLeaveListResponse,
     formatContactEnquiryResponse,
     formatContactEnquiryListResponse,
     formatCountryOriginResponse,
