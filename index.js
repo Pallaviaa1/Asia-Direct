@@ -10,6 +10,21 @@ require('./config/database');
 const { sendSms, sendWhatsApp } = require('./helpers/twilioService');
 const logger = require('./logger');
 
+// Registered before route imports so a missing module still prints here.
+// Winston's exception handler only writes logs/exceptions.log and then exits.
+process.on('unhandledRejection', (reason) => {
+  console.error('\n========== UNHANDLED REJECTION ==========');
+  console.error(reason instanceof Error ? reason.stack : reason);
+  console.error('=========================================\n');
+  logger.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('\n========== APP CRASHED ==========');
+  console.error(err && err.stack ? err.stack : err);
+  console.error('=================================\n');
+  process.exit(1);
+});
+
 const adminRoute = require('./routes/adminRoute');
 const customerRoute = require('./routes/customerRoute');
 const supplierRoute = require('./routes/supplierRoute');
@@ -262,16 +277,6 @@ app.use((err, req, res, next) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});
-
-
-// HANDLE UNCAUGHT EXCEPTIONS & PROMISE REJECTIONS
-process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled Rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught Exception:', { message: err.message, stack: err.stack });
-  process.exit(1);
 });
 
 
