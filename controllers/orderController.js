@@ -8,6 +8,8 @@ const moment = require('moment');
 const { features } = require('process');
 const { log } = require('console');
 const { resolve } = require('path');
+const { query: dbQuery } = require('../helpers/dbQuery');
+const { recalcOrderPayment, recalcSupplierInvoicePayment } = require('../helpers/recalcOrderPayment');
 
 const updateLoadDetails = async (req, res) => {
     try {
@@ -2241,6 +2243,153 @@ const DeleteSageInvoice = async (req, res) => {
     }
 };
 
+const GetSageInvoiceReport = async (req, res) => {
+    try {
+        const {
+            country = "All",
+            start_date,
+            end_date,
+            search
+        } = req.query;
+
+        const allowedCountries = [
+            "All",
+            "South Africa",
+            "Zimbabwe",
+            "Zambia"
+        ];
+
+        if (!allowedCountries.includes(country)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid country filter.",
+                allowedCountries
+            });
+        }
+
+        // Validate YYYY-MM-DD date format
+        const isValidDate = (value) => {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                return false;
+            }
+
+            const date = new Date(`${value}T00:00:00Z`);
+
+            return !Number.isNaN(date.getTime()) &&
+                date.toISOString().slice(0, 10) === value;
+        };
+
+        if (
+            (start_date && !isValidDate(start_date)) ||
+            (end_date && !isValidDate(end_date))
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Dates must be valid and use YYYY-MM-DD format."
+            });
+        }
+
+        if (start_date && end_date && start_date > end_date) {
+            return res.status(400).json({
+                success: false,
+                message: "start_date cannot be after end_date."
+            });
+        }
+
+        const conditions = [];
+        const params = [];
+
+        // Country filter
+        if (country !== "All") {
+            conditions.push("sil.invoice_region LIKE ?");
+            params.push(`%${country}%`);
+        }
+
+        // Start date filter
+        if (start_date) {
+            conditions.push("sil.`date` >= ?");
+            params.push(start_date);
+        }
+
+        // End date filter (inclusive)
+        if (end_date) {
+            conditions.push(
+                "sil.`date` < DATE_ADD(?, INTERVAL 1 DAY)"
+            );
+            params.push(end_date);
+        }
+
+        // Search filter
+        if (search && search.trim()) {
+            conditions.push(`
+                (
+                    sil.customer_name LIKE ?
+                    OR sil.document_number LIKE ?
+                    OR sil.customer_ref LIKE ?
+                )
+            `);
+
+            const searchValue = `%${search.trim()}%`;
+
+            params.push(
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        const whereClause = conditions.length
+            ? `WHERE ${conditions.join(" AND ")}`
+            : "";
+
+        const query = `
+            SELECT
+                sil.*,
+                ti.id AS invoice_id,
+                ti.order_id,
+                o.freight_id
+            FROM sage_invoice_list sil
+            LEFT JOIN tbl_invoices ti
+                ON ti.sage_invoice_id = sil.id
+            LEFT JOIN tbl_orders o
+                ON o.id = ti.order_id
+            ${whereClause}
+            ORDER BY sil.document_number DESC
+        `;
+
+        con.query(query, params, (err, data) => {
+            if (err) {
+                console.error("Sage invoice report error:", err);
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Failed to fetch Sage invoice report."
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Sage invoice report fetched successfully.",
+                filters: {
+                    country,
+                    start_date: start_date || null,
+                    end_date: end_date || null,
+                    search: search?.trim() || null
+                },
+                totalRecords: data.length,
+                data
+            });
+        });
+
+    } catch (error) {
+        console.error("Unexpected error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred."
+        });
+    }
+};
 
 const formatRegionLabel = (region) => {
     switch (region) {
@@ -2480,10 +2629,41 @@ const UploadCashbookList = async (req, res) => {
             }
         }
 
-        // Insert data into tbl_cashbook
+        // Skip a bank reference that already exists, or that appears twice in this file.
+        const uploadRefs = [
+            ...new Set(
+                transformedData
+                    .map((row) => String(row.bank_ref || "").trim())
+                    .filter(Boolean)
+            ),
+        ];
+        const existingRefs = new Set();
+        if (uploadRefs.length > 0) {
+            const existingRows = await dbQuery(
+                `SELECT bank_ref FROM tbl_cashbook WHERE bank_ref IN (?)`,
+                [uploadRefs]
+            );
+            existingRows.forEach((row) => {
+                existingRefs.add(String(row.bank_ref || "").trim());
+            });
+        }
+
+        const seenRefs = new Set();
+        const rowsToInsert = [];
+        let skippedDuplicates = 0;
         for (const row of transformedData) {
+            const bankRef = String(row.bank_ref || "").trim();
+            if (bankRef && (existingRefs.has(bankRef) || seenRefs.has(bankRef))) {
+                skippedDuplicates += 1;
+                continue;
+            }
+            if (bankRef) seenRefs.add(bankRef);
+            rowsToInsert.push(row);
+        }
+
+        for (const row of rowsToInsert) {
             const query = 'INSERT INTO tbl_cashbook SET ?';
-            con.query(query, row, (error, results) => {
+            con.query(query, row, (error) => {
                 if (error) {
                     console.error('Error inserting data:', error.message, 'Data:', row);
                 } else {
@@ -2512,7 +2692,14 @@ const UploadCashbookList = async (req, res) => {
             }
         });
 
-        res.send({ success: true, message: 'File uploaded and data inserted' });
+        res.send({
+            success: true,
+            message: skippedDuplicates > 0
+                ? `File uploaded. ${rowsToInsert.length} inserted, ${skippedDuplicates} duplicate bank references skipped.`
+                : 'File uploaded and data inserted',
+            inserted: rowsToInsert.length,
+            skipped_duplicates: skippedDuplicates
+        });
     } catch (error) {
         res.status(500).send({ success: false, message: error.message });
     }
@@ -2869,10 +3056,43 @@ const addUpdateCashbook = async (req, res) => {
                             });
                         }
 
-                        return res.status(200).json({
-                            success: true,
-                            message: "Cashbook updated successfully."
-                        });
+                        con.query(
+                            `
+                            SELECT order_id, supplier_invoice_id
+                            FROM tbl_cashbook
+                            WHERE id = ?
+                            LIMIT 1
+                            `,
+                            [cashbook_id],
+                            async (selectErr, selectRows) => {
+                                if (selectErr) {
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: selectErr.message
+                                    });
+                                }
+
+                                try {
+                                    const linked = selectRows[0] || {};
+                                    if (linked.order_id) {
+                                        await recalcOrderPayment(linked.order_id);
+                                    }
+                                    if (linked.supplier_invoice_id) {
+                                        await recalcSupplierInvoicePayment(linked.supplier_invoice_id);
+                                    }
+                                } catch (refreshErr) {
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: refreshErr.message
+                                    });
+                                }
+
+                                return res.status(200).json({
+                                    success: true,
+                                    message: "Cashbook updated successfully."
+                                });
+                            }
+                        );
 
                     }
                 );
@@ -3005,7 +3225,7 @@ const deleteCashbookById = async (req, res) => {
 
         // Check if record exists
         const checkQuery = `
-            SELECT id
+            SELECT id, order_id, supplier_invoice_id
             FROM tbl_cashbook
             WHERE id = ?
             LIMIT 1
@@ -3033,12 +3253,28 @@ const deleteCashbookById = async (req, res) => {
                 WHERE id = ?
             `;
 
-            con.query(deleteQuery, [cashbook_id], (deleteErr, deleteResult) => {
+            const removed = checkResult[0];
+
+            con.query(deleteQuery, [cashbook_id], async (deleteErr) => {
 
                 if (deleteErr) {
                     return res.status(500).json({
                         success: false,
                         message: deleteErr.message
+                    });
+                }
+
+                try {
+                    if (removed.order_id) {
+                        await recalcOrderPayment(removed.order_id);
+                    }
+                    if (removed.supplier_invoice_id) {
+                        await recalcSupplierInvoicePayment(removed.supplier_invoice_id);
+                    }
+                } catch (refreshErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: "Cashbook deleted, but the linked invoice payment could not be refreshed. " + refreshErr.message
                     });
                 }
 
@@ -3649,135 +3885,6 @@ END AS Credit
     }
 };
 
-
-/* const AddOrUpdateBookingInstruction = async (req, res) => {
-    try {
-        const {
-            id, // booking_instruction_id for update (if present)
-            order_id,
-            bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
-            bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
-            bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
-            bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
-            bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-            bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
-            bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-            bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-            bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
-            bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-            bk_loading_facilities, bk_desc_goods, bk_handling_req
-        } = req.body;
-        console.log(req.body);
-
-        if (id) {
-            // 🟢 UPDATE
-            const updateQuery = `
-                UPDATE booking_instruction SET
-                    order_id=?, bk_shipper=?, bk_ship_add=?, bk_ship_contact=?, bk_ship_tel_email=?, bk_ship_poNo=?,
-                    bk_ship_custCode=?, bk_ship_regNum=?, bk_ship_refNo=?, bk_consignee=?, bk_consg_add=?,
-                    bk_consg_notfParty=?, bk_consg_ContPersn=?, bk_consg_tel=?, bk_consg_portDischg=?,
-                    bk_xdoc_provider=?, bk_comm_Invoice=?, bk_count_CommInv=?, bk_packing_list=?,
-                    bk_custm_doc=?, bk_trasprt_doc=?, bk_MSDS=?, bk_CuntyTrd_SADC=?, bk_letter_credit=?,
-                    bk_track_contPersn=?, bk_podDoc_contPersn=?, bk_exprt_modTransport=?, bk_comTerm_sales=?,
-                    bk_Instru_origin=?, bk_Instru_des=?, bk_Insur_cover=?, bk_estim_supp=?, bk_estim_ref=?,
-                    bk_org_exptCharge=?, bk_charges_destination=?, bk_intenFreig_charge=?, bk_duties_taxes=?, bk_hazard_cargo=?,
-                    bk_cargo_packed=?, bk_battery_MSDS=?, bk_cnsolid_mulShipp=?, bk_preship_insp=?,
-                    bk_export_Import=?, bk_coll_dddress=?, bk_opening_times=?, bk_conName_tel=?,
-                    bk_loading_facilities=?, bk_desc_goods=?, bk_handling_req=?
-                WHERE id=?
-            `;
-
-            const values = [
-                order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
-                bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
-                bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
-                bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
-                bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-                bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
-                bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-                bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-                bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
-                bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-                bk_loading_facilities, bk_desc_goods, bk_handling_req,
-                id // for WHERE id=?
-            ];
-
-            con.query(updateQuery, values, (err, result) => {
-                if (err) throw err;
-                if (result.affectedRows > 0) {
-                    res.status(200).send({
-                        success: true,
-                        message: "Booking instruction updated successfully"
-                    });
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "No booking instruction found to update"
-                    });
-                }
-            });
-        } else {
-            // 🟢 INSERT
-            const insertQuery = `
-                INSERT INTO booking_instruction (
-                    order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo, bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, 
-                    bk_consg_add, bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg, bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list, bk_custm_doc,
-                    bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-                    bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales, bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-                    bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-                    bk_cargo_packed, bk_battery_MSDS, 
-                    bk_cnsolid_mulShipp, bk_preship_insp,
-                    bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-                    bk_loading_facilities, bk_desc_goods, bk_handling_req 
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-            `;
-
-            const values = [
-                order_id, bk_shipper, bk_ship_add, bk_ship_contact, bk_ship_tel_email, bk_ship_poNo,
-                bk_ship_custCode, bk_ship_regNum, bk_ship_refNo, bk_consignee, bk_consg_add,
-                bk_consg_notfParty, bk_consg_ContPersn, bk_consg_tel, bk_consg_portDischg,
-                bk_xdoc_provider, bk_comm_Invoice, bk_count_CommInv, bk_packing_list,
-                bk_custm_doc, bk_trasprt_doc, bk_MSDS, bk_CuntyTrd_SADC, bk_letter_credit,
-                bk_track_contPersn, bk_podDoc_contPersn, bk_exprt_modTransport, bk_comTerm_sales,
-                bk_Instru_origin, bk_Instru_des, bk_Insur_cover, bk_estim_supp, bk_estim_ref,
-                bk_org_exptCharge, bk_charges_destination, bk_intenFreig_charge, bk_duties_taxes, bk_hazard_cargo,
-                bk_cargo_packed, bk_battery_MSDS, bk_cnsolid_mulShipp, bk_preship_insp,
-                bk_export_Import, bk_coll_dddress, bk_opening_times, bk_conName_tel,
-                bk_loading_facilities, bk_desc_goods, bk_handling_req
-            ].map(v => (v != null ? v : ""));
-
-
-            con.query(insertQuery, values, (err, result) => {
-                if (err) throw err;
-                if (result.affectedRows > 0) {
-                    res.status(200).send({
-                        success: true,
-                        message: "Booking instruction added successfully"
-                    });
-                } else {
-                    res.status(400).send({
-                        success: false,
-                        message: "Failed to add booking instruction"
-                    });
-                }
-            });
-        }
-    } catch (error) {
-        res.status(500).send({
-            success: false,
-            message: error.message
-        });
-    }
-};
- */
-
-
 // const AddOrUpdateBookingInstruction = async (req, res) => {
 //     try {
 //         const {
@@ -4244,5 +4351,5 @@ module.exports = {
     UploadExcelBatch, UploadExcelWarehouse, editBatch, deleteBatche, UploadSageInvoiceLlist, GetSageInvoiceList, UploadCashbookList,
     GetCashbookList, GetSageInvoiceDetails, checkNumber, TransactionAllocation, AddOrUpdateBookingInstruction, GetBookingInstructionById,
     DeleteSageInvoice, GetSageInvoiceListByRegion, GetSageInvoiceDropdown, addUpdateCashbook, getCashbookById, deleteCashbookById,
-    addUpdateCashbookSplit, getCashbookSplitsByCashbookId, deleteCashbookSplitByCashbookId, deleteCashbookSplitById
+    addUpdateCashbookSplit, getCashbookSplitsByCashbookId, deleteCashbookSplitByCashbookId, deleteCashbookSplitById, GetSageInvoiceReport
 }

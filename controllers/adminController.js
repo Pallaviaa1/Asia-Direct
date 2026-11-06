@@ -1194,8 +1194,13 @@ const GetFreightAdmin = async (req, res) => {
                 WHERE is_deleted = 0
                 GROUP BY freight_id
             ) fqe_latest ON fqe_latest.freight_id = tbl_freight.id
-            LEFT JOIN freight_quote_estimate fqe ON fqe.id = fqe_latest.max_id
- 
+            LEFT JOIN freight_quote_estimate fqe ON fqe.id = COALESCE(fqe_latest.max_id, tbl_freight.freight_quote_estimate_id)
+            LEFT JOIN freight_quote_status_history fqsh ON fqsh.id = (
+                SELECT MAX(h.id)
+                FROM freight_quote_status_history h
+                WHERE h.freight_quote_estimate_id = COALESCE(fqe.id, tbl_freight.freight_quote_estimate_id)
+            )
+
             LEFT JOIN (
                 SELECT freight_id, MAX(id) AS max_id
                 FROM estimate_shipping_quote
@@ -1269,7 +1274,8 @@ const GetFreightAdmin = async (req, res) => {
                 c.name AS delivery_to_name,
                 co.name AS collection_from_name,
                 COALESCE(eq_cnt.quote_count, 0) AS quote_count,
-                COALESCE(se_cnt.estimate_count, 0) AS estimate_count
+                COALESCE(se_cnt.estimate_count, 0) AS estimate_count,
+                fqsh.track_status AS quote_tracking_status
             FROM tbl_freight
             ${dataJoins}
             ${condition}
@@ -12619,16 +12625,19 @@ const GetWarehouseOrders = async (req, res) => {
          * move/batch assignment does not matter.
          */
 
-        if (
-            normalizedTab === "instore"
-        ) {
+        if (normalizedTab === "instore") {
 
             condition += `
-                AND NOT (
-                    ${hasTrackingStartedExpr}
-                )
-            `;
+        AND (
+            warehouse_assign_order.batch_id IS NULL
+            OR
+            warehouse_assign_order.batch_id = 0
+        )
 
+        AND NOT (
+            ${hasTrackingStartedExpr}
+        )
+    `;
         }
 
 
@@ -12813,6 +12822,8 @@ const GetWarehouseOrders = async (req, res) => {
 
                     OR tbl_orders.client_name LIKE ?
 
+                    OR tbl_orders.order_number LIKE ?
+
                     OR warehouse_tbl.warehouse_name LIKE ?
 
                     OR batches.batch_number LIKE ?
@@ -12829,6 +12840,7 @@ const GetWarehouseOrders = async (req, res) => {
 
 
             params.push(
+                s,
                 s,
                 s,
                 s,
@@ -16970,6 +16982,7 @@ const InprocessCleranceOrder = async (req, res) => {
     }
 }
 
+
 const StillToCleranceOrder = async (req, res) => {
     try {
         const { clerance_id } = req.body;
@@ -19682,179 +19695,315 @@ GROUP BY tbl_orders.id
     }
 };
 
-
 // const OrderInvoiceList = async (req, res) => {
 //     try {
-//         const { search, client_id, page = 1, limit = 10 } = req.query; // Default page=1, limit=10
-//         const offset = (page - 1) * limit; // Calculate offset for pagination
 
-//         let query = `SELECT 
-//                         tbl_orders.id AS order_ID, 
-//                         tbl_invoices.id AS invoice_id, 
-//                         tbl_invoices.*, 
-//                         CONCAT('OR000', tbl_orders.id) AS order_number, 
-//                         tbl_users.id AS client_id, 
-//                         CASE 
-//                             WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name 
-//                             ELSE tbl_users.full_name 
-//                         END AS client_name
-//                     FROM tbl_orders
-//                     LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
-//                     LEFT JOIN tbl_invoices ON tbl_invoices.order_id = tbl_orders.id`;
+//         const { search, client_id, page = 1, limit = 10 } = req.query;
+
+//         const currentPage = parseInt(page);
+//         const pageSize = parseInt(limit);
+//         const offset = (currentPage - 1) * pageSize;
+
+//         let query = `
+//             SELECT
+//                 tbl_orders.id AS order_ID,
+//                 tbl_orders.freight_id,
+//                 tbl_invoices.id AS invoice_id,
+//                 tbl_invoices.*,
+//                 CONCAT('OR000', tbl_orders.id) AS order_number,
+//                 tbl_users.id AS client_id,
+//                 CASE
+//                     WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+//                     ELSE tbl_users.full_name
+//                 END AS client_name
+//             FROM tbl_orders
+//             LEFT JOIN tbl_users
+//                 ON tbl_users.id = tbl_orders.client_id
+//             LEFT JOIN tbl_invoices
+//                 ON tbl_invoices.order_id = tbl_orders.id
+//         `;
 
 //         let queryParams = [];
-//         let countQuery = `SELECT COUNT(*) AS total FROM tbl_orders`;
+
+//         let countQuery = `
+//             SELECT COUNT(*) AS total
+//             FROM tbl_orders
+//         `;
+
 //         let countParams = [];
 
-//         // Add search condition if 'search' query param is provided
+//         // Search Filter
 //         if (search) {
-//             query += ` WHERE (CONCAT('OR000', tbl_orders.id) LIKE ? 
-//                             OR tbl_users.full_name LIKE ? 
-//                             OR tbl_invoices.id LIKE ?
-//                             OR tbl_invoices.invoice_amt LIKE ?
-//                             OR tbl_invoices.due_date LIKE ?)`;
 
-//             // Add search parameters for multiple columns
-//             queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+//             query += `
+//                 WHERE (
+//                     CONCAT('OR000', tbl_orders.id) LIKE ?
+//                     OR tbl_users.full_name LIKE ?
+//                     OR tbl_invoices.id LIKE ?
+//                     OR tbl_invoices.invoice_amt LIKE ?
+//                     OR tbl_invoices.due_date LIKE ?
+//                 )
+//             `;
+
+//             queryParams.push(
+//                 `%${search}%`,
+//                 `%${search}%`,
+//                 `%${search}%`,
+//                 `%${search}%`,
+//                 `%${search}%`
+//             );
+
+//             countQuery += `
+//                 WHERE (
+//                     CONCAT('OR000', id) LIKE ?
+//                 )
+//             `;
+
+//             countParams.push(`%${search}%`);
 //         }
 
+//         // Client Filter
 //         if (client_id) {
-//             query += query.includes("WHERE") ? " AND" : " WHERE";
-//             query += ` tbl_orders.client_id = ?`;
+
+//             query += query.includes("WHERE") ? " AND " : " WHERE ";
+//             query += ` tbl_orders.client_id = ? `;
+
 //             queryParams.push(client_id);
-//             countQuery += ` WHERE client_id = ?`;
+
+//             countQuery += countQuery.includes("WHERE")
+//                 ? " AND client_id = ? "
+//                 : " WHERE client_id = ? ";
+
 //             countParams.push(client_id);
 //         }
 
-//         // Pagination logic
-//         query += ` ORDER BY tbl_orders.id DESC LIMIT ? OFFSET ?;`;
-//         queryParams.push(parseInt(limit), parseInt(offset));
+//         query += `
+//             ORDER BY tbl_orders.id DESC
+//             LIMIT ? OFFSET ?
+//         `;
 
-//         // Count query
-//         con.query(countQuery, countParams, (err, countResult) => {
-//             if (err) {
-//                 return res.status(500).json({
-//                     success: false,
-//                     message: "Database query error",
-//                     error: err.message
+//         queryParams.push(pageSize, offset);
+
+//         // Total Count
+//         const totalRecords = await new Promise((resolve, reject) => {
+
+//             con.query(countQuery, countParams, (err, result) => {
+//                 if (err) return reject(err);
+//                 resolve(result[0].total);
+//             });
+
+//         });
+
+//         const totalPages = Math.ceil(totalRecords / pageSize);
+
+//         // Orders + Invoices
+//         const orders = await new Promise((resolve, reject) => {
+
+//             con.query(query, queryParams, (err, result) => {
+//                 if (err) return reject(err);
+//                 resolve(result);
+//             });
+
+//         });
+
+//         // Get unique freight ids
+//         const freightIds = [
+//             ...new Set(
+//                 orders
+//                     .map(item => item.freight_id)
+//                     .filter(id => id)
+//             )
+//         ];
+
+//         let freightDocs = [];
+
+//         if (freightIds.length > 0) {
+
+//             freightDocs = await new Promise((resolve, reject) => {
+
+//                 const docQuery = `
+//                     SELECT
+//                         id,
+//                         freight_id,
+//                         document_name,
+//                         document,
+//                         uploaded_by,
+//                         created_at
+//                     FROM freight_doc
+//                     WHERE freight_id IN (?)
+//                     AND document_name IN ('Invoice (AD)', 'POP (AD)')
+//                     ORDER BY id DESC
+//                 `;
+
+//                 con.query(docQuery, [freightIds], (err, result) => {
+//                     if (err) return reject(err);
+//                     resolve(result);
 //                 });
-//             }
 
-//             const totalRecords = countResult[0].total;
-//             const totalPages = Math.ceil(totalRecords / limit);
+//             });
 
-//             // Fetch paginated records
-//             con.query(query, queryParams, (err, data) => {
-//                 if (err) {
-//                     return res.status(500).json({
-//                         success: false,
-//                         message: "Database query error",
-//                         error: err.message
-//                     });
+//         }
+
+//         // Group documents by freight_id
+//         const invoiceDocsMap = {};
+//         const popDocsMap = {};
+
+//         freightDocs.forEach(doc => {
+
+//             if (doc.document_name === "Invoice (AD)") {
+
+//                 if (!invoiceDocsMap[doc.freight_id]) {
+//                     invoiceDocsMap[doc.freight_id] = [];
 //                 }
 
-//                 res.status(200).json({
-//                     success: true,
-//                     data: data,
-//                     pagination: {
-//                         totalRecords,
-//                         totalPages,
-//                         currentPage: parseInt(page),
-//                         pageSize: parseInt(limit)
-//                     }
-//                 });
-//             });
+//                 invoiceDocsMap[doc.freight_id].push(doc);
+//             }
+
+//             if (doc.document_name === "POP (AD)") {
+
+//                 if (!popDocsMap[doc.freight_id]) {
+//                     popDocsMap[doc.freight_id] = [];
+//                 }
+
+//                 popDocsMap[doc.freight_id].push(doc);
+//             }
+
 //         });
+
+//         // Attach docs
+//         const finalData = orders.map(order => ({
+//             ...order,
+//             freight_invoice_docs:
+//                 invoiceDocsMap[order.freight_id] || [],
+//             freight_pop_docs:
+//                 popDocsMap[order.freight_id] || []
+//         }));
+
+//         return res.status(200).json({
+//             success: true,
+//             data: finalData,
+//             pagination: {
+//                 totalRecords,
+//                 totalPages,
+//                 currentPage,
+//                 pageSize
+//             }
+//         });
+
 //     } catch (error) {
-//         res.status(500).json({
+
+//         console.error("OrderInvoiceList Error:", error);
+
+//         return res.status(500).json({
 //             success: false,
 //             message: "An error occurred while fetching data.",
 //             error: error.message
 //         });
+
 //     }
 // };
 
 
 const OrderInvoiceList = async (req, res) => {
     try {
+        const {
+            search,
+            client_id,
+            page = 1,
+            limit = 10
+        } = req.query;
 
-        const { search, client_id, page = 1, limit = 10 } = req.query;
-
-        const currentPage = parseInt(page);
-        const pageSize = parseInt(limit);
+        const currentPage = Math.max(parseInt(page) || 1, 1);
+        const pageSize = Math.max(parseInt(limit) || 10, 1);
         const offset = (currentPage - 1) * pageSize;
 
         let query = `
             SELECT
                 tbl_orders.id AS order_ID,
                 tbl_orders.freight_id,
+
                 tbl_invoices.id AS invoice_id,
                 tbl_invoices.*,
+
+                /* Latest active Quote Invoice reference number */
+                qi.reference_no AS reference_no,
+                qi.id AS quote_invoice_id,
+                qi.final_base_currency as quote_invoice_currency,
+                qi.sumof_finalamount,
+                qi.created_at as quote_invoice_date,
+                
                 CONCAT('OR000', tbl_orders.id) AS order_number,
+
                 tbl_users.id AS client_id,
+
                 CASE
-                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                    WHEN tbl_orders.client_id = 0
+                        THEN tbl_orders.client_name
                     ELSE tbl_users.full_name
                 END AS client_name
+
             FROM tbl_orders
+
             LEFT JOIN tbl_users
                 ON tbl_users.id = tbl_orders.client_id
+
             LEFT JOIN tbl_invoices
                 ON tbl_invoices.order_id = tbl_orders.id
+
+            /*
+            |--------------------------------------------------------------------------
+            | Get latest active quote invoice for the order
+            |--------------------------------------------------------------------------
+            */
+            LEFT JOIN quote_invoice qi
+                ON qi.id = (
+                    SELECT MAX(qi2.id)
+                    FROM quote_invoice qi2
+                    WHERE qi2.order_id = tbl_orders.id
+                      AND qi2.is_deleted = 0
+                )
         `;
 
         let queryParams = [];
 
-        let countQuery = `
-            SELECT COUNT(*) AS total
-            FROM tbl_orders
-        `;
+        let conditions = [];
 
-        let countParams = [];
-
-        // Search Filter
         if (search) {
-
-            query += `
-                WHERE (
+            conditions.push(`
+                (
                     CONCAT('OR000', tbl_orders.id) LIKE ?
                     OR tbl_users.full_name LIKE ?
                     OR tbl_invoices.id LIKE ?
                     OR tbl_invoices.invoice_amt LIKE ?
                     OR tbl_invoices.due_date LIKE ?
+                    OR qi.reference_no LIKE ?
                 )
-            `;
+            `);
+
+            const searchValue = `%${search}%`;
 
             queryParams.push(
-                `%${search}%`,
-                `%${search}%`,
-                `%${search}%`,
-                `%${search}%`,
-                `%${search}%`
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue
             );
-
-            countQuery += `
-                WHERE (
-                    CONCAT('OR000', id) LIKE ?
-                )
-            `;
-
-            countParams.push(`%${search}%`);
         }
 
-        // Client Filter
         if (client_id) {
-
-            query += query.includes("WHERE") ? " AND " : " WHERE ";
-            query += ` tbl_orders.client_id = ? `;
+            conditions.push(`
+                tbl_orders.client_id = ?
+            `);
 
             queryParams.push(client_id);
+        }
 
-            countQuery += countQuery.includes("WHERE")
-                ? " AND client_id = ? "
-                : " WHERE client_id = ? ";
-
-            countParams.push(client_id);
+        if (conditions.length > 0) {
+            query += `
+                WHERE ${conditions.join(" AND ")}
+            `;
         }
 
         query += `
@@ -19864,29 +20013,97 @@ const OrderInvoiceList = async (req, res) => {
 
         queryParams.push(pageSize, offset);
 
-        // Total Count
+        let countQuery = `
+            SELECT COUNT(DISTINCT tbl_orders.id) AS total
+            FROM tbl_orders
+
+            LEFT JOIN tbl_users
+                ON tbl_users.id = tbl_orders.client_id
+
+            LEFT JOIN tbl_invoices
+                ON tbl_invoices.order_id = tbl_orders.id
+
+            LEFT JOIN quote_invoice qi
+                ON qi.id = (
+                    SELECT MAX(qi2.id)
+                    FROM quote_invoice qi2
+                    WHERE qi2.order_id = tbl_orders.id
+                      AND qi2.is_deleted = 0
+                )
+        `;
+
+        let countParams = [];
+
+        let countConditions = [];
+
+        if (search) {
+            countConditions.push(`
+                (
+                    CONCAT('OR000', tbl_orders.id) LIKE ?
+                    OR tbl_users.full_name LIKE ?
+                    OR tbl_invoices.id LIKE ?
+                    OR tbl_invoices.invoice_amt LIKE ?
+                    OR tbl_invoices.due_date LIKE ?
+                    OR qi.reference_no LIKE ?
+                )
+            `);
+
+            const searchValue = `%${search}%`;
+
+            countParams.push(
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        if (client_id) {
+            countConditions.push(`
+                tbl_orders.client_id = ?
+            `);
+
+            countParams.push(client_id);
+        }
+
+        if (countConditions.length > 0) {
+            countQuery += `
+                WHERE ${countConditions.join(" AND ")}
+            `;
+        }
+
         const totalRecords = await new Promise((resolve, reject) => {
+            con.query(
+                countQuery,
+                countParams,
+                (err, result) => {
+                    if (err) {
+                        return reject(err);
+                    }
 
-            con.query(countQuery, countParams, (err, result) => {
-                if (err) return reject(err);
-                resolve(result[0].total);
-            });
-
+                    resolve(result[0].total);
+                }
+            );
         });
 
         const totalPages = Math.ceil(totalRecords / pageSize);
 
-        // Orders + Invoices
         const orders = await new Promise((resolve, reject) => {
+            con.query(
+                query,
+                queryParams,
+                (err, result) => {
+                    if (err) {
+                        return reject(err);
+                    }
 
-            con.query(query, queryParams, (err, result) => {
-                if (err) return reject(err);
-                resolve(result);
-            });
-
+                    resolve(result);
+                }
+            );
         });
 
-        // Get unique freight ids
         const freightIds = [
             ...new Set(
                 orders
@@ -19909,22 +20126,33 @@ const OrderInvoiceList = async (req, res) => {
                         document,
                         uploaded_by,
                         created_at
+
                     FROM freight_doc
+
                     WHERE freight_id IN (?)
-                    AND document_name IN ('Invoice (AD)', 'POP (AD)')
+
+                    AND document_name IN (
+                        'Invoice (AD)',
+                        'POP (AD)'
+                    )
+
                     ORDER BY id DESC
                 `;
 
-                con.query(docQuery, [freightIds], (err, result) => {
-                    if (err) return reject(err);
-                    resolve(result);
-                });
+                con.query(
+                    docQuery,
+                    [freightIds],
+                    (err, result) => {
+                        if (err) {
+                            return reject(err);
+                        }
 
+                        resolve(result);
+                    }
+                );
             });
-
         }
 
-        // Group documents by freight_id
         const invoiceDocsMap = {};
         const popDocsMap = {};
 
@@ -19947,21 +20175,23 @@ const OrderInvoiceList = async (req, res) => {
 
                 popDocsMap[doc.freight_id].push(doc);
             }
-
         });
 
-        // Attach docs
         const finalData = orders.map(order => ({
             ...order,
+
             freight_invoice_docs:
                 invoiceDocsMap[order.freight_id] || [],
+
             freight_pop_docs:
                 popDocsMap[order.freight_id] || []
         }));
 
         return res.status(200).json({
             success: true,
+
             data: finalData,
+
             pagination: {
                 totalRecords,
                 totalPages,
@@ -19972,84 +20202,18 @@ const OrderInvoiceList = async (req, res) => {
 
     } catch (error) {
 
-        console.error("OrderInvoiceList Error:", error);
+        console.error(
+            "OrderInvoiceList Error:",
+            error
+        );
 
         return res.status(500).json({
             success: false,
             message: "An error occurred while fetching data.",
             error: error.message
         });
-
     }
 };
-
-// const revertMovedFreight = async (req, res) => {
-//     try {
-//         const { freight_id, batch_id } = req.body;
-
-//         // Check if freight is actually assigned to the batch
-//         const checkAssignmentQuery = `
-//             SELECT * FROM freight_assig_to_batch 
-//             WHERE freight_id = ? AND batch_id = ?
-//         `;
-//         con.query(checkAssignmentQuery, [freight_id, batch_id], (err, assignmentResult) => {
-//             if (err) {
-//                 return res.status(500).send({ success: false, message: err.message });
-//             }
-
-//             if (assignmentResult.length === 0) {
-//                 return res.status(400).send({ success: false, message: 'No such freight assigned to the batch' });
-//             }
-
-//             // Step 1: Delete from freight_assig_to_batch
-//             const deleteQuery = `
-//                 DELETE FROM freight_assig_to_batch 
-//                 WHERE freight_id = ? AND batch_id = ?
-//             `;
-//             con.query(deleteQuery, [freight_id, batch_id], (err, deleteResult) => {
-//                 if (err) {
-//                     return res.status(500).send({ success: false, message: err.message });
-//                 }
-
-//                 // Step 2: Update tbl_freight.asigned_to_batch = 0
-//                 const updateFreightQuery = `
-//                     UPDATE tbl_freight 
-//                     SET asigned_to_batch = 0 
-//                     WHERE id = ?
-//                 `;
-//                 con.query(updateFreightQuery, [freight_id], (err, updateResult) => {
-//                     if (err) {
-//                         return res.status(500).send({ success: false, message: err.message });
-//                     }
-
-//                     // Step 3: Reset warehouse assignment
-//                     const updateWarehouseQuery = `
-//                         UPDATE warehouse_assign_order 
-//                         SET assign_to_batch = 0, batch_id = NULL 
-//                         WHERE freight_id = ?
-//                     `;
-//                     con.query(updateWarehouseQuery, [freight_id], (err, warehouseUpdateResult) => {
-//                         if (err) {
-//                             return res.status(500).send({ success: false, message: err.message });
-//                         }
-
-//                         return res.status(200).send({
-//                             success: true,
-//                             message: 'Freight successfully removed from batch'
-//                         });
-//                     });
-//                 });
-//             });
-//         });
-
-//     } catch (error) {
-//         return res.status(500).send({
-//             success: false,
-//             message: error.message
-//         });
-//     }
-// };
-
 
 const revertMovedFreight = async (req, res) => {
     try {
@@ -22557,6 +22721,43 @@ const getAdminFrieghtComponentList = async (req, res) => {
     }
 };
 
+const getNewAdminFrieghtComponentList = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                id AS admin_frieght_component_id,
+                code,
+                description,
+                name,
+                status
+            FROM admin_frieght_component
+            ORDER BY description ASC
+        `;
+
+        con.query(query, (err, result) => {
+            if (err) {
+                return res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                count: result.length,
+                data: result
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
 // ================= FREIGHT QUOTE ESTIMATE (ADMIN & SUPPLIER) =================
 
 const addUpdateFreightQuotes = async (req, res) => {
@@ -22578,6 +22779,7 @@ const addUpdateFreightQuotes = async (req, res) => {
             quote_validity,
             final_base_currency,
             chargeable,
+            chargeable_unit,
             sumof_totalcost,
             sumof_finalamount,
             sumof_vatincl,
@@ -22597,7 +22799,9 @@ const addUpdateFreightQuotes = async (req, res) => {
             "USD",
             "RAND",
             "INR",
-            "EURO"
+            "EURO",
+            "CNY",
+            "RMB"
         ];
 
         if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
@@ -22614,12 +22818,12 @@ const addUpdateFreightQuotes = async (req, res) => {
             });
         }
 
-        // if (!client_id) {
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: "client_id is required"
-        //     });
-        // }
+        if (!chargeable_unit) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select Chargeable Unit"
+            });
+        }
 
         if (!quote_type) {
             return res.status(400).json({
@@ -22755,6 +22959,7 @@ const addUpdateFreightQuotes = async (req, res) => {
                 quote_validity = ?,
                 final_base_currency =?,
                 chargeable =?,
+                chargeable_unit =?,
                 sumof_totalcost =?,
                 sumof_finalamount =?,
                 sumof_vatincl =?
@@ -22773,6 +22978,7 @@ const addUpdateFreightQuotes = async (req, res) => {
                         quote_validity,
                         final_base_currency,
                         chargeable,
+                        chargeable_unit,
                         sumof_totalcost,
                         sumof_finalamount,
                         sumof_vatincl,
@@ -22808,11 +23014,12 @@ const addUpdateFreightQuotes = async (req, res) => {
             quote_validity,
             final_base_currency,
             chargeable,
+            chargeable_unit,
             sumof_totalcost,
             sumof_finalamount,
             sumof_vatincl
         )
-    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `,
                     [
                         freight_id,
@@ -22829,6 +23036,7 @@ const addUpdateFreightQuotes = async (req, res) => {
                         quote_validity,
                         final_base_currency,
                         chargeable,
+                        chargeable_unit,
                         sumof_totalcost,
                         sumof_finalamount,
                         sumof_vatincl
@@ -23170,6 +23378,7 @@ const GetFreightQuoteEstimateById = async (req, res) => {
         fqe.quote_type,
         fqe.final_base_currency,
         fqe.chargeable,
+        fqe.chargeable_unit,
         fqe.sumof_totalcost,
         fqe.sumof_finalamount,
         fqe.sumof_vatincl,
@@ -23283,6 +23492,7 @@ const GetFreightQuoteEstimateById = async (req, res) => {
                         date: quote.quote_date,
                         final_base_currency: quote.final_base_currency,
                         chargeable: quote.chargeable,
+                        chargeable_unit: quote.chargeable_unit,
                         sumof_totalcost: quote.sumof_totalcost,
                         sumof_finalamount: quote.sumof_finalamount,
                         sumof_vatincl: quote.sumof_vatincl,
@@ -23412,6 +23622,7 @@ const getFreightQuoteEstimateBySupplier = async (req, res) => {
         fqe.quote_validity,
         fqe.final_base_currency,
         fqe.chargeable,
+        fqe.chargeable_unit,
         fqe.sumof_totalcost,
         fqe.sumof_finalamount,
         fqe.sumof_vatincl,
@@ -23529,6 +23740,7 @@ const getFreightQuoteEstimateBySupplier = async (req, res) => {
                                 quote_validity: quote.quote_validity,
                                 final_base_currency: quote.final_base_currency,
                                 chargeable: quote.chargeable,
+                                chargeable_unit: quote.chargeable_unit,
                                 sumof_totalcost: quote.sumof_totalcost,
                                 sumof_finalamount: quote.sumof_finalamount,
                                 sumof_vatincl: quote.sumof_vatincl,
@@ -23670,12 +23882,17 @@ const GetFreightQuoteEstimateList = async (req, res) => {
 
          fqe.freight_id,
          tf.freight_number,
+         tf.sales_representative as sales_rep_id,
+         tu.full_name as sales_rep_name,
 
          fqe.client_id,
          fqe.client_name,
          
          fqe.supplier_id,
          ts.name as supplier_name,
+
+         fqsh.track_status,
+
          fqe.company_id,
          ca.company_name,
          ca.country,
@@ -23689,6 +23906,7 @@ const GetFreightQuoteEstimateList = async (req, res) => {
          fqe.inv_date,
          fqe.final_base_currency,
          fqe.chargeable,
+         fqe.chargeable_unit,
          fqe.sumof_totalcost,
          fqe.sumof_finalamount,
          fqe.sumof_vatincl,
@@ -23699,8 +23917,18 @@ const GetFreightQuoteEstimateList = async (req, res) => {
 
          FROM freight_quote_estimate fqe
 
+         LEFT JOIN freight_quote_status_history fqsh
+         ON fqsh.id = (
+         SELECT MAX(h.id)
+         FROM freight_quote_status_history h
+         WHERE h.freight_quote_estimate_id = fqe.id
+         )
+
          LEFT JOIN tbl_freight tf
          ON tf.id = fqe.freight_id
+
+         LEFT JOIN tbl_users tu
+         ON tu.id = tf.sales_representative 
 
          LEFT JOIN tbl_suppliers ts
          ON ts.id = fqe.supplier_id
@@ -24219,6 +24447,7 @@ const qouteEstimateDetailsByFreight = async (req, res) => {
                 fqe.quote_type,
                 fqe.final_base_currency,
                 fqe.chargeable,
+                fqe.chargeable_unit,
                 fqe.sumof_totalcost,
                 fqe.sumof_finalamount,
                 fqe.sumof_vatincl,
@@ -24346,6 +24575,7 @@ const qouteEstimateDetailsByFreight = async (req, res) => {
                         date: quote.quote_date,
                         final_base_currency: quote.final_base_currency,
                         chargeable: quote.chargeable,
+                        chargeable_unit: quote.chargeable_unit,
                         sumof_totalcost: quote.sumof_totalcost,
                         sumof_finalamount: quote.sumof_finalamount,
                         sumof_vatincl: quote.sumof_vatincl,
@@ -24431,6 +24661,232 @@ const qouteEstimateDetailsByFreight = async (req, res) => {
 
 };
 
+const updateFreightQuoteHistoryStatus = (req, res) => {
+    try {
+        const {
+            freight_id,
+            freightId,
+            freight_quote_estimate_id,
+            track_status,
+            status,
+            comment,
+            changed_by,
+            user_id
+        } = req.body;
+
+        const targetFreightId = freight_id || freightId;
+        const newStatus = track_status || status;
+        const changedBy = changed_by || user_id;
+
+        // 1. Basic validation
+        if (!targetFreightId && !freight_quote_estimate_id) {
+            return res.status(400).json({
+                success: false,
+                message: "freight_id is required"
+            });
+        }
+
+        if (!newStatus) {
+            return res.status(400).json({
+                success: false,
+                message: "track_status is required"
+            });
+        }
+
+        if (!comment) {
+            return res.status(400).json({
+                success: false,
+                message: "comment is required"
+            });
+        }
+
+        if (!changedBy) {
+            return res.status(400).json({
+                success: false,
+                message: "changed_by is required"
+            });
+        }
+
+        // 2. Check if estimation exists for this freight
+        let checkEstimateQuery = "";
+        let checkEstimateParams = [];
+
+        if (targetFreightId) {
+            checkEstimateQuery = `
+                SELECT 
+                    fqe.id AS freight_quote_estimate_id, 
+                    COALESCE(fqe.freight_id, tf.id) AS freight_id
+                FROM tbl_freight tf
+                LEFT JOIN freight_quote_estimate fqe 
+                    ON (fqe.freight_id = tf.id OR fqe.id = tf.freight_quote_estimate_id)
+                   AND fqe.is_deleted = 0
+                WHERE tf.id = ?
+                ORDER BY fqe.id DESC
+                LIMIT 1
+            `;
+            checkEstimateParams = [targetFreightId];
+        } else {
+            checkEstimateQuery = `
+                SELECT 
+                    id AS freight_quote_estimate_id, 
+                    freight_id
+                FROM freight_quote_estimate
+                WHERE id = ? AND is_deleted = 0
+                LIMIT 1
+            `;
+            checkEstimateParams = [freight_quote_estimate_id];
+        }
+
+        con.query(checkEstimateQuery, checkEstimateParams, (estimateErr, estimateRows) => {
+            if (estimateErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: estimateErr.message
+                });
+            }
+
+            const estimateRecord = estimateRows && estimateRows[0];
+            if (!estimateRecord || !estimateRecord.freight_quote_estimate_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Please Estimate first for this freight"
+                });
+            }
+
+            const finalFreightId = estimateRecord.freight_id || targetFreightId || null;
+            const finalEstimateId = estimateRecord.freight_quote_estimate_id;
+
+            const getLatestStatusQuery = `
+                SELECT track_status 
+                FROM freight_quote_status_history 
+                WHERE (freight_id = ? OR freight_quote_estimate_id = ?)
+                ORDER BY changed_at DESC, id DESC 
+                LIMIT 1
+            `;
+
+            con.query(getLatestStatusQuery, [finalFreightId, finalEstimateId], (statusErr, rows) => {
+                if (statusErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: statusErr.message
+                    });
+                }
+
+                const currentStatus = rows.length > 0 ? rows[0].track_status : 'Draft';
+
+                const insertQuery = `
+                    INSERT INTO freight_quote_status_history 
+                    (freight_id, freight_quote_estimate_id, track_status, comment, changed_by) 
+                    VALUES (?, ?, ?, ?, ?)
+                `;
+
+                const insertParams = [
+                    finalFreightId,
+                    finalEstimateId,
+                    newStatus,
+                    comment || null,
+                    changedBy
+                ];
+
+                con.query(insertQuery, insertParams, (insertErr, result) => {
+                    if (insertErr) {
+                        return res.status(500).json({
+                            success: false,
+                            message: insertErr.message
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        message: `Status updated successfully from '${currentStatus}' to '${newStatus}'`,
+                        data: {
+                            id: result.insertId,
+                            freight_id: finalFreightId,
+                            freight_quote_estimate_id: finalEstimateId,
+                            previous_status: currentStatus,
+                            track_status: newStatus,
+                            comment: comment || null,
+                            changed_by: changedBy
+                        }
+                    });
+                });
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const viewFreightQuoteStatusHistory = (req, res) => {
+    try {
+        const freight_quote_estimate_id =
+            req.params.freight_quote_estimate_id ||
+            req.body.freight_quote_estimate_id;
+
+        // Validation
+        if (!freight_quote_estimate_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Freight Quote not Estimated yet"
+            });
+        }
+
+        const fetchHistoryQuery = `
+            SELECT 
+                fqsh.id,
+                fqsh.freight_quote_estimate_id,
+                fqsh.track_status,
+                fqsh.comment,
+
+                tu.full_name as changed_by,
+
+                DATE_FORMAT(
+                    fqsh.changed_at,
+                    '%Y-%m-%d %H:%i:%s'
+                ) AS changed_at
+
+            FROM freight_quote_status_history fqsh
+
+            LEFT JOIN tbl_users tu
+                ON tu.id = fqsh.changed_by
+
+            WHERE fqsh.freight_quote_estimate_id = ?
+
+            ORDER BY fqsh.changed_at DESC, fqsh.id DESC
+        `;
+
+        con.query(
+            fetchHistoryQuery,
+            [freight_quote_estimate_id],
+            (err, results) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Freight quote status history fetched successfully",
+                    total_records: results.length,
+                    data: results
+                });
+            }
+        );
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 // ===================================== Supplier Shipment Invoices =====================================
 
 const addUpdateSupplierShipmentInvoice = async (req, res) => {
@@ -24448,6 +24904,7 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
             due_date,
             final_base_currency,
             chargeable,
+            chargeable_unit,
             sumof_totalcost,
             sumof_finalamount,
             sumof_vatincl,
@@ -24468,7 +24925,9 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
             "USD",
             "RAND",
             "INR",
-            "EURO"
+            "EURO",
+            "CNY",
+            "RMB"
         ];
 
         if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
@@ -24482,6 +24941,13 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "Please select supplier"
+            });
+        }
+
+        if (!chargeable_unit) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select Chargeable Unit"
             });
         }
 
@@ -24594,6 +25060,7 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
                         due_date = ?,
                         final_base_currency = ?,
                         chargeable = ?,
+                        chargeable_unit = ?,
                         sumof_totalcost = ?,
                         sumof_finalamount = ?,
                         sumof_vatincl = ?,
@@ -24609,6 +25076,7 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
                         due_date || null,
                         final_base_currency || null,
                         chargeable || 0,
+                        chargeable_unit,
                         sumof_totalcost || 0,
                         sumof_finalamount || 0,
                         sumof_vatincl || 0,
@@ -24643,12 +25111,13 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
                         due_date,
                         final_base_currency,
                         chargeable,
+                        chargeable_unit,
                         sumof_totalcost,
                         sumof_finalamount,
                         sumof_vatincl,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `,
                     [
                         supplier_id,
@@ -24659,6 +25128,7 @@ const addUpdateSupplierShipmentInvoice = async (req, res) => {
                         due_date || null,
                         final_base_currency || null,
                         chargeable || 0,
+                        chargeable_unit,
                         sumof_totalcost || 0,
                         sumof_finalamount || 0,
                         sumof_vatincl || 0,
@@ -25012,6 +25482,7 @@ const GetSupplierShipmentInvoiceById = async (req, res) => {
         ssi.quote_date,
         ssi.final_base_currency,
         ssi.chargeable,
+        ssi.chargeable_unit,
         ssi.sumof_totalcost,
         ssi.sumof_finalamount,
         ssi.sumof_vatincl,
@@ -25146,6 +25617,7 @@ const GetSupplierShipmentInvoiceById = async (req, res) => {
                                 quote_date: invoice.quote_date,
                                 final_base_currency: invoice.final_base_currency,
                                 chargeable: invoice.chargeable,
+                                chargeable_unit: invoice.chargeable_unit,
                                 sumof_totalcost: invoice.sumof_totalcost,
                                 sumof_finalamount: invoice.sumof_finalamount,
                                 sumof_vatincl: invoice.sumof_vatincl,
@@ -25313,6 +25785,7 @@ const getAllSupplierShipmentInvoices = async (req, res) => {
                         ssi.due_date,
                         ssi.final_base_currency,
                         ssi.chargeable,
+                        ssi.chargeable_unit,
                         ssi.sumof_totalcost,
                         ssi.sumof_finalamount,
                         ssi.sumof_vatincl,
@@ -25609,6 +26082,7 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
             quote_validity,
             final_base_currency,
             chargeable,
+            chargeable_unit,
             sumof_totalcost,
             sumof_finalamount,
             sumof_vatincl,
@@ -25625,6 +26099,13 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
             });
         }
 
+        if (!chargeable_unit) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select Chargeable Unit"
+            });
+        }
+
         if (!order_id) {
             return res.status(400).json({
                 success: false,
@@ -25636,7 +26117,9 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
             "USD",
             "RAND",
             "INR",
-            "EURO"
+            "EURO",
+            "CNY",
+            "RMB"
         ];
 
         if (!allowedCurrencies.includes(final_base_currency.trim().toUpperCase())) {
@@ -25791,6 +26274,7 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
                         quote_validity = ?,
                         final_base_currency = ?,
                         chargeable = ?,
+                        chargeable_unit = ?,
                         sumof_totalcost = ?,
                         sumof_finalamount = ?,
                         sumof_vatincl = ?,
@@ -25811,6 +26295,7 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
                         quote_validity || null,
                         final_base_currency || null,
                         chargeable || 0,
+                        chargeable_unit,
                         sumof_totalcost || 0,
                         sumof_finalamount || 0,
                         sumof_vatincl || 0,
@@ -25850,12 +26335,13 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
                         quote_validity,
                         final_base_currency,
                         chargeable,
+                        chargeable_unit,
                         sumof_totalcost,
                         sumof_finalamount,
                         sumof_vatincl,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `,
                     [
                         supplier_id,
@@ -25871,6 +26357,7 @@ const addUpdateNewFreightQuoteInvoice = async (req, res) => {
                         quote_validity || null,
                         final_base_currency || null,
                         chargeable || 0,
+                        chargeable_unit,
                         sumof_totalcost || 0,
                         sumof_finalamount || 0,
                         sumof_vatincl || 0,
@@ -26243,7 +26730,26 @@ const GetNewFreightQuoteInvoiceById = async (req, res) => {
 
                 qi.client_id,
 
-                qi.client_name,
+                COALESCE(u.full_name, qi.client_name) AS client_name,
+                u.full_name AS client_full_name,
+                u.email AS client_email,
+                u.address_1 AS client_address_1,
+                u.address_2 AS client_address_2,
+                u.cellphone AS client_cellphone,
+                u.telephone AS client_telephone,
+                u.city AS client_city,
+                u.code AS client_code,
+                u.company_id AS client_company_id,
+                u.contact_person AS client_contact_person,
+                CASE 
+                    WHEN cust_c.name IS NOT NULL AND cust_c.name != '' THEN cust_c.name
+                    WHEN u.country IS NOT NULL AND u.country != '0' AND u.country != 0 THEN u.country
+                    ELSE ''
+                END AS client_country,
+                u.importers_ref AS client_importers_ref,
+                u.province AS client_province,
+                u.tax_ref AS client_tax_ref,
+                u.profile AS client_profile,
 
                 qi.supplier_id,
 
@@ -26264,6 +26770,8 @@ const GetNewFreightQuoteInvoiceById = async (req, res) => {
                 qi.final_base_currency,
 
                 qi.chargeable,
+
+                qi.chargeable_unit,
 
                 qi.sumof_totalcost,
 
@@ -26330,6 +26838,12 @@ const GetNewFreightQuoteInvoiceById = async (req, res) => {
 
             LEFT JOIN tbl_freight tf
                 ON tf.quote_invoice_id = qi.id
+
+            LEFT JOIN tbl_users u
+                ON u.id = COALESCE(qi.client_id, tf.client_id, ord.client_id)
+
+            LEFT JOIN countries cust_c
+                ON (cust_c.id = u.country AND u.country REGEXP '^[0-9]+$')
 
             WHERE
                 qi.is_deleted = 0
@@ -26466,6 +26980,62 @@ const GetNewFreightQuoteInvoiceById = async (req, res) => {
 
                                 client_name: invoice.client_name,
 
+                                // Client profile details from tbl_users (circled fields)
+                                client_company_id: invoice.client_company_id ?? "",
+                                client_contact_person: invoice.client_contact_person ?? "",
+                                client_country: invoice.client_country ?? "",
+                                client_importers_ref: invoice.client_importers_ref ?? "",
+                                client_importer_reference: invoice.client_importers_ref ?? "",
+                                client_province: invoice.client_province ?? "",
+                                client_tax_ref: invoice.client_tax_ref ?? "",
+                                client_tax_reference: invoice.client_tax_ref ?? "",
+
+                                client_email: invoice.client_email ?? "",
+                                client_address_1: invoice.client_address_1 ?? "",
+                                client_address_2: invoice.client_address_2 ?? "",
+                                client_cellphone: invoice.client_cellphone ?? "",
+                                client_telephone: invoice.client_telephone ?? "",
+                                client_city: invoice.client_city ?? "",
+                                client_code: invoice.client_code ?? "",
+                                client_profile: invoice.client_profile ?? "",
+
+                                // Direct keys matching the circled image labels
+                                contact_person: invoice.client_contact_person ?? "",
+                                importers_ref: invoice.client_importers_ref ?? "",
+                                importer_reference: invoice.client_importers_ref ?? "",
+                                province: invoice.client_province ?? "",
+                                tax_ref: invoice.client_tax_ref ?? "",
+                                tax_reference: invoice.client_tax_ref ?? "",
+                                country: invoice.client_country ?? "",
+                                customer_country: invoice.client_country ?? "",
+                                customer_company_id: invoice.client_company_id ?? "",
+
+                                // Structured client / customer profile details
+                                client_details: {
+                                    id: invoice.client_id,
+                                    client_id: invoice.client_id,
+                                    name: invoice.client_name,
+                                    full_name: invoice.client_name,
+                                    email: invoice.client_email ?? "",
+                                    address_1: invoice.client_address_1 ?? "",
+                                    address_2: invoice.client_address_2 ?? "",
+                                    cellphone: invoice.client_cellphone ?? "",
+                                    telephone: invoice.client_telephone ?? "",
+                                    city: invoice.client_city ?? "",
+                                    code: invoice.client_code ?? "",
+                                    company_id: invoice.client_company_id ?? "",
+                                    contact_person: invoice.client_contact_person ?? "",
+                                    country: invoice.client_country ?? "",
+                                    country_name: invoice.client_country ?? "",
+                                    importers_ref: invoice.client_importers_ref ?? "",
+                                    importer_reference: invoice.client_importers_ref ?? "",
+                                    province: invoice.client_province ?? "",
+                                    tax_ref: invoice.client_tax_ref ?? "",
+                                    tax_reference: invoice.client_tax_ref ?? "",
+                                    profile: invoice.client_profile ?? "",
+                                    customer_image: invoice.client_profile ?? ""
+                                },
+
                                 supplier_id: invoice.supplier_id,
 
                                 supplier_name: invoice.supplier_name,
@@ -26485,6 +27055,7 @@ const GetNewFreightQuoteInvoiceById = async (req, res) => {
                                 final_base_currency: invoice.final_base_currency,
 
                                 chargeable: invoice.chargeable,
+                                chargeable_unit: invoice.chargeable_unit,
 
                                 sumof_totalcost: invoice.sumof_totalcost,
 
@@ -26727,6 +27298,8 @@ const getAllNewFreightQuoteInvoices = async (req, res) => {
 
                         qi.chargeable,
 
+                        qi.chargeable_unit,
+
                         qi.sumof_totalcost,
 
                         qi.sumof_finalamount,
@@ -26859,6 +27432,7 @@ const getAllNewFreightQuoteInvoices = async (req, res) => {
                                 country: item.country,
 
                                 chargeable: item.chargeable,
+                                chargeable_unit: item.chargeable_unit,
 
                                 sumof_totalcost: item.sumof_totalcost,
 
@@ -27448,6 +28022,7 @@ const createQuoteInvoice = async (req, res) => {
                     invoice_for_country,
                     final_base_currency,
                     chargeable,
+                    chargeable_unit,
                     sumof_totalcost,
                     sumof_finalamount,
                     sumof_vatincl,
@@ -27455,7 +28030,7 @@ const createQuoteInvoice = async (req, res) => {
                 )
                 VALUES
                 (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 `,
                 [
@@ -27472,6 +28047,7 @@ const createQuoteInvoice = async (req, res) => {
                     quote.invoice_for_country,
                     quote.final_base_currency,
                     quote.chargeable,
+                    quote.chargeable_unit,
                     quote.sumof_totalcost,
                     quote.sumof_finalamount,
                     quote.sumof_vatincl,
@@ -28483,20 +29059,20 @@ const getCustomerQuotesReport = async (req, res) => {
         if (customer_from) {
 
             where += `
-        AND UPPER(LEFT(COALESCE(c.full_name, fqe.client_name),1)) >= ?
+        AND fqe.client_id = ?
     `;
 
-            params.push(customer_from.toUpperCase());
+            params.push(customer_from);
 
         }
 
         if (customer_to) {
 
             where += `
-        AND UPPER(LEFT(COALESCE(c.full_name, fqe.client_name),1)) <= ?
+        OR fqe.client_id = ?
     `;
 
-            params.push(customer_to.toUpperCase());
+            params.push(customer_to);
 
         }
         // =====================================
@@ -28856,26 +29432,17 @@ END AS document_status
 };
 
 const getCustomerInvoicesReport = async (req, res) => {
-
     try {
-
         const {
-
             start_date,
             end_date,
-
             customer_from,
             customer_to,
-
             category_from,
             category_to,
-
             sales_rep_id,
-
             invoice_status = "ALL",
-
             status = "BOTH",
-
         } = req.body;
 
         let where = `
@@ -28888,295 +29455,201 @@ const getCustomerInvoicesReport = async (req, res) => {
         // =====================================
         // DATE FILTER
         // =====================================
-
         if (start_date && end_date) {
-
             where += `
-                AND DATE(qi.quote_date)
-                BETWEEN ? AND ?
+                AND DATE(qi.quote_date) BETWEEN ? AND ?
             `;
-
-            params.push(start_date);
-            params.push(end_date);
-
+            params.push(start_date, end_date);
         }
 
         // =====================================
         // CUSTOMER RANGE
         // =====================================
-
         if (customer_from) {
-
             where += `
-        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) >= ?
-    `;
-
-            params.push(customer_from.toUpperCase());
-
+                AND qi.client_id = ?
+            `;
+            params.push(customer_from);
         }
 
         if (customer_to) {
-
             where += `
-        AND UPPER(LEFT(COALESCE(c.full_name, qi.client_name),1)) <= ?
-    `;
-
-            params.push(customer_to.toUpperCase());
-
+                OR qi.client_id = ?
+            `;
+            params.push(customer_to);
         }
+
         // =====================================
         // CATEGORY RANGE
         // =====================================
-
         if (category_from && category_to) {
-
             where += `
-        AND qi.invoice_for_country IN (?, ?)
-    `;
-
+                AND qi.invoice_for_country IN (?, ?)
+            `;
             params.push(category_from, category_to);
-
-        }
-        else if (category_from) {
-
+        } else if (category_from) {
             where += `
-        AND qi.invoice_for_country = ?
-    `;
-
+                AND qi.invoice_for_country = ?
+            `;
             params.push(category_from);
-
-        }
-        else if (category_to) {
-
+        } else if (category_to) {
             where += `
-        AND qi.invoice_for_country = ?
-    `;
-
+                AND qi.invoice_for_country = ?
+            `;
             params.push(category_to);
-
         }
+
         // =====================================
         // SALES REP
         // =====================================
-
         if (sales_rep_id) {
-
             where += `
                 AND tf.sales_representative = ?
             `;
-
             params.push(sales_rep_id);
-
         }
 
         // =====================================
         // ACTIVE / INACTIVE
         // =====================================
-
         if (status === "ACTIVE") {
-
             where += `
                 AND tf.is_active = 1
             `;
-
         }
 
         if (status === "INACTIVE") {
-
             where += `
                 AND tf.is_active = 0
             `;
-
         }
 
         // Invoices status filter (PAID | UNPAID | ALL)
-
         const invoiceStatus = (invoice_status || "ALL").toLowerCase();
 
         if (invoiceStatus !== "all") {
-
             where += `
-            AND LOWER(qi.status) = ?
+                AND LOWER(qi.status) = ?
             `;
-
             params.push(invoiceStatus);
-
         }
+
         // =====================================
         // COUNT QUERY
         // =====================================
-
         const countQuery = `
-
             SELECT
                 COUNT(DISTINCT qi.id) AS total
-
             FROM quote_invoice qi
-
             LEFT JOIN tbl_freight tf
                 ON tf.id = qi.freight_id
-
             LEFT JOIN freight_quote_estimate fqe
                 ON fqe.id = qi.freight_quote_estimate_id
-
             LEFT JOIN tbl_users tu
                 ON tu.id = tf.sales_representative
                 AND tu.is_deleted = 0
-
             LEFT JOIN tbl_suppliers ts
                 ON ts.id = qi.supplier_id
-
             LEFT JOIN tbl_users c
-            ON c.id = qi.client_id
-            AND c.is_deleted = 0
-
+                ON c.id = qi.client_id
+                AND c.is_deleted = 0
             ${where}
-
         `;
 
-        con.query(
-            countQuery,
-            params,
-            (countErr, countResult) => {
-
-                if (countErr) {
-
-                    return res.status(500).json({
-                        success: false,
-                        message: countErr.message
-                    });
-
-                }
-
-                const total = countResult[0].total;
-
-                // ===== Part 2 =====
-                // =====================================
-                // MAIN QUERY
-                // =====================================
-
-                const reportQuery = `
-
-                    SELECT
-
-                        qi.id AS quote_invoice_id,
-
-                        qi.reference_no,
-
-                        fqe.reference_no AS quote_reference_no,
-
-                        qi.freight_id,
-
-                        tf.freight_number,
-
-                        qi.client_id,
-
-                        qi.client_name,
-
-                        tf.sales_representative,
-
-                        tu.full_name AS sales_rep_name,
-
-                        qi.supplier_id,
-
-                        ts.name AS supplier_name,
-
-                        tf.freight_type,
-
-                        qi.customer_invoice_no,
-
-                        qi.invoice_for_country,
-
-                        qi.quote_date,
-
-                        qi.due_date,
-
-                        qi.final_base_currency,
-
-                        qi.sumof_totalcost AS exclusive,
-
-                        (
-                            qi.sumof_vatincl -
-                            qi.sumof_totalcost
-                        ) AS vat,
-
-                        qi.sumof_vatincl AS total,
-
-                        qi.status,
-
-                        qi.created_at
-
-                    FROM quote_invoice qi
-
-                    LEFT JOIN tbl_freight tf
-                        ON tf.id = qi.freight_id
-
-                    LEFT JOIN freight_quote_estimate fqe
-                        ON fqe.id = qi.freight_quote_estimate_id
-
-                    LEFT JOIN tbl_users tu
-                        ON tu.id = tf.sales_representative
-                        AND tu.is_deleted = 0
-
-                    LEFT JOIN tbl_suppliers ts
-                        ON ts.id = qi.supplier_id
-
-                    LEFT JOIN tbl_users c
-                        ON c.id = qi.client_id
-                        AND c.is_deleted = 0
-
-                    ${where}
-
-                    ORDER BY qi.id DESC
-
-                `;
-
-                con.query(
-                    reportQuery,
-                    params,
-
-                    (err, result) => {
-
-                        if (err) {
-
-                            return res.status(500).json({
-                                success: false,
-                                message: err.message
-                            });
-
-                        }
-
-                        return res.status(200).json({
-
-                            success: true,
-
-                            message: "Customer Invoices Report fetched successfully",
-
-                            data: result
-
-                        });
-
-                    }
-
-                );
-
+        con.query(countQuery, params, (countErr, countResult) => {
+            if (countErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
             }
 
-        );
+            const total = countResult[0].total;
 
-    } catch (error) {
+            // =====================================
+            // MAIN QUERY (Calculates totals directly from quote_invoice_details)
+            // =====================================
+            const reportQuery = `
+                SELECT
+                    qi.id AS quote_invoice_id,
+                    qi.reference_no,
+                    fqe.reference_no AS quote_reference_no,
+                    qi.freight_id,
+                    tf.freight_number,
+                    qi.client_id,
+                    qi.client_name,
+                    tf.sales_representative,
+                    tu.full_name AS sales_rep_name,
+                    qi.supplier_id,
+                    ts.name AS supplier_name,
+                    tf.freight_type,
+                    qi.customer_invoice_no,
+                    qi.invoice_for_country,
+                    qi.quote_date,
+                    qi.due_date,
+                    qi.final_base_currency,
 
-        return res.status(500).json({
+                    -- Sum of exclusive & vat from quote_invoice_details
+                    COALESCE(ROUND(SUM(qid.exclusive), 2), 0.00) AS exclusive,
+                    COALESCE(ROUND(SUM(qid.vat), 2), 0.00) AS vat,
 
-            success: false,
+                    qi.sumof_vatincl as total,
 
-            message: error.message
+                    qi.status,
+                    qi.created_at
 
+                FROM quote_invoice qi
+
+                LEFT JOIN quote_invoice_details qid
+                    ON qid.quote_invoice_id = qi.id
+
+                LEFT JOIN tbl_freight tf
+                    ON tf.id = qi.freight_id
+
+                LEFT JOIN freight_quote_estimate fqe
+                    ON fqe.id = qi.freight_quote_estimate_id
+
+                LEFT JOIN tbl_users tu
+                    ON tu.id = tf.sales_representative
+                    AND tu.is_deleted = 0
+
+                LEFT JOIN tbl_suppliers ts
+                    ON ts.id = qi.supplier_id
+
+                LEFT JOIN tbl_users c
+                    ON c.id = qi.client_id
+                    AND c.is_deleted = 0
+
+                ${where}
+
+                GROUP BY qi.id
+                ORDER BY qi.id DESC
+            `;
+
+            con.query(reportQuery, params, (err, result) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Customer Invoices Report fetched successfully",
+                    data: result
+                });
+            });
         });
 
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
-
 };
+
 
 const getCustomerBalancesOutstandingReport = async (req, res) => {
 
@@ -29423,6 +29896,8 @@ const getCustomerBalancesOutstandingReport = async (req, res) => {
                             qi.client_name
                         ) AS customer,
 
+                        MAX(qi.final_base_currency) AS final_base_currency,
+
                         SUM(
                             CASE
                                 WHEN DATEDIFF(?, qi.quote_date) <= 30
@@ -29598,6 +30073,8 @@ const getCustomerBalancesOutstandingReport = async (req, res) => {
 
                                 customer: row.customer,
 
+                                final_base_currency: row.final_base_currency || null,
+
                                 current: Number(row.current_amount).toFixed(2),
 
                                 days30: Number(row.days30).toFixed(2),
@@ -29639,9 +30116,306 @@ const getCustomerBalancesOutstandingReport = async (req, res) => {
 
 };
 
-const getCustomerUnallocatedReceiptsReport = async (req, res) => {
-    try {
+// const getCustomerUnallocatedReceiptsReport = async (req, res) => {
+//     try {
 
+//         const {
+//             start_date,
+//             end_date,
+//             customer_from,
+//             customer_to,
+//             category_from,
+//             category_to,
+//             status = "BOTH"
+//         } = req.body;
+
+//         /* ================= DATE FORMAT ================= */
+
+//         const formatDate = (date) => {
+
+//             if (!date) return null;
+
+//             if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+//                 return date;
+//             }
+
+//             if (/^\d{2}\/\d{2}\/\d{4}$/.test(date)) {
+//                 const [month, day, year] = date.split("/");
+//                 return `${year}-${month}-${day}`;
+//             }
+
+//             return null;
+//         };
+
+//         const formattedStartDate = formatDate(start_date);
+//         const formattedEndDate = formatDate(end_date);
+
+//         /* ================= WHERE ================= */
+
+//         let where = `
+//             WHERE
+//             (
+//                 cb.receipt -
+//                 COALESCE(
+//                     (
+//                         SELECT SUM(cs.allocated_amount)
+//                         FROM tbl_cashbook_splits cs
+//                         WHERE cs.cashbook_id = cb.id
+//                     ),
+//                     0
+//                 )
+//             ) > 0
+//         `;
+
+//         const params = [];
+
+//         /* ================= DATE FILTER ================= */
+
+//         if (formattedStartDate && formattedEndDate) {
+
+//             where += ` AND cb.date BETWEEN ? AND ? `;
+//             params.push(formattedStartDate, formattedEndDate);
+
+//         } else if (formattedStartDate) {
+
+//             where += ` AND cb.date >= ? `;
+//             params.push(formattedStartDate);
+
+//         } else if (formattedEndDate) {
+
+//             where += ` AND cb.date <= ? `;
+//             params.push(formattedEndDate);
+
+//         }
+
+//         /* ================= CUSTOMER ================= */
+
+//         if (customer_from) {
+//             where += ` AND cb.customer_id >= ? `;
+//             params.push(customer_from);
+//         }
+
+//         if (customer_to) {
+//             where += ` AND cb.customer_id <= ? `;
+//             params.push(customer_to);
+//         }
+
+//         /* ================= CATEGORY ================= */
+
+//         if (category_from) {
+//             where += ` AND qi.invoice_for_country >= ? `;
+//             params.push(category_from);
+//         }
+
+//         if (category_to) {
+//             where += ` AND qi.invoice_for_country <= ? `;
+//             params.push(category_to);
+//         }
+
+//         /* ================= STATUS ================= */
+
+//         if (status === "ACTIVE") {
+//             where += ` AND tu.status = 1 `;
+//         } else if (status === "INACTIVE") {
+//             where += ` AND tu.status = 0 `;
+//         }
+
+//         /* ================= COUNT QUERY ================= */
+
+//         const countQuery = `
+//             SELECT COUNT(DISTINCT cb.id) AS total
+
+//             FROM tbl_cashbook cb
+
+//             LEFT JOIN tbl_users tu
+//                 ON tu.id = cb.customer_id
+
+//             LEFT JOIN tbl_orders o
+//                 ON o.id = cb.order_id
+
+//             LEFT JOIN quote_invoice qi
+//                 ON qi.order_id = o.id
+//                 AND qi.is_deleted = 0
+
+//             ${where}
+//         `;
+
+//         con.query(countQuery, params, (countErr, countResult) => {
+
+//             if (countErr) {
+
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: countErr.message
+//                 });
+
+//             }
+
+//             const totalRecords = countResult[0].total;
+
+//             /* ================= REPORT QUERY ================= */
+
+//             const reportQuery = `
+//                 SELECT
+
+//                     cb.id,
+
+//                     cb.customer_id,
+
+//                     tu.full_name AS customer,
+
+//                     cb.date,
+
+//                     CONCAT('RCP', LPAD(cb.id,6,'0')) AS document_no,
+
+//                     cb.bank_ref AS reference,
+
+//                     cb.description_on_receipt AS description,
+
+//                     cb.receipt,
+
+//                     qi.invoice_for_country,
+
+//                     (
+//                         cb.receipt -
+//                         COALESCE(
+//                             (
+//                                 SELECT SUM(cs.allocated_amount)
+//                                 FROM tbl_cashbook_splits cs
+//                                 WHERE cs.cashbook_id = cb.id
+//                             ),
+//                             0
+//                         )
+//                     ) AS unallocated
+
+//                 FROM tbl_cashbook cb
+
+//                 LEFT JOIN tbl_users tu
+//                     ON tu.id = cb.customer_id
+
+//                 LEFT JOIN tbl_orders o
+//                     ON o.id = cb.order_id
+
+//                 LEFT JOIN quote_invoice qi
+//                     ON qi.order_id = o.id
+//                     AND qi.is_deleted = 0
+
+//                 ${where}
+
+//                 ORDER BY
+//                     tu.full_name ASC,
+//                     cb.date ASC,
+//                     cb.id ASC
+//             `;
+
+//             con.query(reportQuery, params, (err, rows) => {
+
+//                 if (err) {
+
+//                     return res.status(500).json({
+//                         success: false,
+//                         message: err.message
+//                     });
+
+//                 }
+
+//                 const grouped = {};
+
+//                 rows.forEach(row => {
+
+//                     if (!grouped[row.customer_id]) {
+
+//                         grouped[row.customer_id] = {
+
+//                             customer_id: row.customer_id,
+//                             customer: row.customer,
+//                             invoice_for_country: row.invoice_for_country,
+
+//                             totals: {
+//                                 receipt: 0,
+//                                 unallocated: 0
+//                             },
+
+//                             transactions: []
+
+//                         };
+
+//                     }
+
+//                     grouped[row.customer_id].transactions.push({
+
+//                         date: row.date,
+
+//                         document_no: row.document_no,
+
+//                         reference: row.reference,
+
+//                         description: row.description,
+
+//                         receipt: Number(row.receipt).toFixed(2),
+
+//                         unallocated: Number(row.unallocated).toFixed(2)
+
+//                     });
+
+//                     grouped[row.customer_id].totals.receipt += Number(row.receipt);
+
+//                     grouped[row.customer_id].totals.unallocated += Number(row.unallocated);
+
+//                 });
+
+//                 const data = Object.values(grouped).map(item => ({
+
+//                     customer_id: item.customer_id,
+
+//                     customer: item.customer,
+
+//                     invoice_for_country: item.invoice_for_country,
+
+//                     transactions: item.transactions,
+
+//                     totals: {
+
+//                         receipt: item.totals.receipt.toFixed(2),
+
+//                         unallocated: item.totals.unallocated.toFixed(2)
+
+//                     }
+
+//                 }));
+
+//                 return res.status(200).json({
+
+//                     success: true,
+
+//                     message: "Customer Unallocated Receipts Report fetched successfully",
+
+//                     total_records: totalRecords,
+
+//                     data
+
+//                 });
+
+//             });
+
+//         });
+
+//     } catch (error) {
+
+//         return res.status(500).json({
+
+//             success: false,
+
+//             message: error.message
+
+//         });
+
+//     }
+// };
+
+
+const getCustomerReceiptsReport = async (req, res) => {
+    try {
         const {
             start_date,
             end_date,
@@ -29649,13 +30423,23 @@ const getCustomerUnallocatedReceiptsReport = async (req, res) => {
             customer_to,
             category_from,
             category_to,
-            status = "BOTH"
+            status = "BOTH",
+            report_type = "UNALLOCATED"
         } = req.body;
+
+        const normalizedReportType =
+            String(report_type || "UNALLOCATED").toUpperCase();
+
+        if (!["UNALLOCATED", "ALLOCATED"].includes(normalizedReportType)) {
+            return res.status(400).json({
+                success: false,
+                message: "report_type must be UNALLOCATED or ALLOCATED"
+            });
+        }
 
         /* ================= DATE FORMAT ================= */
 
         const formatDate = (date) => {
-
             if (!date) return null;
 
             if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -29673,268 +30457,451 @@ const getCustomerUnallocatedReceiptsReport = async (req, res) => {
         const formattedStartDate = formatDate(start_date);
         const formattedEndDate = formatDate(end_date);
 
+        /* ================= ALLOCATION EXPRESSION ================= */
+
+        const allocatedExpr = `
+            COALESCE(
+                (
+                    SELECT SUM(cs.allocated_amount)
+                    FROM tbl_cashbook_splits cs
+                    WHERE cs.cashbook_id = cb.id
+                ),
+                0
+            )
+        `;
+
+        const unallocatedExpr = `
+            GREATEST(
+                COALESCE(cb.receipt, 0) -
+                (${allocatedExpr}),
+                0
+            )
+        `;
+
         /* ================= WHERE ================= */
 
         let where = `
-            WHERE
-            (
-                cb.receipt -
-                COALESCE(
-                    (
-                        SELECT SUM(cs.allocated_amount)
-                        FROM tbl_cashbook_splits cs
-                        WHERE cs.cashbook_id = cb.id
-                    ),
-                    0
-                )
-            ) > 0
+            WHERE cb.receipt IS NOT NULL
         `;
 
         const params = [];
 
+        /* ================= REPORT TYPE ================= */
+
+        if (normalizedReportType === "UNALLOCATED") {
+            where += `
+                AND (${unallocatedExpr}) > 0
+            `;
+        }
+
+        if (normalizedReportType === "ALLOCATED") {
+            where += `
+                AND (${allocatedExpr}) > 0
+            `;
+        }
+
         /* ================= DATE FILTER ================= */
 
         if (formattedStartDate && formattedEndDate) {
+            where += `
+                AND cb.date BETWEEN ? AND ?
+            `;
 
-            where += ` AND cb.date BETWEEN ? AND ? `;
-            params.push(formattedStartDate, formattedEndDate);
-
+            params.push(
+                formattedStartDate,
+                formattedEndDate
+            );
         } else if (formattedStartDate) {
+            where += `
+                AND cb.date >= ?
+            `;
 
-            where += ` AND cb.date >= ? `;
             params.push(formattedStartDate);
-
         } else if (formattedEndDate) {
+            where += `
+                AND cb.date <= ?
+            `;
 
-            where += ` AND cb.date <= ? `;
             params.push(formattedEndDate);
-
         }
 
-        /* ================= CUSTOMER ================= */
+        /* ================= CUSTOMER FILTER ================= */
 
         if (customer_from) {
-            where += ` AND cb.customer_id >= ? `;
+            where += `
+                AND cb.customer_id = ?
+            `;
+
             params.push(customer_from);
         }
 
         if (customer_to) {
-            where += ` AND cb.customer_id <= ? `;
+            where += `
+                OR cb.customer_id = ?
+            `;
+
             params.push(customer_to);
         }
 
-        /* ================= CATEGORY ================= */
+        /* ================= CATEGORY FILTER ================= */
+
+        /*
+         * Use EXISTS instead of JOIN here.
+         *
+         * This prevents one cashbook receipt from being duplicated
+         * when multiple quote_invoice records exist for the same order.
+         */
 
         if (category_from) {
-            where += ` AND qi.invoice_for_country >= ? `;
+            where += `
+                AND EXISTS (
+                    SELECT 1
+                    FROM tbl_orders o_cat
+                    INNER JOIN quote_invoice qi_cat
+                        ON qi_cat.order_id = o_cat.id
+                        AND qi_cat.is_deleted = 0
+                    WHERE o_cat.id = cb.order_id
+                    AND qi_cat.invoice_for_country >= ?
+                )
+            `;
+
             params.push(category_from);
         }
 
         if (category_to) {
-            where += ` AND qi.invoice_for_country <= ? `;
+            where += `
+                AND EXISTS (
+                    SELECT 1
+                    FROM tbl_orders o_cat
+                    INNER JOIN quote_invoice qi_cat
+                        ON qi_cat.order_id = o_cat.id
+                        AND qi_cat.is_deleted = 0
+                    WHERE o_cat.id = cb.order_id
+                    AND qi_cat.invoice_for_country <= ?
+                )
+            `;
+
             params.push(category_to);
         }
 
-        /* ================= STATUS ================= */
+        /* ================= CUSTOMER STATUS ================= */
 
         if (status === "ACTIVE") {
-            where += ` AND tu.status = 1 `;
+            where += `
+                AND tu.status = 1
+            `;
         } else if (status === "INACTIVE") {
-            where += ` AND tu.status = 0 `;
+            where += `
+                AND tu.status = 0
+            `;
         }
 
         /* ================= COUNT QUERY ================= */
 
         const countQuery = `
             SELECT COUNT(DISTINCT cb.id) AS total
-
             FROM tbl_cashbook cb
-
             LEFT JOIN tbl_users tu
                 ON tu.id = cb.customer_id
-
-            LEFT JOIN tbl_orders o
-                ON o.id = cb.order_id
-
-            LEFT JOIN quote_invoice qi
-                ON qi.order_id = o.id
-                AND qi.is_deleted = 0
-
             ${where}
         `;
 
-        con.query(countQuery, params, (countErr, countResult) => {
-
-            if (countErr) {
-
-                return res.status(500).json({
-                    success: false,
-                    message: countErr.message
-                });
-
-            }
-
-            const totalRecords = countResult[0].total;
-
-            /* ================= REPORT QUERY ================= */
-
-            const reportQuery = `
-                SELECT
-
-                    cb.id,
-
-                    cb.customer_id,
-
-                    tu.full_name AS customer,
-
-                    cb.date,
-
-                    CONCAT('RCP', LPAD(cb.id,6,'0')) AS document_no,
-
-                    cb.bank_ref AS reference,
-
-                    cb.description_on_receipt AS description,
-
-                    cb.receipt,
-
-                    qi.invoice_for_country,
-
-                    (
-                        cb.receipt -
-                        COALESCE(
-                            (
-                                SELECT SUM(cs.allocated_amount)
-                                FROM tbl_cashbook_splits cs
-                                WHERE cs.cashbook_id = cb.id
-                            ),
-                            0
-                        )
-                    ) AS unallocated
-
-                FROM tbl_cashbook cb
-
-                LEFT JOIN tbl_users tu
-                    ON tu.id = cb.customer_id
-
-                LEFT JOIN tbl_orders o
-                    ON o.id = cb.order_id
-
-                LEFT JOIN quote_invoice qi
-                    ON qi.order_id = o.id
-                    AND qi.is_deleted = 0
-
-                ${where}
-
-                ORDER BY
-                    tu.full_name ASC,
-                    cb.date ASC,
-                    cb.id ASC
-            `;
-
-            con.query(reportQuery, params, (err, rows) => {
-
-                if (err) {
-
+        con.query(
+            countQuery,
+            params,
+            (countErr, countResult) => {
+                if (countErr) {
                     return res.status(500).json({
                         success: false,
-                        message: err.message
+                        message: countErr.message
                     });
-
                 }
 
-                const grouped = {};
+                const totalRecords =
+                    Number(countResult[0]?.total || 0);
 
-                rows.forEach(row => {
+                /* ================= REPORT QUERY ================= */
 
-                    if (!grouped[row.customer_id]) {
+                const reportQuery = `
+                    SELECT
+                        cb.id,
+                        cb.customer_id,
+                        tu.full_name AS customer,
+                        cb.date,
+                        CONCAT(
+                            'RCP',
+                            LPAD(cb.id, 6, '0')
+                        ) AS document_no,
+                        cb.bank_ref AS reference,
+                        cb.description_on_receipt AS description,
+                        cb.receipt,
 
-                        grouped[row.customer_id] = {
+                        (
+                            SELECT qi.invoice_for_country
+                            FROM tbl_orders o_cat
+                            INNER JOIN quote_invoice qi
+                                ON qi.order_id = o_cat.id
+                                AND qi.is_deleted = 0
+                            WHERE o_cat.id = cb.order_id
+                            ORDER BY qi.id DESC
+                            LIMIT 1
+                        ) AS invoice_for_country,
 
-                            customer_id: row.customer_id,
-                            customer: row.customer,
-                            invoice_for_country: row.invoice_for_country,
+                        (${allocatedExpr}) AS allocated,
 
-                            totals: {
-                                receipt: 0,
-                                unallocated: 0
-                            },
+                        (${unallocatedExpr}) AS unallocated
 
-                            transactions: []
+                    FROM tbl_cashbook cb
 
+                    LEFT JOIN tbl_users tu
+                        ON tu.id = cb.customer_id
+
+                    ${where}
+
+                    ORDER BY
+                        tu.full_name ASC,
+                        cb.date ASC,
+                        cb.id ASC
+                `;
+
+                con.query(
+                    reportQuery,
+                    params,
+                    (err, rows) => {
+                        if (err) {
+                            return res.status(500).json({
+                                success: false,
+                                message: err.message
+                            });
+                        }
+
+                        /* ================= GROUP BY CUSTOMER ================= */
+
+                        const grouped = {};
+
+                        rows.forEach(row => {
+                            const customerId =
+                                row.customer_id || 0;
+
+                            const customerName =
+                                row.customer &&
+                                    row.customer.trim() !== ""
+                                    ? row.customer.trim()
+                                    : "Unknown Customer";
+
+                            if (!grouped[customerId]) {
+                                grouped[customerId] = {
+                                    customer_id: customerId,
+                                    customer: customerName,
+                                    invoice_for_country:
+                                        row.invoice_for_country || null,
+
+                                    totals: {
+                                        receipt: 0,
+                                        allocated: 0,
+                                        unallocated: 0
+                                    },
+
+                                    transactions: []
+                                };
+                            }
+
+                            const receipt =
+                                Number(row.receipt || 0);
+
+                            const allocated =
+                                Number(row.allocated || 0);
+
+                            const unallocated =
+                                Number(row.unallocated || 0);
+
+                            /*
+                             * Keep invoice country if the first
+                             * transaction did not have one.
+                             */
+                            if (
+                                !grouped[customerId]
+                                    .invoice_for_country &&
+                                row.invoice_for_country
+                            ) {
+                                grouped[customerId]
+                                    .invoice_for_country =
+                                    row.invoice_for_country;
+                            }
+
+                            const transaction = {
+                                date: row.date,
+                                document_no: row.document_no,
+                                reference: row.reference,
+                                description: row.description,
+                                receipt: receipt.toFixed(2)
+                            };
+
+                            if (
+                                normalizedReportType ===
+                                "ALLOCATED"
+                            ) {
+                                transaction.allocated =
+                                    allocated.toFixed(2);
+                            } else {
+                                transaction.unallocated =
+                                    unallocated.toFixed(2);
+                            }
+
+                            grouped[customerId]
+                                .transactions
+                                .push(transaction);
+
+                            grouped[customerId]
+                                .totals
+                                .receipt += receipt;
+
+                            grouped[customerId]
+                                .totals
+                                .allocated += allocated;
+
+                            grouped[customerId]
+                                .totals
+                                .unallocated += unallocated;
+                        });
+
+                        /* ================= FINAL DATA ================= */
+
+                        const data =
+                            Object.values(grouped).map(item => {
+                                const result = {
+                                    customer_id:
+                                        item.customer_id,
+
+                                    customer:
+                                        item.customer,
+
+                                    invoice_for_country:
+                                        item.invoice_for_country,
+
+                                    transactions:
+                                        item.transactions,
+
+                                    totals: {
+                                        receipt:
+                                            item.totals.receipt
+                                                .toFixed(2)
+                                    }
+                                };
+
+                                if (
+                                    normalizedReportType ===
+                                    "ALLOCATED"
+                                ) {
+                                    result.totals.allocated =
+                                        item.totals.allocated
+                                            .toFixed(2);
+                                } else {
+                                    result.totals.unallocated =
+                                        item.totals.unallocated
+                                            .toFixed(2);
+                                }
+
+                                return result;
+                            });
+
+                        /* ================= GRAND TOTAL ================= */
+
+                        let grandReceipt = 0;
+                        let grandAllocated = 0;
+                        let grandUnallocated = 0;
+
+                        rows.forEach(row => {
+                            grandReceipt +=
+                                Number(row.receipt || 0);
+
+                            grandAllocated +=
+                                Number(row.allocated || 0);
+
+                            grandUnallocated +=
+                                Number(row.unallocated || 0);
+                        });
+
+                        const grandTotal = {
+                            receipt:
+                                grandReceipt.toFixed(2)
                         };
 
+                        if (
+                            normalizedReportType ===
+                            "ALLOCATED"
+                        ) {
+                            grandTotal.allocated =
+                                grandAllocated.toFixed(2);
+                        } else {
+                            grandTotal.unallocated =
+                                grandUnallocated.toFixed(2);
+                        }
+
+                        /* ================= RESPONSE ================= */
+
+                        return res.status(200).json({
+                            success: true,
+
+                            message:
+                                normalizedReportType ===
+                                    "ALLOCATED"
+                                    ? "Customer Allocated Receipts Report fetched successfully"
+                                    : "Customer Unallocated Receipts Report fetched successfully",
+
+                            report_type:
+                                normalizedReportType,
+
+                            total_records:
+                                totalRecords,
+
+                            filters: {
+                                start_date:
+                                    start_date || null,
+
+                                end_date:
+                                    end_date || null,
+
+                                customer_from:
+                                    customer_from || null,
+
+                                customer_to:
+                                    customer_to || null,
+
+                                category_from:
+                                    category_from || null,
+
+                                category_to:
+                                    category_to || null,
+
+                                status,
+
+                                report_type:
+                                    normalizedReportType
+                            },
+
+                            data,
+
+                            grand_total:
+                                grandTotal
+                        });
                     }
-
-                    grouped[row.customer_id].transactions.push({
-
-                        date: row.date,
-
-                        document_no: row.document_no,
-
-                        reference: row.reference,
-
-                        description: row.description,
-
-                        receipt: Number(row.receipt).toFixed(2),
-
-                        unallocated: Number(row.unallocated).toFixed(2)
-
-                    });
-
-                    grouped[row.customer_id].totals.receipt += Number(row.receipt);
-
-                    grouped[row.customer_id].totals.unallocated += Number(row.unallocated);
-
-                });
-
-                const data = Object.values(grouped).map(item => ({
-
-                    customer_id: item.customer_id,
-
-                    customer: item.customer,
-
-                    invoice_for_country: item.invoice_for_country,
-
-                    transactions: item.transactions,
-
-                    totals: {
-
-                        receipt: item.totals.receipt.toFixed(2),
-
-                        unallocated: item.totals.unallocated.toFixed(2)
-
-                    }
-
-                }));
-
-                return res.status(200).json({
-
-                    success: true,
-
-                    message: "Customer Unallocated Receipts Report fetched successfully",
-
-                    total_records: totalRecords,
-
-                    data
-
-                });
-
-            });
-
-        });
-
+                );
+            }
+        );
     } catch (error) {
+        console.error(
+            "getCustomerReceiptsReport Error:",
+            error
+        );
 
         return res.status(500).json({
-
             success: false,
-
             message: error.message
-
         });
-
     }
 };
+
 
 const GetCustomerQuoteReportById = async (req, res) => {
 
@@ -30370,7 +31337,7 @@ const getCustomerQuotesByItemReport = async (req, res) => {
         if (customer_from) {
 
             where += `
-                AND tf.collection_from = ?
+                AND tf.client_id = ?
             `;
 
             params.push(customer_from);
@@ -30380,7 +31347,7 @@ const getCustomerQuotesByItemReport = async (req, res) => {
         if (customer_to) {
 
             where += `
-                AND tf.delivery_to = ?
+                OR tf.client_id = ?
             `;
 
             params.push(customer_to);
@@ -30827,12 +31794,12 @@ const getSalesByCustomerReport = async (req, res) => {
         }
         // Customer Filter
         if (customer_from) {
-            where += ` AND UPPER(LEFT(tu.full_name,1)) >= UPPER(?) `;
+            where += ` AND qi.client_id = ? `;
             params.push(customer_from);
         }
 
         if (customer_to) {
-            where += ` AND UPPER(LEFT(tu.full_name,1)) <= UPPER(?) `;
+            where += ` OR qi.client_id = ? `;
             params.push(customer_to);
         }
 
@@ -30891,7 +31858,8 @@ const getSalesByCustomerReport = async (req, res) => {
                         tu.full_name,
                         qi.client_name
                     ) AS customer,
-
+                    qi.final_base_currency,
+                    qi.invoice_for_country,
                     qi.reference_no,
                     qi.quote_date,
 
@@ -30941,6 +31909,7 @@ const getSalesByCustomerReport = async (req, res) => {
                         customers[customerKey] = {
                             client_id: row.client_id,
                             customer: row.customer,
+                            invoice_for_country: row.invoice_for_country,
                             invoices: []
                         };
                     }
@@ -30954,6 +31923,8 @@ const getSalesByCustomerReport = async (req, res) => {
                         invoice = {
                             id: row.id,
                             reference_no: row.reference_no,
+                            final_base_currency: row.final_base_currency || null,
+                            invoice_for_country: row.invoice_for_country,
                             quote_date: row.quote_date,
                             invoice_total: Number(row.invoice_total).toFixed(2),
                             items: []
@@ -30979,7 +31950,8 @@ const getSalesByCustomerReport = async (req, res) => {
 
                         client_id: customer.client_id,
                         customer: customer.customer,
-
+                        final_base_currency: customer.final_base_currency || null,
+                        invoice_for_country: customer.invoice_for_country,
                         total_invoices: customer.invoices.length,
 
                         total_amount: customer.invoices
@@ -31002,6 +31974,266 @@ const getSalesByCustomerReport = async (req, res) => {
 
                     success: true,
                     message: "Sales By Customer Report fetched successfully",
+
+                    totalRecords,
+
+                    totalCustomers: Object.keys(customers).length,
+
+                    style,
+
+                    data
+
+                });
+
+            });
+
+        });
+
+    } catch (error) {
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+};
+
+const getQuoteByCustomerReport = async (req, res) => {
+    try {
+
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const {
+            customer_from,
+            customer_to,
+            category_from,
+            category_to,
+            active = "BOTH",
+            start_date,
+            end_date,
+            include_credit_notes = true,
+            style = "DETAILED"
+        } = body;
+
+        let where = `
+            WHERE
+                fqe.is_deleted = 0
+        `;
+
+        const params = [];
+
+        const cleanStartDate = start_date && String(start_date).trim() !== "" ? String(start_date).trim() : null;
+        const cleanEndDate = end_date && String(end_date).trim() !== "" ? String(end_date).trim() : null;
+
+        if (cleanStartDate && cleanEndDate) {
+            where += ` AND DATE(fqe.quote_date) BETWEEN ? AND ? `;
+            params.push(cleanStartDate, cleanEndDate);
+        } else if (cleanStartDate) {
+            where += ` AND DATE(fqe.quote_date) >= ? `;
+            params.push(cleanStartDate);
+        } else if (cleanEndDate) {
+            where += ` AND DATE(fqe.quote_date) <= ? `;
+            params.push(cleanEndDate);
+        }
+
+        // Customer Filter
+        if (customer_from && customer_to) {
+            if (String(customer_from).trim() === String(customer_to).trim()) {
+                if (!isNaN(customer_from)) {
+                    where += ` AND fqe.client_id = ? `;
+                    params.push(customer_from);
+                } else {
+                    where += ` AND (fqe.client_name LIKE ? OR tu.full_name LIKE ?) `;
+                    params.push(`%${customer_from}%`, `%${customer_from}%`);
+                }
+            } else {
+                if (!isNaN(customer_from) && !isNaN(customer_to)) {
+                    where += ` AND (fqe.client_id = ? OR fqe.client_id = ?) `;
+                    params.push(customer_from, customer_to);
+                } else {
+                    where += ` AND (fqe.client_id = ? OR fqe.client_id = ? OR fqe.client_name LIKE ? OR tu.full_name LIKE ? OR fqe.client_name LIKE ? OR tu.full_name LIKE ?) `;
+                    params.push(customer_from, customer_to, `%${customer_from}%`, `%${customer_from}%`, `%${customer_to}%`, `%${customer_to}%`);
+                }
+            }
+        } else if (customer_from) {
+            if (!isNaN(customer_from)) {
+                where += ` AND fqe.client_id = ? `;
+                params.push(customer_from);
+            } else {
+                where += ` AND (fqe.client_name LIKE ? OR tu.full_name LIKE ?) `;
+                params.push(`%${customer_from}%`, `%${customer_from}%`);
+            }
+        } else if (customer_to) {
+            if (!isNaN(customer_to)) {
+                where += ` AND fqe.client_id = ? `;
+                params.push(customer_to);
+            } else {
+                where += ` AND (fqe.client_name LIKE ? OR tu.full_name LIKE ?) `;
+                params.push(`%${customer_to}%`, `%${customer_to}%`);
+            }
+        }
+
+        // Category Filter
+        if (category_from) {
+            where += ` AND fqe.invoice_for_country >= ? `;
+            params.push(category_from);
+        }
+
+        if (category_to) {
+            where += ` AND fqe.invoice_for_country <= ? `;
+            params.push(category_to);
+        }
+
+        // Active Filter
+        if (active === "ACTIVE") {
+            where += ` AND tu.status = 1 `;
+        }
+
+        if (active === "INACTIVE") {
+            where += ` AND tu.status = 0 `;
+        }
+
+        // Count Query
+        const countQuery = `
+            SELECT COUNT(DISTINCT fqe.id) AS total
+            FROM freight_quote_estimate fqe
+            INNER JOIN freight_quote_estimate_details fqed
+                ON fqed.freight_quote_estimate_id = fqe.id
+            LEFT JOIN tbl_users tu
+                ON tu.id = fqe.client_id
+            ${where}
+        `;
+
+        con.query(countQuery, params, (countErr, countResult) => {
+
+            if (countErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: countErr.message
+                });
+            }
+
+            const totalRecords = countResult && countResult[0] ? countResult[0].total : 0;
+
+            const reportQuery = `
+                SELECT
+                    fqe.id,
+                    fqe.client_id,
+                    COALESCE(
+                        NULLIF(tu.full_name, ''),
+                        NULLIF(fqe.client_name, ''),
+                        'Unknown Customer'
+                    ) AS customer,
+                    fqe.final_base_currency,
+                    fqe.invoice_for_country,
+                    TRIM(fqe.reference_no) AS reference_no,
+                    fqe.quote_date,
+                    fqed.description,
+                    fqed.qty,
+                    fqed.vat_incl AS total_selling,
+                    (
+                        SELECT COALESCE(SUM(vat_incl), 0)
+                        FROM freight_quote_estimate_details
+                        WHERE freight_quote_estimate_id = fqe.id
+                    ) AS invoice_total
+                FROM freight_quote_estimate fqe
+                INNER JOIN freight_quote_estimate_details fqed
+                    ON fqed.freight_quote_estimate_id = fqe.id
+                LEFT JOIN tbl_users tu
+                    ON tu.id = fqe.client_id
+                ${where}
+                ORDER BY
+                    customer,
+                    fqe.quote_date,
+                    fqe.reference_no,
+                    fqed.id
+            `;
+
+            con.query(reportQuery, params, (err, rows) => {
+
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        message: err.message
+                    });
+                }
+
+                const customers = {};
+
+                rows.forEach(row => {
+
+                    const customerKey = row.client_id || row.customer || "Unknown";
+
+                    if (!customers[customerKey]) {
+                        customers[customerKey] = {
+                            client_id: row.client_id,
+                            customer: row.customer,
+                            invoice_for_country: row.invoice_for_country,
+                            invoices: []
+                        };
+                    }
+
+                    let invoice = customers[customerKey].invoices.find(
+                        x => x.id === row.id
+                    );
+
+                    if (!invoice) {
+
+                        invoice = {
+                            id: row.id,
+                            reference_no: row.reference_no,
+                            final_base_currency: row.final_base_currency || null,
+                            invoice_for_country: row.invoice_for_country,
+                            quote_date: row.quote_date,
+                            invoice_total: Number(row.invoice_total || 0).toFixed(2),
+                            items: []
+                        };
+
+                        customers[customerKey].invoices.push(invoice);
+                    }
+
+                    invoice.items.push({
+                        description: row.description,
+                        qty: Number(row.qty || 0).toFixed(2),
+                        total_selling: Number(row.total_selling || 0).toFixed(2)
+                    });
+
+                });
+
+                // SUMMARY STYLE
+                let data;
+
+                if (style === "SUMMARY") {
+
+                    data = Object.values(customers).map(customer => ({
+
+                        client_id: customer.client_id,
+                        customer: customer.customer,
+                        final_base_currency: customer.final_base_currency || null,
+                        invoice_for_country: customer.invoice_for_country,
+                        total_invoices: customer.invoices.length,
+
+                        total_amount: customer.invoices
+                            .reduce(
+                                (sum, inv) =>
+                                    sum + Number(inv.invoice_total),
+                                0
+                            )
+                            .toFixed(2)
+
+                    }));
+
+                } else {
+
+                    data = Object.values(customers);
+
+                }
+
+                return res.status(200).json({
+
+                    success: true,
+                    message: "Quote By Customer Report fetched successfully",
 
                     totalRecords,
 
@@ -31076,7 +32308,7 @@ const getSalesByCustomerSummaryReport = async (req, res) => {
         if (customer_from) {
 
             where += `
-                AND UPPER(LEFT(u.full_name,1)) >= UPPER(?)
+                AND qi.client_id = ?
             `;
 
             params.push(customer_from);
@@ -31086,7 +32318,7 @@ const getSalesByCustomerSummaryReport = async (req, res) => {
         if (customer_to) {
 
             where += `
-                AND UPPER(LEFT(u.full_name,1)) <= UPPER(?)
+                OR qi.client_id = ?
             `;
 
             params.push(customer_to);
@@ -31196,10 +32428,11 @@ const getSalesByCustomerSummaryReport = async (req, res) => {
                     qi.id,
 
                     qi.reference_no,
-
+                    qi.final_base_currency,
                     DATE(qi.quote_date) AS invoice_date,
 
                     qi.sumof_vatincl,
+                    qi.invoice_for_country,
 
                     qi.client_id,
 
@@ -31279,7 +32512,11 @@ const getSalesByCustomerSummaryReport = async (req, res) => {
 
                         qty: Number(row.qty).toFixed(4),
 
-                        total_selling: Number(row.sumof_vatincl).toFixed(2)
+                        total_selling: Number(row.sumof_vatincl).toFixed(2),
+
+                        invoice_for_country: row.invoice_for_country,
+
+                        final_base_currency: row.final_base_currency || null
 
                     });
 
@@ -31333,14 +32570,6 @@ const getSalesByCustomerSummaryReport = async (req, res) => {
 
                     },
 
-                    summary: {
-
-                        grand_total_qty: grandQty.toFixed(4),
-
-                        grand_total_selling: grandTotal.toFixed(2)
-
-                    },
-
                     data
 
                 });
@@ -31372,11 +32601,14 @@ const GetSalesByItemReport = async (req, res) => {
             start_date,
             end_date,
 
-            item_from,
-            item_to,
+            customer_from,
+            customer_to,
 
             category_from,
             category_to,
+
+            item_from,
+            item_to,
 
             status = "Both",
             item_type = "Both",
@@ -31397,7 +32629,10 @@ const GetSalesByItemReport = async (req, res) => {
 
                 qi.id AS invoice_id,
                 qi.reference_no,
+                qi.final_base_currency,
                 DATE(qi.quote_date) AS invoice_date,
+
+                qi.invoice_for_country,
 
                 qi.client_id,
                 qi.client_name,
@@ -31490,30 +32725,30 @@ const GetSalesByItemReport = async (req, res) => {
 
         }
 
-        if (item_from) {
+        if (customer_from) {
 
             query += `
-                AND afc.description >= ?
+                AND qi.client_id = ?
             `;
 
-            queryParams.push(item_from);
+            queryParams.push(customer_from);
 
         }
 
-        if (item_to) {
+        if (customer_to) {
 
             query += `
-                AND afc.description <= ?
+                OR qi.client_id = ?
             `;
 
-            queryParams.push(item_to);
+            queryParams.push(customer_to);
 
         }
 
         if (category_from) {
 
             query += `
-                AND afc.name >= ?
+                AND qi.invoice_for_country = ?
             `;
 
             queryParams.push(category_from);
@@ -31523,7 +32758,7 @@ const GetSalesByItemReport = async (req, res) => {
         if (category_to) {
 
             query += `
-                AND afc.name <= ?
+                OR qi.invoice_for_country = ?
             `;
 
             queryParams.push(category_to);
@@ -31621,7 +32856,11 @@ const GetSalesByItemReport = async (req, res) => {
 
                 document_no: row.reference_no,
 
+                final_base_currency: row.final_base_currency || null,
+
                 customer: row.client_name,
+
+                invoice_for_country: row.invoice_for_country,
 
                 qty: Number(row.qty),
 
@@ -31759,7 +32998,6 @@ const GetSalesByItemReport = async (req, res) => {
 
 const getSalesBySalesRepReport = async (req, res) => {
     try {
-
         const {
             start_date,
             end_date,
@@ -31770,52 +33008,38 @@ const getSalesBySalesRepReport = async (req, res) => {
         } = req.body;
 
         let where = `
-          WHERE qi.is_deleted = 0
-          `;
+            WHERE qi.is_deleted = 0
+        `;
 
         const queryParams = [];
 
         if (start_date && end_date) {
-
             where += `
-            AND DATE(qi.quote_date) BETWEEN ? AND ?
+                AND DATE(qi.quote_date) BETWEEN ? AND ?
             `;
-
-            queryParams.push(
-                start_date,
-                end_date
-            );
-
+            queryParams.push(start_date, end_date);
         } else if (start_date) {
-
             where += `
-            AND DATE(qi.quote_date) >= ?
+                AND DATE(qi.quote_date) >= ?
             `;
-
             queryParams.push(start_date);
-
         } else if (end_date) {
-
             where += `
-            AND DATE(qi.quote_date) <= ?
+                AND DATE(qi.quote_date) <= ?
             `;
-
             queryParams.push(end_date);
-
         }
 
-        // Sales Rep From
         if (sales_rep_from) {
             where += `
-                AND UPPER(u.full_name) >= UPPER(?)
+                AND u.id = ?
             `;
             queryParams.push(sales_rep_from);
         }
 
-        // Sales Rep To
         if (sales_rep_to) {
             where += `
-                AND UPPER(u.full_name) <= UPPER(?)
+                OR u.id = ?
             `;
             queryParams.push(sales_rep_to);
         }
@@ -31828,40 +33052,27 @@ const getSalesBySalesRepReport = async (req, res) => {
 
         const sql = `
             SELECT
-
                 u.id AS sales_rep_id,
-
                 u.full_name AS sales_rep_name,
-
                 DATE(qi.quote_date) AS invoice_date,
-
                 qi.reference_no,
-
+                qi.final_base_currency,
                 qi.client_name,
-
                 afc.code,
                 afc.description,
-
                 qid.qty,
                 qid.total_cost,
                 qid.final_amount
-
             FROM quote_invoice qi
-
             INNER JOIN tbl_freight tf
                 ON tf.id = qi.freight_id
-
             LEFT JOIN tbl_users u
                 ON u.id = tf.sales_representative
-
             INNER JOIN quote_invoice_details qid
                 ON qid.quote_invoice_id = qi.id
-
             LEFT JOIN admin_frieght_component afc
                 ON afc.id = qid.admin_frieght_component_id
-
             ${where}
-
             ORDER BY
                 sales_rep_name,
                 invoice_date,
@@ -31870,7 +33081,6 @@ const getSalesBySalesRepReport = async (req, res) => {
         `;
 
         con.query(sql, queryParams, (err, rows) => {
-
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -31884,14 +33094,13 @@ const getSalesBySalesRepReport = async (req, res) => {
             let grandSelling = 0;
 
             rows.forEach(row => {
-
                 const repName =
-                    row.sales_rep_name && row.sales_rep_name.trim() !== ""
+                    row.sales_rep_name &&
+                        row.sales_rep_name.trim() !== ""
                         ? row.sales_rep_name.trim()
                         : "Unassigned";
 
                 if (!report[repName]) {
-
                     report[repName] = {
                         sales_rep: repName,
                         invoices: [],
@@ -31901,48 +33110,101 @@ const getSalesBySalesRepReport = async (req, res) => {
                         gp_amount: 0,
                         gp_percent: 0
                     };
-
                 }
+
+                const data = report[repName];
 
                 const selling = Number(row.final_amount || 0);
                 const cost = Number(row.total_cost || 0);
                 const qty = Number(row.qty || 0);
 
-                const gp = selling - cost;
+                /*
+                 * IMPORTANT:
+                 * Same date + reference + customer = ONE ROW.
+                 *
+                 * Previously every quote_invoice_details row
+                 * was pushed separately.
+                 */
+                const existingInvoice = data.invoices.find(item =>
+                    String(item.date) === String(row.invoice_date) &&
+                    String(item.reference) === String(row.reference_no) &&
+                    String(item.customer || "") === String(row.client_name || "")
+                );
 
-                report[repName].invoices.push({
+                if (existingInvoice) {
+                    existingInvoice.qty += qty;
+                    existingInvoice.total_cost += cost;
+                    existingInvoice.total_selling += selling;
 
-                    date: row.invoice_date,
-                    reference: row.reference_no,
-                    customer: row.client_name,
+                    existingInvoice.qty =
+                        Number(existingInvoice.qty.toFixed(2));
 
-                    item: row.code
-                        ? `${row.code} - ${row.description}`
-                        : row.description,
+                    existingInvoice.total_cost =
+                        Number(existingInvoice.total_cost.toFixed(2));
 
-                    qty,
-                    total_cost: cost,
-                    total_selling: selling,
-                    gp_amount: gp,
-                    gp_percent:
-                        selling > 0
-                            ? Number(((gp / selling) * 100).toFixed(2))
-                            : 0
-                });
+                    existingInvoice.total_selling =
+                        Number(existingInvoice.total_selling.toFixed(2));
 
-                report[repName].total_qty += qty;
-                report[repName].total_cost += cost;
-                report[repName].total_selling += selling;
+                    existingInvoice.gp_amount =
+                        Number(
+                            (
+                                existingInvoice.total_selling -
+                                existingInvoice.total_cost
+                            ).toFixed(2)
+                        );
+
+                    existingInvoice.gp_percent =
+                        existingInvoice.total_selling > 0
+                            ? Number(
+                                (
+                                    (
+                                        existingInvoice.gp_amount /
+                                        existingInvoice.total_selling
+                                    ) * 100
+                                ).toFixed(2)
+                            )
+                            : 0;
+                } else {
+                    const gp = selling - cost;
+
+                    data.invoices.push({
+                        date: row.invoice_date,
+                        reference: row.reference_no,
+                        customer: row.client_name,
+                        final_base_currency: row.final_base_currency,
+
+                        /*
+                         * Keep item empty because client does not
+                         * want the individual items broken into rows.
+                         */
+                        item: "Total",
+
+                        qty,
+                        total_cost: cost,
+                        total_selling: selling,
+                        gp_amount:
+                            Number(gp.toFixed(2)),
+                        gp_percent:
+                            selling > 0
+                                ? Number(
+                                    (
+                                        (gp / selling) * 100
+                                    ).toFixed(2)
+                                )
+                                : 0
+                    });
+                }
+
+                data.total_qty += qty;
+                data.total_cost += cost;
+                data.total_selling += selling;
 
                 grandQty += qty;
                 grandCost += cost;
                 grandSelling += selling;
-
             });
 
-            // Calculate Sales Rep Totals
             Object.keys(report).forEach(rep => {
-
                 const data = report[rep];
 
                 data.gp_amount =
@@ -31974,6 +33236,40 @@ const getSalesBySalesRepReport = async (req, res) => {
                 data.total_selling =
                     Number(data.total_selling.toFixed(2));
 
+                /*
+                 * Make sure grouped invoice values are also
+                 * properly rounded.
+                 */
+                data.invoices.forEach(invoice => {
+                    invoice.qty =
+                        Number(invoice.qty.toFixed(2));
+
+                    invoice.total_cost =
+                        Number(invoice.total_cost.toFixed(2));
+
+                    invoice.total_selling =
+                        Number(invoice.total_selling.toFixed(2));
+
+                    invoice.gp_amount =
+                        Number(
+                            (
+                                invoice.total_selling -
+                                invoice.total_cost
+                            ).toFixed(2)
+                        );
+
+                    invoice.gp_percent =
+                        invoice.total_selling > 0
+                            ? Number(
+                                (
+                                    (
+                                        invoice.gp_amount /
+                                        invoice.total_selling
+                                    ) * 100
+                                ).toFixed(2)
+                            )
+                            : 0;
+                });
             });
 
             const grandGp =
@@ -31992,57 +33288,336 @@ const getSalesBySalesRepReport = async (req, res) => {
                     : 0;
 
             return res.status(200).json({
-
                 success: true,
 
                 filters: {
-
                     start_date: start_date || null,
                     end_date: end_date || null,
-
                     sales_rep_from: sales_rep_from || null,
                     sales_rep_to: sales_rep_to || null,
-
                     include_credit_notes,
                     style
-
                 },
 
                 data: Object.values(report),
 
-                grand_total: {
-
-                    qty:
-                        Number(grandQty.toFixed(2)),
-
-                    total_cost:
-                        Number(grandCost.toFixed(2)),
-
-                    total_selling:
-                        Number(grandSelling.toFixed(2)),
-
-                    gp_amount:
-                        Number(grandGp.toFixed(2)),
-
-                    gp_percent:
-                        grandPercent
-
-                }
-
             });
-
         });
-
     } catch (error) {
-
         return res.status(500).json({
-
             success: false,
             message: "An unexpected error occurred.",
             error: error.message
-
         });
+    }
+};
 
+const getQuotesSalesBySalesRepReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+        const {
+            start_date,
+            end_date,
+            sales_rep_from,
+            sales_rep_to,
+            include_credit_notes = true,
+            style = "Detailed"
+        } = body;
+
+        let where = `
+            WHERE fqe.is_deleted = 0
+        `;
+
+        const queryParams = [];
+
+        const cleanStartDate = start_date && String(start_date).trim() !== "" ? String(start_date).trim() : null;
+        const cleanEndDate = end_date && String(end_date).trim() !== "" ? String(end_date).trim() : null;
+
+        if (cleanStartDate && cleanEndDate) {
+            where += `
+                AND DATE(fqe.quote_date) BETWEEN ? AND ?
+            `;
+            queryParams.push(cleanStartDate, cleanEndDate);
+        } else if (cleanStartDate) {
+            where += `
+                AND DATE(fqe.quote_date) >= ?
+            `;
+            queryParams.push(cleanStartDate);
+        } else if (cleanEndDate) {
+            where += `
+                AND DATE(fqe.quote_date) <= ?
+            `;
+            queryParams.push(cleanEndDate);
+        }
+
+        if (sales_rep_from && sales_rep_to) {
+            if (String(sales_rep_from).trim() === String(sales_rep_to).trim()) {
+                if (!isNaN(sales_rep_from)) {
+                    where += ` AND u.id = ? `;
+                    queryParams.push(sales_rep_from);
+                } else {
+                    where += ` AND u.full_name LIKE ? `;
+                    queryParams.push(`%${sales_rep_from}%`);
+                }
+            } else {
+                if (!isNaN(sales_rep_from) && !isNaN(sales_rep_to)) {
+                    where += ` AND (u.id = ? OR u.id = ?) `;
+                    queryParams.push(sales_rep_from, sales_rep_to);
+                } else {
+                    where += ` AND (u.id = ? OR u.id = ? OR u.full_name LIKE ? OR u.full_name LIKE ?) `;
+                    queryParams.push(sales_rep_from, sales_rep_to, `%${sales_rep_from}%`, `%${sales_rep_to}%`);
+                }
+            }
+        } else if (sales_rep_from) {
+            if (!isNaN(sales_rep_from)) {
+                where += ` AND u.id = ? `;
+                queryParams.push(sales_rep_from);
+            } else {
+                where += ` AND u.full_name LIKE ? `;
+                queryParams.push(`%${sales_rep_from}%`);
+            }
+        } else if (sales_rep_to) {
+            if (!isNaN(sales_rep_to)) {
+                where += ` AND u.id = ? `;
+                queryParams.push(sales_rep_to);
+            } else {
+                where += ` AND u.full_name LIKE ? `;
+                queryParams.push(`%${sales_rep_to}%`);
+            }
+        }
+
+        const sql = `
+            SELECT
+                u.id AS sales_rep_id,
+                u.full_name AS sales_rep_name,
+                DATE(fqe.quote_date) AS invoice_date,
+                TRIM(fqe.reference_no) AS reference_no,
+                fqe.final_base_currency,
+                COALESCE(NULLIF(fqe.client_name, ''), tu.full_name, 'Unknown Customer') AS client_name,
+                afc.code,
+                afc.description,
+                fqed.qty,
+                fqed.total_cost,
+                fqed.final_amount
+            FROM freight_quote_estimate fqe
+            LEFT JOIN tbl_freight tf
+                ON tf.id = fqe.freight_id
+            LEFT JOIN tbl_users u
+                ON u.id = tf.sales_representative
+            LEFT JOIN tbl_users tu
+                ON tu.id = fqe.client_id
+            INNER JOIN freight_quote_estimate_details fqed
+                ON fqed.freight_quote_estimate_id = fqe.id
+            LEFT JOIN admin_frieght_component afc
+                ON afc.id = fqed.admin_frieght_component_id
+            ${where}
+            ORDER BY
+                sales_rep_name,
+                invoice_date,
+                fqe.reference_no,
+                afc.description
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: err.message
+                });
+            }
+
+            const report = {};
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+
+            rows.forEach(row => {
+                const repName =
+                    row.sales_rep_name &&
+                        row.sales_rep_name.trim() !== ""
+                        ? row.sales_rep_name.trim()
+                        : "Unassigned";
+
+                if (!report[repName]) {
+                    report[repName] = {
+                        sales_rep: repName,
+                        invoices: [],
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0
+                    };
+                }
+
+                const data = report[repName];
+
+                const selling = Number(row.final_amount || 0);
+                const cost = Number(row.total_cost || 0);
+                const qty = Number(row.qty || 0);
+
+                /*
+                 * Same date + reference + customer = ONE ROW.
+                 */
+                const existingInvoice = data.invoices.find(item =>
+                    String(item.date) === String(row.invoice_date) &&
+                    String(item.reference) === String(row.reference_no) &&
+                    String(item.customer || "") === String(row.client_name || "")
+                );
+
+                if (existingInvoice) {
+                    existingInvoice.qty += qty;
+                    existingInvoice.total_cost += cost;
+                    existingInvoice.total_selling += selling;
+
+                    existingInvoice.qty =
+                        Number(existingInvoice.qty.toFixed(2));
+
+                    existingInvoice.total_cost =
+                        Number(existingInvoice.total_cost.toFixed(2));
+
+                    existingInvoice.total_selling =
+                        Number(existingInvoice.total_selling.toFixed(2));
+
+                    existingInvoice.gp_amount =
+                        Number(
+                            (
+                                existingInvoice.total_selling -
+                                existingInvoice.total_cost
+                            ).toFixed(2)
+                        );
+
+                    existingInvoice.gp_percent =
+                        existingInvoice.total_selling > 0
+                            ? Number(
+                                (
+                                    (
+                                        existingInvoice.gp_amount /
+                                        existingInvoice.total_selling
+                                    ) * 100
+                                ).toFixed(2)
+                            )
+                            : 0;
+                } else {
+                    const gp = selling - cost;
+
+                    data.invoices.push({
+                        date: row.invoice_date,
+                        reference: row.reference_no,
+                        customer: row.client_name,
+                        final_base_currency: row.final_base_currency,
+                        item: "Total",
+                        qty,
+                        total_cost: cost,
+                        total_selling: selling,
+                        gp_amount:
+                            Number(gp.toFixed(2)),
+                        gp_percent:
+                            selling > 0
+                                ? Number(
+                                    (
+                                        (gp / selling) * 100
+                                    ).toFixed(2)
+                                )
+                                : 0
+                    });
+                }
+
+                data.total_qty += qty;
+                data.total_cost += cost;
+                data.total_selling += selling;
+
+                grandQty += qty;
+                grandCost += cost;
+                grandSelling += selling;
+            });
+
+            Object.keys(report).forEach(rep => {
+                const data = report[rep];
+
+                data.gp_amount =
+                    Number(
+                        (
+                            data.total_selling -
+                            data.total_cost
+                        ).toFixed(2)
+                    );
+
+                data.gp_percent =
+                    data.total_selling > 0
+                        ? Number(
+                            (
+                                (
+                                    data.gp_amount /
+                                    data.total_selling
+                                ) * 100
+                            ).toFixed(2)
+                        )
+                        : 0;
+
+                data.total_qty =
+                    Number(data.total_qty.toFixed(2));
+
+                data.total_cost =
+                    Number(data.total_cost.toFixed(2));
+
+                data.total_selling =
+                    Number(data.total_selling.toFixed(2));
+
+                data.invoices.forEach(invoice => {
+                    invoice.qty =
+                        Number(invoice.qty.toFixed(2));
+
+                    invoice.total_cost =
+                        Number(invoice.total_cost.toFixed(2));
+
+                    invoice.total_selling =
+                        Number(invoice.total_selling.toFixed(2));
+
+                    invoice.gp_amount =
+                        Number(
+                            (
+                                invoice.total_selling -
+                                invoice.total_cost
+                            ).toFixed(2)
+                        );
+
+                    invoice.gp_percent =
+                        invoice.total_selling > 0
+                            ? Number(
+                                (
+                                    (
+                                        invoice.gp_amount /
+                                        invoice.total_selling
+                                    ) * 100
+                                ).toFixed(2)
+                            )
+                            : 0;
+                });
+            });
+
+            return res.status(200).json({
+                success: true,
+
+                filters: {
+                    start_date: start_date || null,
+                    end_date: end_date || null,
+                    sales_rep_from: sales_rep_from || null,
+                    sales_rep_to: sales_rep_to || null,
+                    include_credit_notes,
+                    style
+                },
+
+                data: Object.values(report),
+
+            });
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+        });
     }
 };
 
@@ -32051,10 +33626,14 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
     try {
 
         const {
-
             run_at_date,
+
             supplier_from,
             supplier_to,
+
+            category_from,
+            category_to,
+
             status = "Both",
             style = "summary",
             exclude_zero_balance = false,
@@ -32062,32 +33641,30 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
 
         } = req.body;
 
-        // if (!run_at_date) {
 
-        //     return res.status(400).json({
-
-        //         success: false,
-        //         message: "run_at_date is required."
-
-        //     });
-
-        // }
+        // --------------------------------------------------
+        // Base WHERE
+        // --------------------------------------------------
 
         let where = `
             WHERE
-                sp.is_deleted = 0
-                AND ssi.status <> 'Cancelled'
+                ssi.status <> 'Cancelled'
         `;
 
         const queryParams = [];
 
-        // ---------- Supplier Filter ----------
+
+        // --------------------------------------------------
+        // Supplier Filter
+        // --------------------------------------------------
 
         if (supplier_from && supplier_to) {
 
             where += `
-                AND sp.name >= ?
-                AND sp.name <= ?
+                AND (
+                    sp.id = ?
+                    OR sp.id = ?
+                )
             `;
 
             queryParams.push(
@@ -32096,84 +33673,178 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
             );
 
         }
+        else if (supplier_from) {
 
-        // ---------- Status Filter ----------
+            where += `
+                AND sp.id = ?
+            `;
+
+            queryParams.push(supplier_from);
+
+        }
+        else if (supplier_to) {
+
+            where += `
+                AND sp.id = ?
+            `;
+
+            queryParams.push(supplier_to);
+
+        }
+
+
+        // --------------------------------------------------
+        // Category / Country Filter
+        // invoice_for_country
+        // --------------------------------------------------
+
+        if (category_from && category_to) {
+
+            where += `
+                AND (
+                    ssi.invoice_for_country = ?
+                    OR ssi.invoice_for_country = ?
+                )
+            `;
+
+            queryParams.push(
+                category_from,
+                category_to
+            );
+
+        }
+        else if (category_from) {
+
+            where += `
+                AND ssi.invoice_for_country = ?
+            `;
+
+            queryParams.push(category_from);
+
+        }
+        else if (category_to) {
+
+            where += `
+                AND ssi.invoice_for_country = ?
+            `;
+
+            queryParams.push(category_to);
+
+        }
+
+
+        // --------------------------------------------------
+        // Status Filter
+        // --------------------------------------------------
 
         if (status === "Active") {
 
-            where += ` AND sp.is_deleted = 0 `;
+            where += `
+                AND sp.is_deleted = 0
+            `;
 
         }
         else if (status === "Inactive") {
 
-            where += ` AND sp.is_deleted = 1 `;
+            where += `
+                AND sp.is_deleted = 1
+            `;
+
+        }
+        else {
+
+            // Both
+            // No supplier deleted-status filter
+            // is applied here.
 
         }
 
+
+        // --------------------------------------------------
+        // SQL
+        // --------------------------------------------------
+
         const sql = `
 
-        SELECT
+            SELECT
 
-            sp.id,
-            sp.name AS supplier_name,
+                sp.id,
 
-            SUM(
-                CASE
-                    WHEN DATEDIFF(?, ssi.due_date) > 120
-                    THEN ssi.sumof_vatincl
-                    ELSE 0
-                END
-            ) AS days_120,
+                sp.name AS supplier_name,
 
-            SUM(
-                CASE
-                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 91 AND 120
-                    THEN ssi.sumof_vatincl
-                    ELSE 0
-                END
-            ) AS days_90,
+                MAX(ssi.final_base_currency) AS final_base_currency,
 
-            SUM(
-                CASE
-                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 61 AND 90
-                    THEN ssi.sumof_vatincl
-                    ELSE 0
-                END
-            ) AS days_60,
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(?, ssi.due_date) > 120
+                        THEN ssi.sumof_vatincl
+                        ELSE 0
+                    END
+                ) AS days_120,
 
-            SUM(
-                CASE
-                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 31 AND 60
-                    THEN ssi.sumof_vatincl
-                    ELSE 0
-                END
-            ) AS days_30,
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(?, ssi.due_date) BETWEEN 91 AND 120
+                        THEN ssi.sumof_vatincl
+                        ELSE 0
+                    END
+                ) AS days_90,
 
-            SUM(
-                CASE
-                    WHEN DATEDIFF(?, ssi.due_date) BETWEEN 0 AND 30
-                    THEN ssi.sumof_vatincl
-                    ELSE 0
-                END
-            ) AS current_due,
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(?, ssi.due_date) BETWEEN 61 AND 90
+                        THEN ssi.sumof_vatincl
+                        ELSE 0
+                    END
+                ) AS days_60,
 
-            SUM(ssi.sumof_vatincl) AS total_due
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(?, ssi.due_date) BETWEEN 31 AND 60
+                        THEN ssi.sumof_vatincl
+                        ELSE 0
+                    END
+                ) AS days_30,
 
-        FROM supplier_shipment_invoice ssi
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(?, ssi.due_date) BETWEEN 0 AND 30
+                        THEN ssi.sumof_vatincl
+                        ELSE 0
+                    END
+                ) AS current_due,
 
-        INNER JOIN tbl_suppliers sp
-            ON sp.id = ssi.supplier_id
+                SUM(ssi.sumof_vatincl) AS total_due,
 
-        LEFT JOIN tbl_shipments ts
-            ON ts.id = ssi.shipment_id
+                GROUP_CONCAT(
+                    DISTINCT ssi.invoice_for_country
+                    ORDER BY ssi.invoice_for_country
+                    SEPARATOR ', '
+                ) AS invoice_for_country
 
-        ${where}
+            FROM supplier_shipment_invoice ssi
 
-        GROUP BY
-            sp.id,
-            sp.name
+            INNER JOIN tbl_suppliers sp
+                ON sp.id = ssi.supplier_id
+
+            LEFT JOIN tbl_shipments ts
+                ON ts.id = ssi.shipment_id
+
+            ${where}
+
+            GROUP BY
+                sp.id,
+                sp.name
+
+            ORDER BY
+                sp.name ASC
 
         `;
+
+
+        // --------------------------------------------------
+        // Params
+        // --------------------------------------------------
 
         const params = [
 
@@ -32187,20 +33858,36 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
 
         ];
 
+
+        // --------------------------------------------------
+        // Execute Query
+        // --------------------------------------------------
+
         con.query(sql, params, (err, rows) => {
 
             if (err) {
 
+                console.error(
+                    "getSupplierBalancesDaysOutstandingReport SQL Error:",
+                    err
+                );
+
                 return res.status(500).json({
 
                     success: false,
+
                     message: err.message
 
                 });
 
             }
 
-            let data = [];
+
+            // --------------------------------------------------
+            // Response Data
+            // --------------------------------------------------
+
+            const data = [];
 
             let grand120 = 0;
             let grand90 = 0;
@@ -32209,39 +33896,81 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
             let grandCurrent = 0;
             let grandTotal = 0;
 
+
             rows.forEach(row => {
 
                 const supplier = {
 
                     supplier_id: row.id,
+
                     supplier_name: row.supplier_name,
 
-                    days_120: Number(row.days_120 || 0),
-                    days_90: Number(row.days_90 || 0),
-                    days_60: Number(row.days_60 || 0),
-                    days_30: Number(row.days_30 || 0),
-                    current: Number(row.current_due || 0),
-                    total_due: Number(row.total_due || 0)
+                    final_base_currency:
+                        row.final_base_currency || null,
+
+                    invoice_for_country:
+                        row.invoice_for_country || null,
+
+                    days_120:
+                        Number(row.days_120 || 0),
+
+                    days_90:
+                        Number(row.days_90 || 0),
+
+                    days_60:
+                        Number(row.days_60 || 0),
+
+                    days_30:
+                        Number(row.days_30 || 0),
+
+                    current:
+                        Number(row.current_due || 0),
+
+                    total_due:
+                        Number(row.total_due || 0)
 
                 };
+
+
+                // --------------------------------------------------
+                // Exclude Zero Balance
+                // --------------------------------------------------
 
                 if (
                     exclude_zero_balance &&
                     supplier.total_due === 0
                 ) {
+
                     return;
+
                 }
 
+
+                // --------------------------------------------------
+                // Grand Total
+                // --------------------------------------------------
+
                 grand120 += supplier.days_120;
+
                 grand90 += supplier.days_90;
+
                 grand60 += supplier.days_60;
+
                 grand30 += supplier.days_30;
+
                 grandCurrent += supplier.current;
+
                 grandTotal += supplier.total_due;
+
 
                 data.push(supplier);
 
             });
+
+
+            // --------------------------------------------------
+            // Response
+            // --------------------------------------------------
 
             return res.status(200).json({
 
@@ -32250,11 +33979,25 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
                 filters: {
 
                     run_at_date,
-                    supplier_from: supplier_from || "All",
-                    supplier_to: supplier_to || "All",
+
+                    supplier_from:
+                        supplier_from || "All",
+
+                    supplier_to:
+                        supplier_to || "All",
+
+                    category_from:
+                        category_from || "All",
+
+                    category_to:
+                        category_to || "All",
+
                     status,
+
                     style,
+
                     exclude_zero_balance,
+
                     use_foreign_currency
 
                 },
@@ -32263,12 +34006,17 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
 
                 grand_total: {
 
-                    days_120: Number(grand120.toFixed(2)),
-                    days_90: Number(grand90.toFixed(2)),
-                    days_60: Number(grand60.toFixed(2)),
-                    days_30: Number(grand30.toFixed(2)),
-                    current: Number(grandCurrent.toFixed(2)),
-                    total_due: Number(grandTotal.toFixed(2))
+                    days_120: grand120,
+
+                    days_90: grand90,
+
+                    days_60: grand60,
+
+                    days_30: grand30,
+
+                    current: grandCurrent,
+
+                    total_due: grandTotal
 
                 }
 
@@ -32279,17 +34027,2455 @@ const getSupplierBalancesDaysOutstandingReport = async (req, res) => {
     }
     catch (error) {
 
+        console.error(
+            "getSupplierBalancesDaysOutstandingReport Error:",
+            error
+        );
+
         return res.status(500).json({
 
             success: false,
-            message: "An unexpected error occurred.",
-            error: error.message
+
+            message:
+                "An unexpected error occurred.",
+
+            error:
+                error.message
 
         });
 
     }
 
 };
+
+const getCustomerBalancesDaysOutstandingReport = async (req, res) => {
+    try {
+        const {
+            run_at_date,
+            customer_from,
+            customer_to,
+            category_from,
+            category_to,
+            style = "summary",
+            exclude_zero_balance = true,
+            use_foreign_currency = true
+        } = req.body;
+
+        if (!run_at_date) {
+            return res.status(400).json({
+                success: false,
+                message: "run_at_date is required."
+            });
+        }
+
+        // Handle YYYY-MM-DD or DD/MM/YYYY
+        let formattedRunDate = run_at_date;
+        if (run_at_date.includes("/")) {
+            const [d, m, y] = run_at_date.split("/");
+            if (!d || !m || !y) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid run_at_date format. Use YYYY-MM-DD or DD/MM/YYYY."
+                });
+            }
+            formattedRunDate = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+        }
+
+        const runDateObj = new Date(`${formattedRunDate}T00:00:00`);
+
+        const queryAsync = (sql, params = []) => {
+            return new Promise((resolve, reject) => {
+                con.query(sql, params, (err, rows) => {
+                    if (err) return reject(err);
+                    resolve(rows);
+                });
+            });
+        };
+
+        const formatDateDDMMYYYY = (dateStr) => {
+            if (!dateStr) return "";
+            const parts = dateStr.split("-");
+            if (parts.length === 3) {
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            }
+            return dateStr;
+        };
+
+        const getMonthDiff = (runDate, txDate) => {
+            const rY = runDate.getFullYear();
+            const rM = runDate.getMonth();
+            const tY = txDate.getFullYear();
+            const tM = txDate.getMonth();
+            return (rY - tY) * 12 + (rM - tM);
+        };
+
+        const getPeriodKey = (diffMonths) => {
+            if (diffMonths <= 0) return "current";
+            if (diffMonths === 1) return "days_30";
+            if (diffMonths === 2) return "days_60";
+            if (diffMonths === 3) return "days_90";
+            return "days_120";
+        };
+
+        const normalizeCustomerKey = (name) => {
+            if (!name) return "";
+            let clean = name.trim().toLowerCase();
+            clean = clean.replace(/\(pty\)\s*ltd\.?/gi, "");
+            clean = clean.replace(/pty\s*ltd\.?/gi, "");
+            clean = clean.replace(/\(pty\)/gi, "");
+            clean = clean.replace(/\bltd\.?/gi, "");
+            clean = clean.replace(/\bcc\b/gi, "");
+            clean = clean.replace(/[.,\-_/]/g, " ");
+            clean = clean.replace(/\s+/g, " ").trim();
+            return clean;
+        };
+
+        const buildCustomerMatchCondition = (val) => {
+            const trimmed = (val !== undefined && val !== null) ? String(val).trim() : '';
+            if (!trimmed) return null;
+            const isNumericId = /^\d+$/.test(trimmed);
+            if (isNumericId) {
+                return {
+                    clause: `(
+                        u.id = ?
+                        OR LOWER(TRIM(u.full_name)) = LOWER(?)
+                        OR REPLACE(LOWER(u.full_name), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(?), ' ', ''), '%')
+                    )`,
+                    params: [parseInt(trimmed, 10), trimmed, trimmed]
+                };
+            } else {
+                return {
+                    clause: `(
+                        LOWER(TRIM(u.full_name)) = LOWER(TRIM(?))
+                        OR REPLACE(LOWER(u.full_name), ' ', '') = REPLACE(LOWER(?), ' ', '')
+                        OR REPLACE(LOWER(u.full_name), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(?), ' ', ''), '%')
+                        OR REPLACE(LOWER(?), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(u.full_name), ' ', ''), '%')
+                    )`,
+                    params: [trimmed, trimmed, trimmed, trimmed]
+                };
+            }
+        };
+
+        const matchesCustomerTerm = (nameOrCust, term) => {
+            if (!term) return false;
+            const strTerm = String(term).trim();
+            if (!strTerm) return false;
+
+            const name = typeof nameOrCust === 'string' ? nameOrCust : (nameOrCust.customer_name || '');
+            const ids = typeof nameOrCust === 'object' && nameOrCust.all_customer_ids
+                ? nameOrCust.all_customer_ids
+                : (typeof nameOrCust === 'object' && nameOrCust.customer_id ? [nameOrCust.customer_id] : []);
+
+            if (/^\d+$/.test(strTerm)) {
+                const numId = parseInt(strTerm, 10);
+                if (ids.includes(numId)) return true;
+            }
+
+            const cleanName = normalizeCustomerKey(name);
+            const cleanTerm = normalizeCustomerKey(strTerm);
+            if (cleanName && cleanTerm) {
+                if (cleanName === cleanTerm) return true;
+                if (cleanName.includes(cleanTerm) || cleanTerm.includes(cleanName)) return true;
+            }
+
+            const rawLowerName = name.trim().toLowerCase();
+            const rawLowerTerm = strTerm.toLowerCase();
+            if (rawLowerName === rawLowerTerm || rawLowerName.includes(rawLowerTerm) || rawLowerTerm.includes(rawLowerName)) {
+                return true;
+            }
+
+            return false;
+        };
+
+        const hasFrom = customer_from && String(customer_from).trim() !== '';
+        const hasTo = customer_to && String(customer_to).trim() !== '';
+
+        let customerWhere = `
+            WHERE u.is_deleted = 0
+              AND TRIM(COALESCE(u.full_name, '')) <> ''
+        `;
+        const customerQueryParams = [];
+
+        if (hasFrom && hasTo) {
+            const matchFrom = buildCustomerMatchCondition(customer_from);
+            const matchTo = buildCustomerMatchCondition(customer_to);
+            customerWhere += ` AND (${matchFrom.clause} OR ${matchTo.clause}) `;
+            customerQueryParams.push(...matchFrom.params, ...matchTo.params);
+        } else if (hasFrom) {
+            const matchFrom = buildCustomerMatchCondition(customer_from);
+            customerWhere += ` AND (${matchFrom.clause}) `;
+            customerQueryParams.push(...matchFrom.params);
+        } else if (hasTo) {
+            const matchTo = buildCustomerMatchCondition(customer_to);
+            customerWhere += ` AND (${matchTo.clause}) `;
+            customerQueryParams.push(...matchTo.params);
+        }
+
+        if (category_from && category_to) {
+            customerWhere += ` AND COALESCE(c.name, u.access_country, u.country_code, '') >= ? AND COALESCE(c.name, u.access_country, u.country_code, '') <= ? `;
+            customerQueryParams.push(category_from, category_to);
+        } else if (category_from) {
+            customerWhere += ` AND COALESCE(c.name, u.access_country, u.country_code, '') >= ? `;
+            customerQueryParams.push(category_from);
+        } else if (category_to) {
+            customerWhere += ` AND COALESCE(c.name, u.access_country, u.country_code, '') <= ? `;
+            customerQueryParams.push(category_to);
+        }
+
+        const customerSql = `
+            SELECT
+                MIN(u.id) AS customer_id,
+                GROUP_CONCAT(DISTINCT u.id) AS all_customer_ids,
+                TRIM(u.full_name) AS customer_name,
+                COALESCE(MAX(c.name), MAX(u.access_country), MAX(u.country_code)) AS category,
+                MAX(u.country_code) AS country_code
+            FROM tbl_users u
+            LEFT JOIN countries c ON c.id = u.country
+            ${customerWhere}
+            GROUP BY TRIM(LOWER(u.full_name))
+            ORDER BY TRIM(u.full_name) ASC
+        `;
+
+        const [customerRows, allInvoices, allSageInvoices, allCashbook] = await Promise.all([
+            queryAsync(customerSql, customerQueryParams),
+            // Point 2: quote_invoice (system invoices)
+            queryAsync(`
+                SELECT
+                    qi.id,
+                    qi.order_id,
+                    COALESCE(qi.client_id, o.client_id) AS client_id,
+                    COALESCE(u.full_name, qi.client_name, o.client_name) AS client_name,
+                    qi.reference_no,
+                    qi.customer_invoice_no,
+                    DATE_FORMAT(COALESCE(qi.quote_date, qi.due_date, qi.created_at), '%Y-%m-%d') AS quote_date,
+                    qi.sumof_vatincl,
+                    qi.final_base_currency,
+                    qi.status
+                FROM quote_invoice qi
+                LEFT JOIN tbl_orders o ON o.id = qi.order_id
+                LEFT JOIN tbl_users u ON u.id = COALESCE(qi.client_id, o.client_id)
+                WHERE qi.is_deleted = 0
+                  AND LOWER(COALESCE(qi.status, '')) <> 'cancelled'
+                  AND DATE(COALESCE(qi.quote_date, qi.due_date, qi.created_at)) <= ?
+                ORDER BY COALESCE(qi.quote_date, qi.due_date, qi.created_at) ASC, qi.id ASC
+            `, [formattedRunDate]),
+            // Point 3: Reconciled Sage invoices allocated to a freight order in "Invoices Recon" (tbl_invoices)
+            queryAsync(`
+                SELECT
+                    ti.id AS tbl_invoice_id,
+                    ti.order_id,
+                    ti.sage_invoice_id,
+                    COALESCE(ti.client_id, o.client_id) AS client_id,
+                    COALESCE(u.full_name, o.client_name, si.customer_name) AS client_name,
+                    COALESCE(si.document_number, CONCAT('SAGE_', ti.sage_invoice_id), CONCAT('INV_', ti.id)) AS document_number,
+                    COALESCE(si.customer_ref, o.order_number, CONCAT('OR000', ti.order_id)) AS customer_ref,
+                    DATE_FORMAT(COALESCE(ti.date, si.date, ti.created_at), '%Y-%m-%d') AS date,
+                    COALESCE(ti.invoice_amt, si.total, 0) AS total,
+                    COALESCE(si.invoice_region, 'All Categories') AS invoice_region,
+                    COALESCE(ti.invoice_currency, 'ZAR') AS invoice_currency
+                FROM tbl_invoices ti
+                LEFT JOIN sage_invoice_list si ON si.id = ti.sage_invoice_id
+                LEFT JOIN tbl_orders o ON o.id = ti.order_id
+                LEFT JOIN tbl_users u ON u.id = COALESCE(ti.client_id, o.client_id)
+                WHERE ti.allocated = 'Yes'
+                  AND ti.sage_invoice_id > 0
+                  AND DATE(COALESCE(ti.date, si.date, ti.created_at)) <= ?
+                ORDER BY COALESCE(ti.date, si.date, ti.created_at) ASC, ti.id ASC
+            `, [formattedRunDate]).catch(() => []),
+            // Cashbook receipts
+            queryAsync(`
+                SELECT
+                    cb.id,
+                    DATE_FORMAT(cb.date, '%Y-%m-%d') AS date,
+                    cb.bank_ref,
+                    cb.description_on_receipt,
+                    cb.receipt,
+                    cb.payment,
+                    COALESCE(cb.customer_id, o.client_id) AS customer_id,
+                    cb.order_id,
+                    cb.allocation_type,
+                    cb.allocated,
+                    COALESCE(u.full_name, o.client_name) AS client_name
+                FROM tbl_cashbook cb
+                LEFT JOIN tbl_orders o ON o.id = cb.order_id
+                LEFT JOIN tbl_users u ON u.id = COALESCE(cb.customer_id, o.client_id)
+                WHERE DATE(cb.date) <= ?
+                  AND (
+                      cb.allocation_type = 'Customer'
+                      OR cb.allocation_type IS NULL
+                      OR cb.allocation_type = ''
+                  )
+                ORDER BY cb.date ASC, cb.id ASC
+            `, [formattedRunDate])
+        ]);
+
+        const customerMap = new Map();
+        const customerIdToKey = new Map();
+
+        for (const c of customerRows) {
+            const key = normalizeCustomerKey(c.customer_name);
+            if (!key) continue;
+            const ids = String(c.all_customer_ids || c.customer_id).split(",").map(Number).filter(Boolean);
+            if (!customerMap.has(key)) {
+                customerMap.set(key, {
+                    customer_id: c.customer_id,
+                    all_customer_ids: ids,
+                    customer_name: c.customer_name.trim(),
+                    category: c.category || "All Categories",
+                    country_code: c.country_code
+                });
+            }
+            for (const cid of ids) {
+                customerIdToKey.set(cid, key);
+            }
+        }
+
+        const isCustomerInFilter = (nameOrCust) => {
+            if (!hasFrom && !hasTo) return true;
+            if (hasFrom && hasTo) {
+                return matchesCustomerTerm(nameOrCust, customer_from) || matchesCustomerTerm(nameOrCust, customer_to);
+            }
+            if (hasFrom) {
+                return matchesCustomerTerm(nameOrCust, customer_from);
+            }
+            if (hasTo) {
+                return matchesCustomerTerm(nameOrCust, customer_to);
+            }
+            return true;
+        };
+
+        const resolveCustomerKey = (cid, name) => {
+            if (cid && customerIdToKey.has(cid)) return customerIdToKey.get(cid);
+            if (name) {
+                const clean = normalizeCustomerKey(name);
+                if (customerMap.has(clean)) return clean;
+            }
+            return null;
+        };
+
+        const customerData = new Map();
+        const getOrCreateCustData = (key, fallbackName, fallbackCid, fallbackCategory) => {
+            if (!customerData.has(key)) {
+                let custMeta = customerMap.get(key);
+                if (!custMeta) {
+                    custMeta = {
+                        customer_id: fallbackCid || null,
+                        all_customer_ids: fallbackCid ? [fallbackCid] : [],
+                        customer_name: fallbackName ? fallbackName.trim() : key,
+                        category: fallbackCategory || "All Categories"
+                    };
+                    customerMap.set(key, custMeta);
+                }
+                customerData.set(key, {
+                    meta: custMeta,
+                    invoices: [],
+                    payments: []
+                });
+            }
+            return customerData.get(key);
+        };
+
+        // 1. Process quote_invoices
+        for (const inv of allInvoices) {
+            let key = resolveCustomerKey(inv.client_id, inv.client_name);
+            if (!key && inv.client_name) {
+                key = normalizeCustomerKey(inv.client_name);
+            }
+            if (!key) continue;
+            if (!isCustomerInFilter(inv.client_name || key)) continue;
+
+            const cData = getOrCreateCustData(key, inv.client_name, inv.client_id, "All Categories");
+            cData.invoices.push({
+                source: "quote_invoice",
+                id: inv.id,
+                order_id: inv.order_id ? Number(inv.order_id) : 0,
+                date: inv.quote_date,
+                document_no: (inv.reference_no || inv.customer_invoice_no || `INV_${inv.id}`).trim(),
+                reference: inv.customer_invoice_no || (inv.order_id ? `Order OR000${inv.order_id}` : inv.client_name),
+                total: Number(inv.sumof_vatincl) || 0,
+                currency: inv.final_base_currency || "ZAR"
+            });
+        }
+
+        // 2. Process reconciled sage_invoices
+        for (const sage of allSageInvoices) {
+            let key = resolveCustomerKey(sage.client_id, sage.client_name);
+            if (!key && sage.client_name) {
+                key = normalizeCustomerKey(sage.client_name);
+            }
+            if (!key) continue;
+            if (!isCustomerInFilter(sage.client_name || key)) continue;
+
+            const cData = getOrCreateCustData(key, sage.client_name, sage.client_id, sage.invoice_region);
+            cData.invoices.push({
+                source: "sage_invoice",
+                id: sage.tbl_invoice_id,
+                order_id: sage.order_id ? Number(sage.order_id) : 0,
+                date: sage.date,
+                document_no: (sage.document_number || `SAGE_${sage.sage_invoice_id}`).trim(),
+                reference: sage.customer_ref || (sage.order_id ? `Order OR000${sage.order_id}` : sage.client_name),
+                total: Number(sage.total) || 0,
+                currency: sage.invoice_currency || "ZAR"
+            });
+        }
+
+        // 3. Process cashbook entries
+        for (const cb of allCashbook) {
+            const receipt = Number(cb.receipt) || 0;
+            const payment = Number(cb.payment) || 0;
+            const netReceipt = receipt - payment;
+            if (netReceipt === 0) continue;
+
+            let key = resolveCustomerKey(cb.customer_id, cb.client_name);
+            if (!key && cb.description_on_receipt) {
+                const cleanDesc = normalizeCustomerKey(cb.description_on_receipt);
+                if (customerMap.has(cleanDesc)) key = cleanDesc;
+            }
+            if (!key) continue;
+            if (!isCustomerInFilter(cb.client_name || cb.description_on_receipt || key)) continue;
+
+            const bankRef = (cb.bank_ref || "").trim();
+            const docNo = bankRef && /^RCP/i.test(bankRef) ? bankRef : `RCP${String(cb.id).padStart(7, "0")}`;
+            const refNo = bankRef
+                ? (cb.description_on_receipt ? `${bankRef} - ${cb.description_on_receipt}` : bankRef)
+                : (cb.description_on_receipt || "");
+
+            const cData = getOrCreateCustData(key, cb.client_name || cb.description_on_receipt, cb.customer_id, "All Categories");
+            cData.payments.push({
+                id: cb.id,
+                order_id: cb.order_id ? Number(cb.order_id) : 0,
+                date: cb.date,
+                document_no: docNo,
+                reference: refNo,
+                amount: netReceipt
+            });
+        }
+
+        const data = [];
+        const totals = {
+            days_120: 0,
+            days_90: 0,
+            days_60: 0,
+            days_30: 0,
+            current: 0,
+            total_due: 0
+        };
+
+        const isDetailed = String(style).toLowerCase() === "detailed";
+        const shouldExcludeZero = (req.body.include_zero_balance === true || req.body.show_zero_balance === true)
+            ? false
+            : (exclude_zero_balance !== false && exclude_zero_balance !== "false");
+
+        for (const [key, cData] of customerData) {
+            const custMeta = cData.meta;
+            const invoices = cData.invoices;
+            const payments = cData.payments;
+
+            if (invoices.length === 0 && payments.length === 0) continue;
+
+            const invoiceItems = invoices.map(inv => ({
+                ...inv,
+                remaining_balance: inv.total,
+                allocated_payment: 0
+            }));
+
+            const paymentItems = payments.map(pmt => ({
+                ...pmt,
+                remaining_amount: pmt.amount,
+                allocated_to_invoices: 0
+            }));
+
+            // PHASE 1: Direct Order Matching (order_id > 0)
+            // Customer payments allocated against specific order number clear that specific order's invoice
+            for (const pmt of paymentItems) {
+                if (pmt.order_id > 0 && pmt.remaining_amount > 0) {
+                    for (const inv of invoiceItems) {
+                        if (inv.order_id === pmt.order_id && inv.remaining_balance > 0) {
+                            const alloc = Math.min(pmt.remaining_amount, inv.remaining_balance);
+                            inv.remaining_balance -= alloc;
+                            pmt.remaining_amount -= alloc;
+                            inv.allocated_payment += alloc;
+                            pmt.allocated_to_invoices += alloc;
+                            if (pmt.remaining_amount <= 0) break;
+                        }
+                    }
+                }
+            }
+
+            // PHASE 2: Unallocated payments (order_id === 0) apply FIFO to unassigned invoices (order_id === 0)
+            const unassignedInvoices = invoiceItems.filter(inv => (!inv.order_id || inv.order_id === 0) && inv.remaining_balance > 0);
+            unassignedInvoices.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            const unassignedPayments = paymentItems.filter(pmt => (!pmt.order_id || pmt.order_id === 0) && pmt.remaining_amount > 0);
+            unassignedPayments.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            for (const pmt of unassignedPayments) {
+                if (pmt.remaining_amount <= 0) continue;
+                for (const inv of unassignedInvoices) {
+                    if (inv.remaining_balance <= 0) continue;
+                    const alloc = Math.min(pmt.remaining_amount, inv.remaining_balance);
+                    inv.remaining_balance -= alloc;
+                    pmt.remaining_amount -= alloc;
+                    inv.allocated_payment += alloc;
+                    pmt.allocated_to_invoices += alloc;
+                    if (pmt.remaining_amount <= 0) break;
+                }
+            }
+
+            // PHASE 3: Aging Buckets Calculation
+            const buckets = {
+                days_120: 0,
+                days_90: 0,
+                days_60: 0,
+                days_30: 0,
+                current: 0
+            };
+
+            const transactions = [];
+
+            // Invoices with outstanding balance
+            for (const inv of invoiceItems) {
+                if (inv.remaining_balance > 0) {
+                    const txDate = new Date(`${inv.date}T00:00:00`);
+                    const diffMonths = getMonthDiff(runDateObj, txDate);
+                    const pKey = getPeriodKey(diffMonths);
+                    const openBal = Number(inv.remaining_balance.toFixed(2));
+
+                    buckets[pKey] += openBal;
+
+                    if (isDetailed) {
+                        transactions.push({
+                            date: formatDateDDMMYYYY(inv.date),
+                            raw_date: inv.date,
+                            document_no: inv.document_no,
+                            customer: inv.document_no,
+                            order_id: inv.order_id || null,
+                            reference: inv.allocated_payment > 0 
+                                ? `${inv.reference} (Part Paid: ${inv.allocated_payment.toFixed(2)})`
+                                : inv.reference,
+                            type: "invoice",
+                            days_120: pKey === "days_120" ? openBal : 0,
+                            days_90: pKey === "days_90" ? openBal : 0,
+                            days_60: pKey === "days_60" ? openBal : 0,
+                            days_30: pKey === "days_30" ? openBal : 0,
+                            current: pKey === "current" ? openBal : 0,
+                            total_due: openBal
+                        });
+                    }
+                }
+            }
+
+            // Payments with remaining unapplied credit / overpayment
+            for (const pmt of paymentItems) {
+                if (pmt.remaining_amount > 0) {
+                    const txDate = new Date(`${pmt.date}T00:00:00`);
+                    const diffMonths = getMonthDiff(runDateObj, txDate);
+                    const pKey = getPeriodKey(diffMonths);
+                    const openCredit = Number(pmt.remaining_amount.toFixed(2));
+
+                    buckets[pKey] -= openCredit;
+
+                    if (isDetailed) {
+                        const txAmt = -openCredit;
+                        transactions.push({
+                            date: formatDateDDMMYYYY(pmt.date),
+                            raw_date: pmt.date,
+                            document_no: pmt.document_no,
+                            customer: pmt.document_no,
+                            order_id: pmt.order_id || null,
+                            reference: pmt.allocated_to_invoices > 0 
+                                ? `${pmt.reference} (Unapplied Balance)` 
+                                : (pmt.reference || "Unallocated Receipt"),
+                            type: "receipt",
+                            days_120: pKey === "days_120" ? txAmt : 0,
+                            days_90: pKey === "days_90" ? txAmt : 0,
+                            days_60: pKey === "days_60" ? txAmt : 0,
+                            days_30: pKey === "days_30" ? txAmt : 0,
+                            current: pKey === "current" ? txAmt : 0,
+                            total_due: txAmt
+                        });
+                    }
+                }
+            }
+
+            const days_120 = Number(buckets.days_120.toFixed(2));
+            const days_90 = Number(buckets.days_90.toFixed(2));
+            const days_60 = Number(buckets.days_60.toFixed(2));
+            const days_30 = Number(buckets.days_30.toFixed(2));
+            const current = Number(buckets.current.toFixed(2));
+            const total_due = Number((days_120 + days_90 + days_60 + days_30 + current).toFixed(2));
+
+            // Exclude clients who have paid in full and balance is zero
+            if (shouldExcludeZero && Math.abs(total_due) < 0.01) {
+                continue;
+            }
+
+            transactions.sort((a, b) => {
+                const dateA = new Date(`${a.raw_date || "1900-01-01"}T00:00:00`).getTime();
+                const dateB = new Date(`${b.raw_date || "1900-01-01"}T00:00:00`).getTime();
+                if (dateA !== dateB) return dateA - dateB;
+                return a.document_no.localeCompare(b.document_no);
+            });
+
+            let primaryCurrency = "ZAR";
+            if (invoices.length > 0 && invoices[0].currency) {
+                primaryCurrency = invoices[0].currency;
+            }
+
+            const customerEntry = {
+                customer_id: custMeta.customer_id,
+                customer_name: custMeta.customer_name,
+                final_base_currency: primaryCurrency,
+                days_120,
+                days_90,
+                days_60,
+                days_30,
+                current,
+                total_due
+            };
+
+            if (isDetailed) {
+                customerEntry.transactions = transactions;
+                customerEntry.items = transactions;
+            }
+
+            data.push(customerEntry);
+
+            totals.days_120 += days_120;
+            totals.days_90 += days_90;
+            totals.days_60 += days_60;
+            totals.days_30 += days_30;
+            totals.current += current;
+            totals.total_due += total_due;
+        }
+
+        data.sort((a, b) => a.customer_name.localeCompare(b.customer_name));
+
+        Object.keys(totals).forEach(key => {
+            totals[key] = Number(totals[key].toFixed(2));
+        });
+
+        return res.status(200).json({
+            success: true,
+            filters: {
+                run_at_date,
+                customer_from: customer_from || "All",
+                customer_to: customer_to || "All",
+                category_from: category_from || "All",
+                category_to: category_to || "All",
+                style,
+                exclude_zero_balance: shouldExcludeZero,
+                use_foreign_currency
+            },
+            data,
+            totals
+        });
+    } catch (error) {
+        console.error(
+            "Unexpected Customer Days Outstanding Report Error:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+        });
+    }
+};
+
+const getSupplierWarehouseDaysOutstandingReport = async (
+    req,
+    res
+) => {
+    try {
+        const {
+            run_at_date,
+            supplier_from,
+            supplier_to,
+            warehouse_id,
+            metric = "cbm", // "packages" | "cbm" | "count"
+            exclude_zero = false,
+        } = req.body;
+
+        // =========================================================
+        // VALIDATION
+        // =========================================================
+
+        if (!run_at_date) {
+            return res.status(400).json({
+                success: false,
+                message: "run_at_date is required.",
+            });
+        }
+
+        const allowedMetrics = [
+            "packages",
+            "cbm",
+            "count",
+        ];
+
+        if (!allowedMetrics.includes(metric)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "metric must be packages, cbm or count.",
+            });
+        }
+
+        // =========================================================
+        // DATE NORMALIZATION
+        // =========================================================
+
+        const normalizeReportDate = (value) => {
+            if (!value) {
+                return null;
+            }
+
+            const dateValue = String(value).trim();
+
+            // YYYY-MM-DD
+            if (
+                /^\d{4}-\d{2}-\d{2}$/.test(
+                    dateValue
+                )
+            ) {
+                return dateValue;
+            }
+
+            // YYYY-MM-DD HH:mm:ss
+            if (
+                /^\d{4}-\d{2}-\d{2}\s/.test(
+                    dateValue
+                )
+            ) {
+                return dateValue.substring(0, 10);
+            }
+
+            // YYYY-MM-DDTHH:mm:ss
+            if (
+                /^\d{4}-\d{2}-\d{2}T/.test(
+                    dateValue
+                )
+            ) {
+                return dateValue.substring(0, 10);
+            }
+
+            // DD/MM/YYYY
+            if (
+                /^\d{2}\/\d{2}\/\d{4}$/.test(
+                    dateValue
+                )
+            ) {
+                const [
+                    day,
+                    month,
+                    year,
+                ] = dateValue.split("/");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            // DD-MM-YYYY
+            if (
+                /^\d{2}-\d{2}-\d{4}$/.test(
+                    dateValue
+                )
+            ) {
+                const [
+                    day,
+                    month,
+                    year,
+                ] = dateValue.split("-");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            return null;
+        };
+
+        const formattedRunDate =
+            normalizeReportDate(run_at_date);
+
+        if (!formattedRunDate) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "run_at_date must be YYYY-MM-DD, DD/MM/YYYY or DD-MM-YYYY.",
+            });
+        }
+
+        // =========================================================
+        // TRACKING START DATE
+        // =========================================================
+
+        const trackingStartedAtSql = `
+            (
+                SELECT
+                    MIN(ot.created_at)
+                FROM order_track ot
+                WHERE
+                    (
+                        s.order_id IS NOT NULL
+                        AND s.order_id > 0
+                        AND ot.order_id = s.order_id
+                    )
+                    OR
+                    (
+                        NULLIF(s.batch_id, 0) IS NOT NULL
+                        AND ot.batch_id = s.batch_id
+                    )
+            )
+        `;
+
+        const hasTrackingStartedSql = `
+            (
+                ${trackingStartedAtSql} IS NOT NULL
+
+                OR
+
+                (
+                    o.track_status IS NOT NULL
+                    AND o.track_status != ''
+                )
+
+                OR
+
+                (
+                    b.track_status IS NOT NULL
+                    AND b.track_status != ''
+                )
+            )
+        `;
+
+        // =========================================================
+        // ARRIVAL DATE
+        // IMPORTANT:
+        // supplier_warehouse_orders table mein
+        // warehousing_date use nahi karna hai.
+        // =========================================================
+
+        const arrivalDateExpr = `
+            COALESCE(
+                CASE
+                    WHEN NULLIF(
+                        TRIM(
+                            CAST(
+                                s.date_received
+                                AS CHAR
+                            )
+                        ),
+                        ''
+                    ) IS NULL
+                    THEN NULL
+
+                    /*
+                     * YYYY-MM-DD or YYYY-MM-DD HH:mm:ss
+                     */
+                    WHEN CAST(
+                        s.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                    THEN DATE(
+                        s.date_received
+                    )
+
+                    /*
+                     * DD/MM/YYYY
+                     */
+                    WHEN CAST(
+                        s.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+                    THEN STR_TO_DATE(
+                        LEFT(
+                            CAST(
+                                s.date_received
+                                AS CHAR
+                            ),
+                            10
+                        ),
+                        '%d/%m/%Y'
+                    )
+
+                    /*
+                     * DD-MM-YYYY
+                     */
+                    WHEN CAST(
+                        s.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{2}-[0-9]{2}-[0-9]{4}'
+                    THEN STR_TO_DATE(
+                        LEFT(
+                            CAST(
+                                s.date_received
+                                AS CHAR
+                            ),
+                            10
+                        ),
+                        '%d-%m-%Y'
+                    )
+
+                    ELSE NULL
+                END,
+
+                /*
+                 * Fallback because warehousing_date
+                 * does not exist in this table.
+                 */
+                DATE(s.created_at)
+            )
+        `;
+
+        // =========================================================
+        // SUPPLIER ID AND NAME
+        // =========================================================
+
+        const supplierIdExpr = `
+            COALESCE(
+                NULLIF(s.supplier_id, 0),
+                0
+            )
+        `;
+
+        const supplierNameExpr = `
+            TRIM(
+                COALESCE(
+                    NULLIF(su.name, ''),
+                    NULLIF(s.supplier_company, ''),
+                    NULLIF(s.supplier_person, ''),
+                    'Unknown Supplier'
+                )
+            )
+        `;
+
+        // =========================================================
+        // METRIC
+        // =========================================================
+
+        let metricFieldExpr = `
+            COALESCE(
+                CAST(
+                    s.total_packages
+                    AS DECIMAL(15, 2)
+                ),
+                0
+            )
+        `;
+
+        if (metric === "cbm") {
+            metricFieldExpr = `
+                COALESCE(
+                    CAST(
+                        s.total_cbm
+                        AS DECIMAL(15, 2)
+                    ),
+                    0
+                )
+            `;
+        }
+
+        if (metric === "count") {
+            metricFieldExpr = "1";
+        }
+
+        // =========================================================
+        // WHERE CLAUSE
+        // =========================================================
+
+        /*
+         * Same behavior as supplier list's "instore" tab:
+         * tracking start nahi hui honi chahiye.
+         */
+        let whereClause = `
+            WHERE
+                ${arrivalDateExpr} IS NOT NULL
+
+                AND NOT (
+                    ${hasTrackingStartedSql}
+                )
+        `;
+
+        const queryParams = [];
+
+        // =========================================================
+        // SUPPLIER RANGE FILTER
+        // =========================================================
+
+        if (supplier_from && supplier_to) {
+            whereClause += `
+                AND ${supplierNameExpr} >= ?
+                AND ${supplierNameExpr} <= ?
+            `;
+
+            queryParams.push(
+                String(supplier_from).trim(),
+                String(supplier_to).trim()
+            );
+        } else if (supplier_from) {
+            whereClause += `
+                AND ${supplierNameExpr} >= ?
+            `;
+
+            queryParams.push(
+                String(supplier_from).trim()
+            );
+        } else if (supplier_to) {
+            whereClause += `
+                AND ${supplierNameExpr} <= ?
+            `;
+
+            queryParams.push(
+                String(supplier_to).trim()
+            );
+        }
+
+        // =========================================================
+        // WAREHOUSE FILTER
+        // =========================================================
+
+        if (
+            warehouse_id !== undefined &&
+            warehouse_id !== null &&
+            warehouse_id !== ""
+        ) {
+            whereClause += `
+                AND s.warehouse_id = ?
+            `;
+
+            queryParams.push(warehouse_id);
+        }
+
+        // =========================================================
+        // MAIN SQL
+        // =========================================================
+
+        const sql = `
+            SELECT
+                report_data.supplier_id,
+                report_data.supplier_name,
+
+                COUNT(
+                    report_data.supplier_warehouse_id
+                ) AS total_instore_orders,
+
+                /*
+                 * METRIC VALUES
+                 */
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 120
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_120,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 90
+                         AND report_data.days_in_warehouse <= 120
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_90,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 60
+                         AND report_data.days_in_warehouse <= 90
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_60,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 30
+                         AND report_data.days_in_warehouse <= 60
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_30,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse <= 30
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS current_stored,
+
+                SUM(
+                    report_data.metric_value
+                ) AS total_stored,
+
+                /*
+                 * ACTUAL DAYS VALUES
+                 */
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 120
+                        THEN report_data.days_in_warehouse
+                        ELSE 0
+                    END
+                ) AS days_120_days,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 90
+                         AND report_data.days_in_warehouse <= 120
+                        THEN report_data.days_in_warehouse
+                        ELSE 0
+                    END
+                ) AS days_90_days,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 60
+                         AND report_data.days_in_warehouse <= 90
+                        THEN report_data.days_in_warehouse
+                        ELSE 0
+                    END
+                ) AS days_60_days,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse > 30
+                         AND report_data.days_in_warehouse <= 60
+                        THEN report_data.days_in_warehouse
+                        ELSE 0
+                    END
+                ) AS days_30_days,
+
+                SUM(
+                    CASE
+                        WHEN report_data.days_in_warehouse <= 30
+                        THEN report_data.days_in_warehouse
+                        ELSE 0
+                    END
+                ) AS current_days,
+
+                SUM(
+                    report_data.days_in_warehouse
+                ) AS total_days
+
+            FROM (
+                SELECT
+                    ${supplierIdExpr}
+                        AS supplier_id,
+
+                    ${supplierNameExpr}
+                        AS supplier_name,
+
+                    s.id
+                        AS supplier_warehouse_id,
+
+                    ${arrivalDateExpr}
+                        AS arrival_date,
+
+                    GREATEST(
+                        DATEDIFF(
+                            ?,
+                            ${arrivalDateExpr}
+                        ),
+                        0
+                    ) AS days_in_warehouse,
+
+                    ${metricFieldExpr}
+                        AS metric_value
+
+                FROM supplier_warehouse_orders s
+
+                LEFT JOIN tbl_suppliers su
+                    ON su.id = s.supplier_id
+
+                LEFT JOIN tbl_orders o
+                    ON o.id = s.order_id
+
+                LEFT JOIN batches b
+                    ON b.id = NULLIF(
+                        s.batch_id,
+                        0
+                    )
+
+                ${whereClause}
+            ) report_data
+
+            GROUP BY
+                report_data.supplier_id,
+                report_data.supplier_name
+
+            ORDER BY
+                report_data.supplier_name ASC,
+                report_data.supplier_id ASC
+        `;
+
+        /*
+         * First parameter is the report date:
+         *
+         * DATEDIFF(?, arrival_date)
+         */
+        const params = [
+            formattedRunDate,
+            ...queryParams,
+        ];
+
+        // =========================================================
+        // EXECUTE
+        // =========================================================
+
+        con.query(sql, params, (err, rows) => {
+            if (err) {
+                console.error(
+                    "Supplier Warehouse Days Outstanding Error:",
+                    err
+                );
+
+                return res.status(500).json({
+                    success: false,
+                    message: err.message,
+                });
+            }
+
+            const data = [];
+
+            const totals = {
+                days_120: 0,
+                days_90: 0,
+                days_60: 0,
+                days_30: 0,
+                current: 0,
+
+                days_120_days: 0,
+                days_90_days: 0,
+                days_60_days: 0,
+                days_30_days: 0,
+                current_days: 0,
+
+                total_stored: 0,
+                total_days: 0,
+                total_orders: 0,
+            };
+
+            const shouldExcludeZero =
+                exclude_zero === true ||
+                exclude_zero === "true" ||
+                exclude_zero === 1 ||
+                exclude_zero === "1";
+
+            rows.forEach((row) => {
+                const totalStored = Number(
+                    row.total_stored || 0
+                );
+
+                if (
+                    shouldExcludeZero &&
+                    totalStored === 0
+                ) {
+                    return;
+                }
+
+                const item = {
+                    supplier_id:
+                        row.supplier_id !== null
+                            ? Number(row.supplier_id)
+                            : null,
+
+                    supplier_name:
+                        row.supplier_name ||
+                        "Unknown Supplier",
+
+                    total_orders: Number(
+                        row.total_instore_orders || 0
+                    ),
+
+                    // Metric bucket values
+                    days_120: Number(
+                        Number(row.days_120 || 0).toFixed(2)
+                    ),
+
+                    days_90: Number(
+                        Number(row.days_90 || 0).toFixed(2)
+                    ),
+
+                    days_60: Number(
+                        Number(row.days_60 || 0).toFixed(2)
+                    ),
+
+                    days_30: Number(
+                        Number(row.days_30 || 0).toFixed(2)
+                    ),
+
+                    current: Number(
+                        Number(row.current_stored || 0).toFixed(2)
+                    ),
+
+                    total_stored: Number(
+                        totalStored.toFixed(2)
+                    ),
+
+                    // Actual days bucket values
+                    days_120_days: Number(
+                        Number(
+                            row.days_120_days || 0
+                        ).toFixed(2)
+                    ),
+
+                    days_90_days: Number(
+                        Number(
+                            row.days_90_days || 0
+                        ).toFixed(2)
+                    ),
+
+                    days_60_days: Number(
+                        Number(
+                            row.days_60_days || 0
+                        ).toFixed(2)
+                    ),
+
+                    days_30_days: Number(
+                        Number(
+                            row.days_30_days || 0
+                        ).toFixed(2)
+                    ),
+
+                    current_days: Number(
+                        Number(
+                            row.current_days || 0
+                        ).toFixed(2)
+                    ),
+
+                    total_days: Number(
+                        Number(
+                            row.total_days || 0
+                        ).toFixed(2)
+                    ),
+                };
+
+                totals.days_120 += item.days_120;
+                totals.days_90 += item.days_90;
+                totals.days_60 += item.days_60;
+                totals.days_30 += item.days_30;
+                totals.current += item.current;
+
+                totals.days_120_days +=
+                    item.days_120_days;
+
+                totals.days_90_days +=
+                    item.days_90_days;
+
+                totals.days_60_days +=
+                    item.days_60_days;
+
+                totals.days_30_days +=
+                    item.days_30_days;
+
+                totals.current_days +=
+                    item.current_days;
+
+                totals.total_stored +=
+                    item.total_stored;
+
+                totals.total_days +=
+                    item.total_days;
+
+                totals.total_orders +=
+                    item.total_orders;
+
+                data.push(item);
+            });
+
+            Object.keys(totals).forEach((key) => {
+                totals[key] = Number(
+                    totals[key].toFixed(2)
+                );
+            });
+
+            return res.status(200).json({
+                success: true,
+
+                filters: {
+                    run_at_date,
+                    normalized_run_at_date:
+                        formattedRunDate,
+
+                    supplier_from:
+                        supplier_from || "All",
+
+                    supplier_to:
+                        supplier_to || "All",
+
+                    metric,
+
+                    warehouse_id:
+                        warehouse_id || "All",
+
+                    exclude_zero,
+                },
+
+                data,
+                totals,
+            });
+        });
+    } catch (error) {
+        console.error(
+            "Supplier Warehouse Days Outstanding Exception:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "An unexpected error occurred.",
+            error: error.message,
+        });
+    }
+};
+
+
+const getWarehouseDaysOutstandingReport = async (req, res) => {
+    try {
+        const {
+            run_at_date,
+            customer_from,
+            customer_to,
+            warehouse_id,
+            origin,
+            destination,
+            metric = "count", // "packages" | "cbm" | "count"
+            exclude_zero = false,
+        } = req.body;
+
+        // =========================================================
+        // VALIDATION
+        // =========================================================
+
+        if (!run_at_date) {
+            return res.status(400).json({
+                success: false,
+                message: "run_at_date is required.",
+            });
+        }
+
+        const allowedMetrics = [
+            "packages",
+            "cbm",
+            "count",
+        ];
+
+        if (!allowedMetrics.includes(metric)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "metric must be packages, cbm or count.",
+            });
+        }
+
+        // =========================================================
+        // NORMALIZE RUN DATE
+        // =========================================================
+
+        const normalizeReportDate = (value) => {
+            if (!value) {
+                return null;
+            }
+
+            const dateValue = String(value).trim();
+
+            // DD/MM/YYYY
+            if (
+                /^\d{2}\/\d{2}\/\d{4}$/.test(
+                    dateValue
+                )
+            ) {
+                const [
+                    day,
+                    month,
+                    year,
+                ] = dateValue.split("/");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            // DD-MM-YYYY
+            if (
+                /^\d{2}-\d{2}-\d{4}$/.test(
+                    dateValue
+                )
+            ) {
+                const [
+                    day,
+                    month,
+                    year,
+                ] = dateValue.split("-");
+
+                return `${year}-${month}-${day}`;
+            }
+
+            // YYYY-MM-DD
+            if (
+                /^\d{4}-\d{2}-\d{2}$/.test(
+                    dateValue
+                )
+            ) {
+                return dateValue;
+            }
+
+            // ISO datetime
+            if (
+                /^\d{4}-\d{2}-\d{2}T/.test(
+                    dateValue
+                )
+            ) {
+                return dateValue.substring(0, 10);
+            }
+
+            return null;
+        };
+
+        const formattedRunDate =
+            normalizeReportDate(run_at_date);
+
+        if (!formattedRunDate) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "run_at_date must be YYYY-MM-DD, DD/MM/YYYY or DD-MM-YYYY.",
+            });
+        }
+
+        // =========================================================
+        // TRACKING JOINS
+        // =========================================================
+
+        const trackingJoins = `
+            LEFT JOIN (
+                SELECT
+                    order_id,
+                    MIN(created_at) AS first_track_at
+                FROM order_track
+                WHERE order_id IS NOT NULL
+                  AND order_id > 0
+                GROUP BY order_id
+            ) ot_order
+                ON ot_order.order_id =
+                   warehouse_assign_order.order_id
+                AND warehouse_assign_order.order_id > 0
+
+            LEFT JOIN (
+                SELECT
+                    batch_id,
+                    MIN(created_at) AS first_track_at
+                FROM order_track
+                WHERE batch_id IS NOT NULL
+                  AND batch_id > 0
+                GROUP BY batch_id
+            ) ot_batch
+                ON ot_batch.batch_id =
+                   warehouse_assign_order.batch_id
+                AND NULLIF(
+                    warehouse_assign_order.batch_id,
+                    0
+                ) IS NOT NULL
+        `;
+
+        // =========================================================
+        // TRACKING STATUS
+        // =========================================================
+
+        const hasTrackingStartedExpr = `
+            (
+                ot_order.first_track_at IS NOT NULL
+
+                OR
+
+                ot_batch.first_track_at IS NOT NULL
+
+                OR
+
+                (
+                    tbl_orders.track_status IS NOT NULL
+                    AND tbl_orders.track_status != ''
+                )
+
+                OR
+
+                (
+                    batches.track_status IS NOT NULL
+                    AND batches.track_status != ''
+                )
+            )
+        `;
+
+        // =========================================================
+        // ROBUST ARRIVAL DATE
+        // =========================================================
+
+        const arrivalDateExpr = `
+            COALESCE(
+                CASE
+                    WHEN NULLIF(
+                        TRIM(
+                            CAST(
+                                warehouse_assign_order.date_received
+                                AS CHAR
+                            )
+                        ),
+                        ''
+                    ) IS NULL
+                    THEN NULL
+
+                    WHEN CAST(
+                        warehouse_assign_order.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                    THEN DATE(
+                        warehouse_assign_order.date_received
+                    )
+
+                    WHEN CAST(
+                        warehouse_assign_order.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+                    THEN STR_TO_DATE(
+                        LEFT(
+                            CAST(
+                                warehouse_assign_order.date_received
+                                AS CHAR
+                            ),
+                            10
+                        ),
+                        '%d/%m/%Y'
+                    )
+
+                    WHEN CAST(
+                        warehouse_assign_order.date_received
+                        AS CHAR
+                    ) REGEXP '^[0-9]{2}-[0-9]{2}-[0-9]{4}'
+                    THEN STR_TO_DATE(
+                        LEFT(
+                            CAST(
+                                warehouse_assign_order.date_received
+                                AS CHAR
+                            ),
+                            10
+                        ),
+                        '%d-%m-%Y'
+                    )
+
+                    ELSE NULL
+                END,
+
+                DATE(
+                    warehouse_assign_order.warehousing_date
+                ),
+
+                DATE(
+                    warehouse_assign_order.created_at
+                )
+            )
+        `;
+
+        // =========================================================
+        // CUSTOMER EXPRESSIONS
+        // =========================================================
+
+        const clientIdExpr = `
+            COALESCE(
+                NULLIF(tbl_orders.client_id, 0),
+                0
+            )
+        `;
+
+        const clientNameExpr = `
+            TRIM(
+                COALESCE(
+                    NULLIF(tbl_users.full_name, ''),
+                    NULLIF(tbl_orders.client_name, ''),
+                    'Unknown Customer'
+                )
+            )
+        `;
+
+        // =========================================================
+        // METRIC
+        // =========================================================
+
+        let metricFieldExpr = `
+            COALESCE(
+                NULLIF(
+                    tbl_freight.no_of_packages,
+                    0
+                ),
+
+                NULLIF(
+                    CAST(
+                        tbl_orders.cartons
+                        AS DECIMAL(15, 2)
+                    ),
+                    0
+                ),
+
+                NULLIF(
+                    wp.wp_total_packages,
+                    0
+                ),
+
+                0
+            )
+        `;
+
+        if (metric === "cbm") {
+            metricFieldExpr = `
+                COALESCE(
+                    NULLIF(
+                        tbl_freight.dimension,
+                        0
+                    ),
+
+                    NULLIF(
+                        CAST(
+                            tbl_orders.dimensions
+                            AS DECIMAL(15, 2)
+                        ),
+                        0
+                    ),
+
+                    NULLIF(
+                        wp.wp_total_dimension,
+                        0
+                    ),
+
+                    0
+                )
+            `;
+        }
+
+        if (metric === "count") {
+            metricFieldExpr = "1";
+        }
+
+        // =========================================================
+        // WHERE
+        // =========================================================
+
+        let whereClause = `
+            WHERE warehouse_assign_order.warehouse_status = 1
+
+              AND ${arrivalDateExpr} IS NOT NULL
+
+              AND NOT (
+                  ${hasTrackingStartedExpr}
+              )
+        `;
+
+        const queryParams = [];
+
+        // =========================================================
+        // CUSTOMER RANGE
+        // =========================================================
+
+        if (customer_from && customer_to) {
+            whereClause += `
+                AND ${clientNameExpr} >= ?
+                AND ${clientNameExpr} <= ?
+            `;
+
+            queryParams.push(
+                String(customer_from).trim(),
+                String(customer_to).trim()
+            );
+        } else if (customer_from) {
+            whereClause += `
+                AND ${clientNameExpr} >= ?
+            `;
+
+            queryParams.push(
+                String(customer_from).trim()
+            );
+        } else if (customer_to) {
+            whereClause += `
+                AND ${clientNameExpr} <= ?
+            `;
+
+            queryParams.push(
+                String(customer_to).trim()
+            );
+        }
+
+        // =========================================================
+        // WAREHOUSE
+        // =========================================================
+
+        if (
+            warehouse_id !== undefined &&
+            warehouse_id !== null &&
+            warehouse_id !== ""
+        ) {
+            whereClause += `
+                AND batches.warehouse_id = ?
+            `;
+
+            queryParams.push(warehouse_id);
+        }
+
+        // =========================================================
+        // ORIGIN
+        // =========================================================
+
+        if (
+            origin !== undefined &&
+            origin !== null &&
+            origin !== ""
+        ) {
+            whereClause += `
+                AND COALESCE(
+                    tbl_freight.collection_from,
+                    tbl_orders.collection_from
+                ) = ?
+            `;
+
+            queryParams.push(origin);
+        }
+
+        // =========================================================
+        // DESTINATION
+        // =========================================================
+
+        if (
+            destination !== undefined &&
+            destination !== null &&
+            destination !== ""
+        ) {
+            whereClause += `
+                AND COALESCE(
+                    tbl_freight.delivery_to,
+                    tbl_orders.delivery_to
+                ) = ?
+            `;
+
+            queryParams.push(destination);
+        }
+
+        // =========================================================
+        // REPORT QUERY
+        // =========================================================
+
+        const sql = `
+            SELECT
+                report_data.client_id,
+                report_data.customer_name,
+
+                COUNT(
+                    report_data.warehouse_order_id
+                ) AS total_orders_instore,
+
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) > 120
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_120,
+
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) > 90
+
+                        AND DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) <= 120
+
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_90,
+
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) > 60
+
+                        AND DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) <= 90
+
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_60,
+
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) > 30
+
+                        AND DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) <= 60
+
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS days_30,
+
+                SUM(
+                    CASE
+                        WHEN DATEDIFF(
+                            ?,
+                            report_data.arrival_date
+                        ) <= 30
+                        THEN report_data.metric_value
+                        ELSE 0
+                    END
+                ) AS current_stored,
+
+                SUM(
+                    report_data.metric_value
+                ) AS total_stored
+
+            FROM (
+                SELECT
+                    ${clientIdExpr}
+                        AS client_id,
+
+                    ${clientNameExpr}
+                        AS customer_name,
+
+                    warehouse_assign_order.id
+                        AS warehouse_order_id,
+
+                    ${arrivalDateExpr}
+                        AS arrival_date,
+
+                    ${metricFieldExpr}
+                        AS metric_value
+
+                FROM warehouse_assign_order
+
+                LEFT JOIN tbl_orders
+                    ON warehouse_assign_order.order_id =
+                       tbl_orders.id
+
+                LEFT JOIN tbl_freight
+                    ON tbl_freight.id = COALESCE(
+                        NULLIF(
+                            warehouse_assign_order.freight_id,
+                            0
+                        ),
+                        NULLIF(
+                            tbl_orders.freight_id,
+                            0
+                        )
+                    )
+
+                LEFT JOIN tbl_users
+                    ON tbl_users.id =
+                       tbl_orders.client_id
+
+                LEFT JOIN batches
+                    ON batches.id =
+                       warehouse_assign_order.batch_id
+
+                LEFT JOIN (
+                    SELECT
+                        warehouse_order_id,
+
+                        SUM(
+                            IFNULL(dimension, 0)
+                        ) AS wp_total_dimension,
+
+                        SUM(
+                            IFNULL(packages, 0)
+                        ) AS wp_total_packages
+
+                    FROM warehouse_products
+
+                    GROUP BY warehouse_order_id
+                ) wp
+                    ON wp.warehouse_order_id =
+                       warehouse_assign_order.id
+
+                ${trackingJoins}
+
+                ${whereClause}
+            ) report_data
+
+            GROUP BY
+                report_data.client_id,
+                report_data.customer_name
+
+            ORDER BY
+                report_data.customer_name ASC,
+                report_data.client_id ASC
+        `;
+
+        /*
+         * Date placeholders:
+         *
+         * days_120   = 1
+         * days_90    = 2
+         * days_60    = 2
+         * days_30    = 2
+         * current    = 1
+         *
+         * Total = 8
+         */
+        const params = [
+            formattedRunDate,
+
+            formattedRunDate,
+            formattedRunDate,
+
+            formattedRunDate,
+            formattedRunDate,
+
+            formattedRunDate,
+            formattedRunDate,
+
+            formattedRunDate,
+
+            ...queryParams,
+        ];
+
+        // =========================================================
+        // EXECUTE
+        // =========================================================
+
+        con.query(sql, params, (err, rows) => {
+            if (err) {
+                console.error(
+                    "Warehouse Days Outstanding Report Error:",
+                    err
+                );
+
+                return res.status(500).json({
+                    success: false,
+                    message: err.message,
+                });
+            }
+
+            const data = [];
+
+            const totals = {
+                days_120: 0,
+                days_90: 0,
+                days_60: 0,
+                days_30: 0,
+                current: 0,
+                total_stored: 0,
+                total_orders: 0,
+            };
+
+            const isExcludeZero =
+                exclude_zero === true ||
+                exclude_zero === "true" ||
+                exclude_zero === 1 ||
+                exclude_zero === "1";
+
+            rows.forEach((row) => {
+                const totalStored = Number(
+                    row.total_stored || 0
+                );
+
+                if (
+                    isExcludeZero &&
+                    totalStored === 0
+                ) {
+                    return;
+                }
+
+                const customerRecord = {
+                    client_id:
+                        row.client_id !== null
+                            ? Number(row.client_id)
+                            : null,
+
+                    customer_name:
+                        row.customer_name ||
+                        "Unknown Customer",
+
+                    total_orders: Number(
+                        row.total_orders_instore || 0
+                    ),
+
+                    days_120: Number(
+                        Number(row.days_120 || 0).toFixed(2)
+                    ),
+
+                    days_90: Number(
+                        Number(row.days_90 || 0).toFixed(2)
+                    ),
+
+                    days_60: Number(
+                        Number(row.days_60 || 0).toFixed(2)
+                    ),
+
+                    days_30: Number(
+                        Number(row.days_30 || 0).toFixed(2)
+                    ),
+
+                    current: Number(
+                        Number(row.current_stored || 0).toFixed(2)
+                    ),
+
+                    total_stored: Number(
+                        totalStored.toFixed(2)
+                    ),
+                };
+
+                totals.days_120 +=
+                    customerRecord.days_120;
+
+                totals.days_90 +=
+                    customerRecord.days_90;
+
+                totals.days_60 +=
+                    customerRecord.days_60;
+
+                totals.days_30 +=
+                    customerRecord.days_30;
+
+                totals.current +=
+                    customerRecord.current;
+
+                totals.total_stored +=
+                    customerRecord.total_stored;
+
+                totals.total_orders +=
+                    customerRecord.total_orders;
+
+                data.push(customerRecord);
+            });
+
+            Object.keys(totals).forEach((key) => {
+                totals[key] = Number(
+                    totals[key].toFixed(2)
+                );
+            });
+
+            return res.status(200).json({
+                success: true,
+
+                filters: {
+                    run_at_date,
+                    normalized_run_at_date:
+                        formattedRunDate,
+
+                    customer_from:
+                        customer_from || "All",
+
+                    customer_to:
+                        customer_to || "All",
+
+                    metric,
+
+                    warehouse_id:
+                        warehouse_id || "All",
+
+                    origin:
+                        origin || "All",
+
+                    destination:
+                        destination || "All",
+                },
+
+                data,
+
+                totals,
+            });
+        });
+    } catch (error) {
+        console.error(
+            "Warehouse Days Outstanding Report Exception:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message,
+        });
+    }
+};
+
+// const getSupplierInvoicesReport = async (req, res) => {
+
+//     try {
+
+//         const {
+
+//             start_date,
+//             end_date,
+//             supplier_from,
+//             supplier_to,
+//             status = "Both",
+//             style = "summary",
+//             exclude_zero_balance = false,
+//             use_foreign_currency = true
+
+//         } = req.body;
+
+//         // if (!start_date || !end_date) {
+
+//         //     return res.status(400).json({
+//         //         success: false,
+//         //         message: "start_date and end_date are required."
+//         //     });
+
+//         // }
+
+//         let where = `
+//         WHERE 1 = 1
+//         `;
+
+//         const queryParams = [];
+
+//         if (start_date && end_date) {
+
+//             where += `
+//             AND DATE(ssi.quote_date) BETWEEN ? AND ?
+//           `;
+
+//             queryParams.push(
+//                 start_date,
+//                 end_date
+//             );
+
+//         } else if (start_date) {
+
+//             where += `
+//             AND DATE(ssi.quote_date) >= ?
+//             `;
+
+//             queryParams.push(start_date);
+
+//         } else if (end_date) {
+
+//             where += `
+//             AND DATE(ssi.quote_date) <= ?
+//             `;
+
+//             queryParams.push(end_date);
+
+//         }
+
+//         // Supplier Filter
+
+//         if (supplier_from) {
+
+//             where += `
+//             AND UPPER(sp.name) >= UPPER(?)
+//             `;
+
+//             queryParams.push(supplier_from);
+
+//         }
+
+//         if (supplier_to) {
+
+//             where += `
+//             AND UPPER(sp.name) <= UPPER(?)
+//             `;
+
+//             queryParams.push(supplier_to);
+
+//         }
+
+//         // Status Filter
+
+//         if (status === "Active") {
+
+//             where += ` AND sp.is_deleted = 0 `;
+
+//         }
+//         else if (status === "Inactive") {
+
+//             where += ` AND sp.is_deleted = 1 `;
+
+//         }
+
+//         const sql = `
+
+//             SELECT
+
+//                 ssi.id,
+
+//                 DATE_FORMAT(ssi.quote_date,'%Y-%m-%d') AS invoice_date,
+
+//                 ssi.reference_no,
+
+//                 ssi.customer_invoice_no,
+
+//                 sp.name AS supplier_name,
+
+//                 DATE_FORMAT(ssi.due_date,'%Y-%m-%d') AS due_date,
+
+//                 0 AS anticipated_payment,
+
+//                 ssi.sumof_finalamount AS exclusive,
+
+//                 (
+//                     ssi.sumof_vatincl
+//                     - ssi.sumof_finalamount
+//                 ) AS vat,
+
+//                 ssi.sumof_vatincl AS total_purchase,
+
+//                 ssi.sumof_vatincl AS total_outstanding,
+
+//                 ssi.invoice_for_country,
+
+//                 ssi.final_base_currency
+
+//             FROM supplier_shipment_invoice ssi
+
+//             INNER JOIN tbl_suppliers sp
+//                 ON sp.id = ssi.supplier_id
+
+//             LEFT JOIN tbl_shipments ts
+//                 ON ts.id = ssi.shipment_id
+
+//             ${where}
+
+//             ORDER BY
+//                 ssi.quote_date ASC,
+//                 ssi.reference_no ASC
+
+//         `;
+
+//         con.query(sql, queryParams, (err, rows) => {
+
+//             if (err) {
+
+//                 return res.status(500).json({
+
+//                     success: false,
+//                     message: err.message
+
+//                 });
+
+//             }
+
+//             let data = [];
+
+//             let grandExclusive = 0;
+//             let grandVat = 0;
+//             let grandPurchase = 0;
+//             let grandOutstanding = 0;
+
+//             rows.forEach(row => {
+
+//                 const invoice = {
+
+//                     id: row.id,
+
+//                     date: row.invoice_date,
+
+//                     document_no: row.reference_no,
+
+//                     supplier_invoice_no: row.customer_invoice_no,
+
+//                     supplier: row.supplier_name,
+
+//                     due_date: row.due_date,
+
+//                     anticipated_payment: Number(row.anticipated_payment || 0),
+
+//                     currency: row.final_base_currency,
+
+//                     invoice_for_country: row.invoice_for_country,
+
+//                     exclusive: Number(row.exclusive || 0),
+
+//                     vat: Number(row.vat || 0),
+
+//                     total_purchase: Number(row.total_purchase || 0),
+
+//                     total_outstanding: Number(row.total_outstanding || 0)
+
+//                 };
+
+//                 if (
+//                     exclude_zero_balance &&
+//                     invoice.total_outstanding === 0
+//                 ) {
+//                     return;
+//                 }
+
+//                 grandExclusive += invoice.exclusive;
+//                 grandVat += invoice.vat;
+//                 grandPurchase += invoice.total_purchase;
+//                 grandOutstanding += invoice.total_outstanding;
+
+//                 data.push(invoice);
+
+//             });
+
+//             return res.status(200).json({
+
+//                 success: true,
+
+//                 filters: {
+
+//                     start_date: start_date || null,
+//                     end_date: end_date || null,
+
+//                     supplier_from: supplier_from || "All",
+//                     supplier_to: supplier_to || "All",
+
+//                     status,
+//                     style,
+//                     exclude_zero_balance,
+//                     use_foreign_currency
+
+//                 },
+
+//                 data,
+
+//                 grand_total: {
+
+//                     exclusive: Number(grandExclusive.toFixed(2)),
+//                     vat: Number(grandVat.toFixed(2)),
+//                     total_purchase: Number(grandPurchase.toFixed(2)),
+//                     total_outstanding: Number(grandOutstanding.toFixed(2))
+
+//                 }
+
+//             });
+
+//         });
+
+//     }
+//     catch (error) {
+
+//         return res.status(500).json({
+
+//             success: false,
+//             message: "An unexpected error occurred.",
+//             error: error.message
+
+//         });
+
+//     }
+
+// };
+
 
 const getSupplierInvoicesReport = async (req, res) => {
 
@@ -32299,8 +36485,13 @@ const getSupplierInvoicesReport = async (req, res) => {
 
             start_date,
             end_date,
+
             supplier_from,
             supplier_to,
+
+            category_from,
+            category_to,
+
             status = "Both",
             style = "summary",
             exclude_zero_balance = false,
@@ -32308,84 +36499,166 @@ const getSupplierInvoicesReport = async (req, res) => {
 
         } = req.body;
 
-        // if (!start_date || !end_date) {
 
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: "start_date and end_date are required."
-        //     });
-
-        // }
+        // --------------------------------------------------
+        // Base WHERE
+        // --------------------------------------------------
 
         let where = `
-        WHERE 1 = 1
+            WHERE 1 = 1
         `;
 
         const queryParams = [];
 
+
+        // --------------------------------------------------
+        // Date Filter
+        // --------------------------------------------------
+
         if (start_date && end_date) {
 
             where += `
-            AND DATE(ssi.quote_date) BETWEEN ? AND ?
-          `;
+                AND DATE(ssi.quote_date) BETWEEN ? AND ?
+            `;
 
             queryParams.push(
                 start_date,
                 end_date
             );
 
-        } else if (start_date) {
+        }
+        else if (start_date) {
 
             where += `
-            AND DATE(ssi.quote_date) >= ?
+                AND DATE(ssi.quote_date) >= ?
             `;
 
             queryParams.push(start_date);
 
-        } else if (end_date) {
+        }
+        else if (end_date) {
 
             where += `
-            AND DATE(ssi.quote_date) <= ?
+                AND DATE(ssi.quote_date) <= ?
             `;
 
             queryParams.push(end_date);
 
         }
 
+
+        // --------------------------------------------------
         // Supplier Filter
+        // --------------------------------------------------
 
-        if (supplier_from) {
+        if (supplier_from && supplier_to) {
 
             where += `
-            AND UPPER(sp.name) >= UPPER(?)
+                AND (
+                    sp.id = ?
+                    OR sp.id = ?
+                )
             `;
 
-            queryParams.push(supplier_from);
+            queryParams.push(
+                supplier_from,
+                supplier_to
+            );
+
+        }
+        else if (supplier_from) {
+
+            where += `
+                AND sp.id = ?
+            `;
+
+            queryParams.push(
+                supplier_from
+            );
+
+        }
+        else if (supplier_to) {
+
+            where += `
+                AND sp.id = ?
+            `;
+
+            queryParams.push(
+                supplier_to
+            );
 
         }
 
-        if (supplier_to) {
+
+        // --------------------------------------------------
+        // Category / Country Filter
+        // invoice_for_country
+        // --------------------------------------------------
+
+        if (category_from && category_to) {
 
             where += `
-            AND UPPER(sp.name) <= UPPER(?)
+                AND (
+                    ssi.invoice_for_country = ?
+                    OR ssi.invoice_for_country = ?
+                )
             `;
 
-            queryParams.push(supplier_to);
+            queryParams.push(
+                category_from,
+                category_to
+            );
+
+        }
+        else if (category_from) {
+
+            where += `
+                AND ssi.invoice_for_country = ?
+            `;
+
+            queryParams.push(
+                category_from
+            );
+
+        }
+        else if (category_to) {
+
+            where += `
+                AND ssi.invoice_for_country = ?
+            `;
+
+            queryParams.push(
+                category_to
+            );
 
         }
 
+
+        // --------------------------------------------------
         // Status Filter
+        // --------------------------------------------------
 
         if (status === "Active") {
 
-            where += ` AND sp.is_deleted = 0 `;
+            where += `
+                AND sp.is_deleted = 0
+            `;
 
         }
         else if (status === "Inactive") {
 
-            where += ` AND sp.is_deleted = 1 `;
+            where += `
+                AND sp.is_deleted = 1
+            `;
 
         }
+        // status === "Both"
+        // No is_deleted filter
+
+
+        // --------------------------------------------------
+        // SQL Query
+        // --------------------------------------------------
 
         const sql = `
 
@@ -32393,7 +36666,10 @@ const getSupplierInvoicesReport = async (req, res) => {
 
                 ssi.id,
 
-                DATE_FORMAT(ssi.quote_date,'%Y-%m-%d') AS invoice_date,
+                DATE_FORMAT(
+                    ssi.quote_date,
+                    '%Y-%m-%d'
+                ) AS invoice_date,
 
                 ssi.reference_no,
 
@@ -32401,7 +36677,10 @@ const getSupplierInvoicesReport = async (req, res) => {
 
                 sp.name AS supplier_name,
 
-                DATE_FORMAT(ssi.due_date,'%Y-%m-%d') AS due_date,
+                DATE_FORMAT(
+                    ssi.due_date,
+                    '%Y-%m-%d'
+                ) AS due_date,
 
                 0 AS anticipated_payment,
 
@@ -32415,6 +36694,8 @@ const getSupplierInvoicesReport = async (req, res) => {
                 ssi.sumof_vatincl AS total_purchase,
 
                 ssi.sumof_vatincl AS total_outstanding,
+
+                ssi.invoice_for_country,
 
                 ssi.final_base_currency
 
@@ -32434,114 +36715,225 @@ const getSupplierInvoicesReport = async (req, res) => {
 
         `;
 
-        con.query(sql, queryParams, (err, rows) => {
 
-            if (err) {
+        // --------------------------------------------------
+        // Execute Query
+        // --------------------------------------------------
 
-                return res.status(500).json({
+        con.query(
+            sql,
+            queryParams,
+            (err, rows) => {
 
-                    success: false,
-                    message: err.message
+                if (err) {
+
+                    console.error(
+                        "getSupplierInvoicesReport SQL Error:",
+                        err
+                    );
+
+                    return res.status(500).json({
+
+                        success: false,
+
+                        message:
+                            err.message
+
+                    });
+
+                }
+
+
+                // --------------------------------------------------
+                // Response Data
+                // --------------------------------------------------
+
+                const data = [];
+
+                let grandExclusive = 0;
+                let grandVat = 0;
+                let grandPurchase = 0;
+                let grandOutstanding = 0;
+
+
+                rows.forEach(row => {
+
+                    const invoice = {
+
+                        id:
+                            row.id,
+
+                        date:
+                            row.invoice_date,
+
+                        document_no:
+                            row.reference_no,
+
+                        supplier_invoice_no:
+                            row.customer_invoice_no,
+
+                        supplier:
+                            row.supplier_name,
+
+                        due_date:
+                            row.due_date,
+
+                        anticipated_payment:
+                            Number(
+                                row.anticipated_payment || 0
+                            ),
+
+                        currency:
+                            row.final_base_currency || null,
+
+                        invoice_for_country:
+                            row.invoice_for_country || null,
+
+                        exclusive:
+                            Number(
+                                row.exclusive || 0
+                            ),
+
+                        vat:
+                            Number(
+                                row.vat || 0
+                            ),
+
+                        total_purchase:
+                            Number(
+                                row.total_purchase || 0
+                            ),
+
+                        total_outstanding:
+                            Number(
+                                row.total_outstanding || 0
+                            )
+
+                    };
+
+
+                    // --------------------------------------------------
+                    // Exclude Zero Balance
+                    // --------------------------------------------------
+
+                    if (
+                        exclude_zero_balance &&
+                        invoice.total_outstanding === 0
+                    ) {
+
+                        return;
+
+                    }
+
+
+                    // --------------------------------------------------
+                    // Grand Totals
+                    // --------------------------------------------------
+
+                    grandExclusive +=
+                        invoice.exclusive;
+
+                    grandVat +=
+                        invoice.vat;
+
+                    grandPurchase +=
+                        invoice.total_purchase;
+
+                    grandOutstanding +=
+                        invoice.total_outstanding;
+
+
+                    data.push(invoice);
+
+                });
+
+
+                // --------------------------------------------------
+                // Response
+                // --------------------------------------------------
+
+                return res.status(200).json({
+
+                    success: true,
+
+                    filters: {
+
+                        start_date:
+                            start_date || null,
+
+                        end_date:
+                            end_date || null,
+
+                        supplier_from:
+                            supplier_from || "All",
+
+                        supplier_to:
+                            supplier_to || "All",
+
+                        category_from:
+                            category_from || "All",
+
+                        category_to:
+                            category_to || "All",
+
+                        status,
+
+                        style,
+
+                        exclude_zero_balance,
+
+                        use_foreign_currency
+
+                    },
+
+                    data,
+
+                    grand_total: {
+
+                        exclusive:
+                            Number(
+                                grandExclusive.toFixed(2)
+                            ),
+
+                        vat:
+                            Number(
+                                grandVat.toFixed(2)
+                            ),
+
+                        total_purchase:
+                            Number(
+                                grandPurchase.toFixed(2)
+                            ),
+
+                        total_outstanding:
+                            Number(
+                                grandOutstanding.toFixed(2)
+                            )
+
+                    }
 
                 });
 
             }
-
-            let data = [];
-
-            let grandExclusive = 0;
-            let grandVat = 0;
-            let grandPurchase = 0;
-            let grandOutstanding = 0;
-
-            rows.forEach(row => {
-
-                const invoice = {
-
-                    id: row.id,
-
-                    date: row.invoice_date,
-
-                    document_no: row.reference_no,
-
-                    supplier_invoice_no: row.customer_invoice_no,
-
-                    supplier: row.supplier_name,
-
-                    due_date: row.due_date,
-
-                    anticipated_payment: Number(row.anticipated_payment || 0),
-
-                    currency: row.final_base_currency,
-
-                    exclusive: Number(row.exclusive || 0),
-
-                    vat: Number(row.vat || 0),
-
-                    total_purchase: Number(row.total_purchase || 0),
-
-                    total_outstanding: Number(row.total_outstanding || 0)
-
-                };
-
-                if (
-                    exclude_zero_balance &&
-                    invoice.total_outstanding === 0
-                ) {
-                    return;
-                }
-
-                grandExclusive += invoice.exclusive;
-                grandVat += invoice.vat;
-                grandPurchase += invoice.total_purchase;
-                grandOutstanding += invoice.total_outstanding;
-
-                data.push(invoice);
-
-            });
-
-            return res.status(200).json({
-
-                success: true,
-
-                filters: {
-
-                    start_date: start_date || null,
-                    end_date: end_date || null,
-
-                    supplier_from: supplier_from || "All",
-                    supplier_to: supplier_to || "All",
-
-                    status,
-                    style,
-                    exclude_zero_balance,
-                    use_foreign_currency
-
-                },
-
-                data,
-
-                grand_total: {
-
-                    exclusive: Number(grandExclusive.toFixed(2)),
-                    vat: Number(grandVat.toFixed(2)),
-                    total_purchase: Number(grandPurchase.toFixed(2)),
-                    total_outstanding: Number(grandOutstanding.toFixed(2))
-
-                }
-
-            });
-
-        });
+        );
 
     }
     catch (error) {
 
+        console.error(
+            "getSupplierInvoicesReport Error:",
+            error
+        );
+
         return res.status(500).json({
 
             success: false,
-            message: "An unexpected error occurred.",
-            error: error.message
+
+            message:
+                "An unexpected error occurred.",
+
+            error:
+                error.message
 
         });
 
@@ -32550,6 +36942,44 @@ const getSupplierInvoicesReport = async (req, res) => {
 };
 
 const getBatchReport = async (req, res) => {
+    const cleanVal = (val, defaultVal = "") => {
+        if (val === null || val === undefined) return defaultVal;
+        const str = String(val).trim();
+        if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
+            return defaultVal;
+        }
+        return str;
+    };
+
+    const cleanDate = (val) => {
+        if (!val) return null;
+        const str = String(val).trim();
+        if (str === '' || str.startsWith('0000-00-00') || str.toLowerCase() === 'null') {
+            return null;
+        }
+        return val;
+    };
+
+    const formatDateDDMMYY = (date) => {
+        if (!date) return "";
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return "";
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = String(d.getFullYear()).slice(-2);
+        return `${day}/${month}/${year}`;
+    };
+
+    const formatDateDDMMYYYY = (date) => {
+        if (!date) return "";
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return "";
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    };
+
     try {
         const { batch_id } = req.params;
 
@@ -32570,7 +37000,7 @@ const getBatchReport = async (req, res) => {
 
         const batchId = Number(batch_id);
 
-        // 2. Get batch + shipment information
+        // 2. Get batch + shipment + countries information
         const batchQuery = `
             SELECT
                 b.id AS batch_id,
@@ -32611,35 +37041,53 @@ const getBatchReport = async (req, res) => {
                 b.type_of_packaging,
                 b.total_boxes,
                 b.volumentric_weight,
+                b.container_no,
                 b.created_at,
 
-                -- Shipment information
-                ts.id AS shipment_id,
-                ts.waybill AS shipment_waybill,
-                ts.freight AS shipment_freight,
-                ts.carrier AS shipment_carrier,
-                ts.vessel AS shipment_vessel,
-                ts.date_of_dispatch,
-                ts.ETD AS shipment_etd,
-                ts.ATD AS shipment_atd,
-                ts.status AS shipment_status,
-                ts.origin_agent,
-                ts.port_of_loading AS shipment_port_of_loading,
-                ts.port_of_discharge AS shipment_port_of_discharge,
-                ts.origin_country_id AS shipment_origin_country_id,
-                ts.des_country_id AS shipment_destination_country_id,
-                ts.destination_agent,
-                ts.load AS shipment_load,
-                ts.release_type,
-                ts.container,
-                ts.seal,
-                ts.document,
-                ts.supplier_invoice_id,
-                ts.supplier_invoice_date
+                -- Countries
+                c_orig.name AS origin_country_name,
+                c_dest.name AS destination_country_name,
+
+                -- Shipment information (prioritize shipment_details, then fallback to waybill)
+                COALESCE(ts_sd.id, ts_wb.id) AS shipment_id,
+                COALESCE(ts_sd.waybill, ts_wb.waybill) AS shipment_waybill,
+                COALESCE(ts_sd.freight, ts_wb.freight) AS shipment_freight,
+                COALESCE(ts_sd.carrier, ts_wb.carrier) AS shipment_carrier,
+                COALESCE(ts_sd.vessel, ts_wb.vessel) AS shipment_vessel,
+                COALESCE(ts_sd.date_of_dispatch, ts_wb.date_of_dispatch) AS date_of_dispatch,
+                COALESCE(ts_sd.ETD, ts_wb.ETD) AS shipment_etd,
+                COALESCE(ts_sd.ATD, ts_wb.ATD) AS shipment_atd,
+                COALESCE(ts_sd.status, ts_wb.status) AS shipment_status,
+                COALESCE(ts_sd.origin_agent, ts_wb.origin_agent) AS origin_agent,
+                COALESCE(ts_sd.port_of_loading, ts_wb.port_of_loading) AS shipment_port_of_loading,
+                COALESCE(ts_sd.port_of_discharge, ts_wb.port_of_discharge) AS shipment_port_of_discharge,
+                COALESCE(ts_sd.origin_country_id, ts_wb.origin_country_id) AS shipment_origin_country_id,
+                COALESCE(ts_sd.des_country_id, ts_wb.des_country_id) AS shipment_destination_country_id,
+                COALESCE(ts_sd.destination_agent, ts_wb.destination_agent) AS destination_agent,
+                COALESCE(ts_sd.load, ts_wb.load) AS shipment_load,
+                COALESCE(ts_sd.release_type, ts_wb.release_type) AS release_type,
+                COALESCE(ts_sd.container, ts_wb.container) AS container,
+                COALESCE(ts_sd.seal, ts_wb.seal) AS seal,
+                COALESCE(ts_sd.document, ts_wb.document) AS document,
+                COALESCE(ts_sd.supplier_invoice_id, ts_wb.supplier_invoice_id) AS supplier_invoice_id,
+                COALESCE(ts_sd.supplier_invoice_date, ts_wb.supplier_invoice_date) AS supplier_invoice_date
+
             FROM batches b
-            LEFT JOIN tbl_shipments ts
-                ON b.waybill COLLATE utf8mb4_general_ci =
-                   ts.waybill COLLATE utf8mb4_general_ci
+            LEFT JOIN countries c_orig ON c_orig.id = b.origin_country_id
+            LEFT JOIN countries c_dest ON c_dest.id = b.detination_country_id
+            LEFT JOIN (
+                SELECT batch_id, MAX(shipment_id) AS shipment_id
+                FROM shipment_details
+                WHERE batch_id IS NOT NULL
+                GROUP BY batch_id
+            ) sd ON sd.batch_id = b.id
+            LEFT JOIN tbl_shipments ts_sd ON ts_sd.id = sd.shipment_id
+            LEFT JOIN tbl_shipments ts_wb ON (
+                sd.shipment_id IS NULL
+                AND b.waybill IS NOT NULL
+                AND b.waybill != ''
+                AND ts_wb.waybill COLLATE utf8mb4_general_ci = b.waybill COLLATE utf8mb4_general_ci
+            )
             WHERE b.id = ?
               AND b.is_deleted = 0
             LIMIT 1
@@ -32650,7 +37098,6 @@ const getBatchReport = async (req, res) => {
                 if (error) {
                     return reject(error);
                 }
-
                 resolve(result);
             });
         });
@@ -32665,15 +37112,16 @@ const getBatchReport = async (req, res) => {
 
         const batch = batchResult[0];
 
-        // 4. Get warehouse / consignment information
-        // Weight / dimension / packages are taken from:
-        // tbl_freight first, then tbl_orders.
-        const warehouseQuery = `
+        // 4. Get consignments - primary source of truth is freight_assig_to_batch (matching Batches list and details)
+        const consignmentsQuery = `
             SELECT
+                fa.id AS freight_assign_id,
+                fa.freight_id AS fa_freight_id,
+                fa.order_id AS fa_order_id,
+                fa.batch_id,
+
+                -- Warehouse assign order info
                 wao.id AS warehouse_assign_order_id,
-                wao.freight_id,
-                wao.order_id,
-                wao.batch_id,
                 wao.warehouse_id,
                 wao.warehouse_number,
                 wao.warehouse_order_id,
@@ -32684,21 +37132,10 @@ const getBatchReport = async (req, res) => {
                 wao.tracking_number,
                 wao.warehouse_status,
                 wao.warehouse_collect,
-                (
-    SELECT ot.created_at
-    FROM order_track ot
-    WHERE ot.order_id = wao.order_id
-      AND ot.batch_id = wao.batch_id
-      AND ot.status = 'Received at Asia Direct warehouse'
-    ORDER BY ot.id DESC
-    LIMIT 1
-) AS date_received,
                 wao.assign_to_batch,
-
                 wao.total_dimension AS warehouse_total_dimension,
                 wao.total_weight AS warehouse_total_weight,
                 wao.total_cbm AS warehouse_total_cbm,
-
                 wao.costs_to_collect,
                 wao.warehouse_cost,
                 wao.warehouse_dispatch,
@@ -32711,8 +37148,8 @@ const getBatchReport = async (req, res) => {
                 wao.warehouse_comment,
                 wao.customer_ref,
                 wao.box_marking,
-                wao.package_type,
-                wao.hazardous,
+                wao.package_type AS wao_package_type,
+                wao.hazardous AS wao_hazardous,
                 wao.total_packeges AS warehouse_total_packages,
                 wao.hazard_description,
                 wao.package_comment,
@@ -32727,253 +37164,387 @@ const getBatchReport = async (req, res) => {
                 wao.handling_required,
                 wao.handling_cost,
                 wao.customer_name,
-                wao.freight,
                 wao.goods_description AS warehouse_goods_description,
 
                 -- Order information
                 o.id AS order_table_id,
+                o.order_number,
                 o.freight_id AS order_freight_id,
                 o.dimensions AS order_dimensions,
                 o.weight AS order_weight,
                 o.cartons AS order_cartons,
                 o.goods_description AS order_goods_description,
+                o.shipper_address AS order_shipper_address,
 
                 -- Freight information
                 f.id AS freight_table_id,
+                f.freight_number,
                 f.dimension AS freight_dimension,
                 f.weight AS freight_weight,
                 f.no_of_packages AS freight_packages,
+                f.package_type AS freight_package_type,
+                f.hazardous AS freight_hazardous,
+                f.commodity AS freight_commodity,
+                f.product_desc AS freight_product_desc,
+                f.nature_of_goods AS freight_nature_of_goods,
+                f.supplier_address AS freight_supplier_address,
 
-                -- Final values
+                -- Date received from shipment_details (order-level and batch-level)
+                (
+                    SELECT sd.created
+                    FROM shipment_details sd
+                    WHERE sd.batch_id = fa.batch_id
+                      AND sd.order_id = fa.order_id
+                    ORDER BY sd.id DESC
+                    LIMIT 1
+                ) AS sd_order_date,
+
+                (
+                    SELECT sd.created
+                    FROM shipment_details sd
+                    WHERE sd.batch_id = fa.batch_id
+                    ORDER BY sd.id DESC
+                    LIMIT 1
+                ) AS sd_batch_date,
+
+                (
+                    SELECT sd.created
+                    FROM shipment_details sd
+                    WHERE sd.order_id = fa.order_id
+                    ORDER BY sd.id DESC
+                    LIMIT 1
+                ) AS sd_order_any_date,
+
+                wao.warehousing_date AS wao_warehousing_date,
+                o.created_at AS order_created_at,
+
+                -- Date received from order_track
+                (
+                    SELECT ot.created_at
+                    FROM order_track ot
+                    WHERE ot.order_id = COALESCE(fa.order_id, o.id)
+                      AND ot.status = 'Received at Asia Direct warehouse'
+                    ORDER BY ot.id DESC
+                    LIMIT 1
+                ) AS track_date_received,
+                wao.date_received AS wao_date_received,
+
+                -- Final values matching NewGetAllBatch logic
                 COALESCE(
                     f.dimension,
                     o.dimensions,
+                    wao.total_dimension,
                     0
                 ) AS final_dimension,
 
                 COALESCE(
                     f.weight,
                     o.weight,
+                    wao.total_weight,
                     0
                 ) AS final_weight,
 
                 COALESCE(
                     f.no_of_packages,
                     o.cartons,
+                    wao.total_packeges,
                     0
                 ) AS final_packages,
 
-                o.goods_description AS final_goods_description
+                COALESCE(
+                    NULLIF(TRIM(f.product_desc), ''),
+                    NULLIF(TRIM(o.goods_description), ''),
+                    NULLIF(TRIM(wao.goods_description), ''),
+                    NULLIF(TRIM(f.nature_of_goods), ''),
+                    NULLIF(TRIM(b.nature_of_good), '')
+                ) AS final_goods_description
 
-            FROM warehouse_assign_order wao
+            FROM freight_assig_to_batch fa
 
             LEFT JOIN tbl_orders o
-                ON o.id = wao.order_id
+                ON o.id = fa.order_id
 
             LEFT JOIN tbl_freight f
-                ON f.id = COALESCE(
-                    wao.freight_id,
-                    o.freight_id
+                ON f.id = COALESCE(fa.freight_id, o.freight_id)
+
+            LEFT JOIN warehouse_assign_order wao
+                ON (
+                    (fa.order_id IS NOT NULL AND wao.order_id = fa.order_id)
+                    OR (fa.order_id IS NULL AND fa.freight_id IS NOT NULL AND wao.freight_id = fa.freight_id)
                 )
 
-            WHERE wao.batch_id = ?
-            ORDER BY wao.id ASC
+            LEFT JOIN batches b
+                ON b.id = fa.batch_id
+
+            WHERE fa.batch_id = ?
+            GROUP BY fa.id
+            ORDER BY fa.id ASC
         `;
 
-        const warehouseResult = await new Promise((resolve, reject) => {
-            con.query(warehouseQuery, [batchId], (error, result) => {
+        let consignmentRows = await new Promise((resolve, reject) => {
+            con.query(consignmentsQuery, [batchId], (error, result) => {
                 if (error) {
                     return reject(error);
                 }
-
-                resolve(result);
+                resolve(result || []);
             });
         });
 
-        // 5. Prepare consignment rows
-        const consignments = warehouseResult.map((row) => {
-            const dimension = row.final_dimension !== null
-                ? Number(row.final_dimension)
-                : 0;
+        // Fallback for legacy batches that might only exist in warehouse_assign_order
+        if (consignmentRows.length === 0) {
+            const fallbackQuery = `
+                SELECT
+                    wao.id AS warehouse_assign_order_id,
+                    wao.freight_id AS fa_freight_id,
+                    wao.order_id AS fa_order_id,
+                    wao.batch_id,
+                    wao.warehouse_id,
+                    wao.warehouse_number,
+                    wao.warehouse_order_id,
+                    wao.supplier_id,
+                    wao.supplier_contact_no,
+                    wao.ware_receipt_no,
+                    wao.express_no,
+                    wao.tracking_number,
+                    wao.warehouse_status,
+                    wao.warehouse_collect,
+                    wao.assign_to_batch,
+                    wao.total_dimension AS warehouse_total_dimension,
+                    wao.total_weight AS warehouse_total_weight,
+                    wao.total_cbm AS warehouse_total_cbm,
+                    wao.costs_to_collect,
+                    wao.warehouse_cost,
+                    wao.warehouse_dispatch,
+                    wao.cost_to_dispatch,
+                    wao.warehousing_date,
+                    wao.courier_waybill_ref,
+                    wao.date_entry_created,
+                    wao.dispatched_date,
+                    wao.days_in_warehouse,
+                    wao.warehouse_comment,
+                    wao.customer_ref,
+                    wao.box_marking,
+                    wao.package_type AS wao_package_type,
+                    wao.hazardous AS wao_hazardous,
+                    wao.total_packeges AS warehouse_total_packages,
+                    wao.hazard_description,
+                    wao.package_comment,
+                    wao.damage_goods,
+                    wao.damaged_pkg_qty,
+                    wao.damage_packed,
+                    wao.damage_comment,
+                    wao.supplier_company,
+                    wao.supplier_person,
+                    wao.supplier_address,
+                    wao.warehouse_storage,
+                    wao.handling_required,
+                    wao.handling_cost,
+                    wao.customer_name,
+                    wao.goods_description AS warehouse_goods_description,
 
-            const weight = row.final_weight !== null
-                ? Number(row.final_weight)
-                : 0;
+                    o.id AS order_table_id,
+                    o.order_number,
+                    o.freight_id AS order_freight_id,
+                    o.dimensions AS order_dimensions,
+                    o.weight AS order_weight,
+                    o.cartons AS order_cartons,
+                    o.goods_description AS order_goods_description,
+                    o.shipper_address AS order_shipper_address,
 
-            const packages = row.final_packages !== null
-                ? Number(row.final_packages)
-                : 0;
+                    f.id AS freight_table_id,
+                    f.freight_number,
+                    f.dimension AS freight_dimension,
+                    f.weight AS freight_weight,
+                    f.no_of_packages AS freight_packages,
+                    f.package_type AS freight_package_type,
+                    f.hazardous AS freight_hazardous,
+                    f.commodity AS freight_commodity,
+                    f.product_desc AS freight_product_desc,
+                    f.nature_of_goods AS freight_nature_of_goods,
+                    f.supplier_address AS freight_supplier_address,
 
-            // First use warehouse CBM, otherwise use final dimension.
-            const volume =
-                row.warehouse_total_cbm !== null &&
-                    row.warehouse_total_cbm !== undefined
-                    ? Number(row.warehouse_total_cbm)
-                    : dimension;
+                    -- Date received from shipment_details (order-level and batch-level)
+                    (
+                        SELECT sd.created
+                        FROM shipment_details sd
+                        WHERE sd.batch_id = wao.batch_id
+                          AND sd.order_id = wao.order_id
+                        ORDER BY sd.id DESC
+                        LIMIT 1
+                    ) AS sd_order_date,
+
+                    (
+                        SELECT sd.created
+                        FROM shipment_details sd
+                        WHERE sd.batch_id = wao.batch_id
+                        ORDER BY sd.id DESC
+                        LIMIT 1
+                    ) AS sd_batch_date,
+
+                    (
+                        SELECT sd.created
+                        FROM shipment_details sd
+                        WHERE sd.order_id = wao.order_id
+                        ORDER BY sd.id DESC
+                        LIMIT 1
+                    ) AS sd_order_any_date,
+
+                    wao.warehousing_date AS wao_warehousing_date,
+                    o.created_at AS order_created_at,
+
+                    (
+                        SELECT ot.created_at
+                        FROM order_track ot
+                        WHERE ot.order_id = wao.order_id
+                          AND ot.status = 'Received at Asia Direct warehouse'
+                        ORDER BY ot.id DESC
+                        LIMIT 1
+                    ) AS track_date_received,
+                    wao.date_received AS wao_date_received,
+
+                    COALESCE(
+                        f.dimension,
+                        o.dimensions,
+                        wao.total_dimension,
+                        0
+                    ) AS final_dimension,
+
+                    COALESCE(
+                        f.weight,
+                        o.weight,
+                        wao.total_weight,
+                        0
+                    ) AS final_weight,
+
+                    COALESCE(
+                        f.no_of_packages,
+                        o.cartons,
+                        wao.total_packeges,
+                        0
+                    ) AS final_packages,
+
+                    COALESCE(
+                        NULLIF(TRIM(f.product_desc), ''),
+                        NULLIF(TRIM(o.goods_description), ''),
+                        NULLIF(TRIM(wao.goods_description), ''),
+                        NULLIF(TRIM(f.nature_of_goods), ''),
+                        NULLIF(TRIM(b.nature_of_good), '')
+                    ) AS final_goods_description
+
+                FROM warehouse_assign_order wao
+                LEFT JOIN tbl_orders o ON o.id = wao.order_id
+                LEFT JOIN tbl_freight f ON f.id = COALESCE(wao.freight_id, o.freight_id)
+                LEFT JOIN batches b ON b.id = wao.batch_id
+                WHERE wao.batch_id = ?
+                ORDER BY wao.id ASC
+            `;
+
+            consignmentRows = await new Promise((resolve, reject) => {
+                con.query(fallbackQuery, [batchId], (error, result) => {
+                    if (error) {
+                        return reject(error);
+                    }
+                    resolve(result || []);
+                });
+            });
+        }
+
+        // 5. Prepare consignment rows matching the CONSIGNMENT INFORMATION table:
+        // MARKS | GOODS DESCRIPTION | Volume | Packages | Warehouse Receipt Ref | Date Received
+        let totalVolume = 0;
+        let totalPackages = 0;
+
+        const consignments = consignmentRows.map((row) => {
+            const dimension = row.final_dimension !== null ? Number(row.final_dimension) : 0;
+            const packages = row.final_packages !== null ? Number(row.final_packages) : 0;
+
+            const volume = (row.warehouse_total_cbm !== null && row.warehouse_total_cbm !== undefined && Number(row.warehouse_total_cbm) > 0)
+                ? Number(row.warehouse_total_cbm)
+                : dimension;
+
+            totalVolume += volume;
+            totalPackages += packages;
+
+            // Date Received priority: shipment_details -> order_track -> warehousing_date -> wao_date_received -> order_created_at -> batch dates
+            const dateReceivedRaw = cleanDate(row.sd_order_date) ||
+                cleanDate(row.sd_batch_date) ||
+                cleanDate(row.sd_order_any_date) ||
+                cleanDate(row.track_date_received) ||
+                cleanDate(row.wao_warehousing_date) ||
+                cleanDate(row.wao_date_received) ||
+                cleanDate(row.order_created_at) ||
+                cleanDate(batch.date_first_received) ||
+                cleanDate(batch.date_start) || null;
+
+            const dateReceivedStr = formatDateDDMMYY(dateReceivedRaw) || "";
+
+            // MARKS column: In the batch report, display the batch's order ID (e.g. 1063, 1052, 1118)
+            const orderIdVal = row.fa_order_id || row.order_table_id || "";
+            const marksVal = orderIdVal ? String(orderIdVal) : (cleanVal(row.box_marking) || cleanVal(row.freight_number) || cleanVal(row.freight_commodity) || "");
+
+            // Warehouse Receipt Ref: e.g. JWT0263... / ware_receipt_no / tracking / warehouse_order_id
+            const receiptRef = cleanVal(row.ware_receipt_no) || cleanVal(row.tracking_number) || cleanVal(row.warehouse_order_id) || cleanVal(row.express_no) || cleanVal(row.customer_ref);
+
+            const goodsDesc = cleanVal(row.final_goods_description);
 
             return {
-                warehouse_assign_order_id: row.warehouse_assign_order_id,
-
-                freight_id:
-                    row.freight_id ||
-                    row.order_freight_id ||
-                    row.freight_table_id,
-
-                order_id: row.order_id,
-                warehouse_id: row.warehouse_id,
-                warehouse_number: row.warehouse_number,
-                warehouse_order_id: row.warehouse_order_id,
-                warehouse_receipt_reference: row.ware_receipt_no,
-                express_number: row.express_no,
-                tracking_number: row.tracking_number,
-                customer_reference: row.customer_ref,
-                marks: row.box_marking,
-                goods_description: row.final_goods_description || null,
-                package_type: row.package_type,
-                hazardous: row.hazardous,
+                marks: marksVal,
+                goods_description: goodsDesc,
+                volume: Number(volume.toFixed(2)),
                 packages,
-                volume,
-                dimension,
-                weight,
-                date_received: row.date_received,
-                warehouse_status: row.warehouse_status,
-                days_in_warehouse: row.days_in_warehouse,
-                warehouse_storage: row.warehouse_storage,
-                handling_required: row.handling_required,
-                handling_cost: row.handling_cost,
-                damage_goods: row.damage_goods,
-                damaged_package_quantity: row.damaged_pkg_qty,
-                supplier_company: row.supplier_company,
-                supplier_person: row.supplier_person,
-                supplier_address: row.supplier_address
+                warehouse_receipt_ref: receiptRef,
+                date_received: dateReceivedStr,
+                received_at: dateReceivedStr
             };
         });
 
-        // 6. Calculate totals
-        let totalVolume = 0;
-        let totalPackages = 0;
-        let totalWeight = 0;
+        // 6. Routing information table: Mode | B/L Release type | Carrier | Load | Disch. | ETD | ETA
+        const shippingAgent = cleanVal(batch.origin_agent) || cleanVal(batch.batch_agent) || cleanVal(batch.forwarding_agent);
+        const mode = cleanVal(batch.shipment_freight) || cleanVal(batch.batch_freight) || "Sea";
+        const blReleaseType = cleanVal(batch.release_type);
+        const carrier = cleanVal(batch.shipment_carrier) || cleanVal(batch.batch_carrier);
+        const load = cleanVal(batch.shipment_load) || cleanVal(batch.container) || cleanVal(batch.container_no);
+        const disch = cleanVal(batch.shipment_port_of_discharge) || cleanVal(batch.batch_port_discharge) || cleanVal(batch.destination_country_name) || cleanVal(batch.destination);
 
-        warehouseResult.forEach((row) => {
-            const dimension = Number(row.final_dimension) || 0;
-            const weight = Number(row.final_weight) || 0;
-            const packages = Number(row.final_packages) || 0;
+        const rawEtd = cleanDate(batch.shipment_etd) || cleanDate(batch.batch_etd) || null;
+        const rawEta = cleanDate(batch.shipment_atd) || null;
 
-            const volume =
-                row.warehouse_total_cbm !== null &&
-                    row.warehouse_total_cbm !== undefined
-                    ? Number(row.warehouse_total_cbm) || 0
-                    : dimension;
-
-            totalVolume += volume;
-            totalWeight += weight;
-            totalPackages += packages;
-        });
-
-        // 7. Routing information
         const routingInformation = {
-            shipping_agent:
-                batch.origin_agent ||
-                batch.batch_agent ||
-                null,
-
-            freight:
-                batch.shipment_freight ||
-                batch.batch_freight ||
-                null,
-
-            carrier:
-                batch.shipment_carrier ||
-                batch.batch_carrier ||
-                null,
-
-            vessel:
-                batch.shipment_vessel ||
-                batch.batch_vessel ||
-                null,
-
-            load: batch.shipment_load || null,
-
-            port_of_loading:
-                batch.shipment_port_of_loading ||
-                batch.batch_port_loading ||
-                null,
-
-            port_of_discharge:
-                batch.shipment_port_of_discharge ||
-                batch.batch_port_discharge ||
-                null,
-
-            ETD:
-                batch.shipment_etd ||
-                batch.batch_etd ||
-                null,
-
-            ATD: batch.shipment_atd || null,
-            release_type: batch.release_type || null,
-            container: batch.container || null,
-            seal: batch.seal || null,
-
-            status:
-                batch.shipment_status ||
-                batch.track_status ||
-                null,
-
-            origin_agent: batch.origin_agent || null,
-            destination_agent: batch.destination_agent || null,
-
-            waybill:
-                batch.shipment_waybill ||
-                batch.batch_waybill ||
-                null
+            mode,
+            bl_release_type: blReleaseType,
+            carrier,
+            load,
+            disch,
+            etd: formatDateDDMMYYYY(rawEtd) || "",
+            eta: formatDateDDMMYYYY(rawEta) || ""
         };
 
-        // 8. Final response
+        // 7. Totals matching the report summary: Volume | Packages
+        const totals = {
+            volume: Number(totalVolume.toFixed(2)),
+            packages: totalPackages
+        };
+
+        // 8. Company header matching the top of the report
+        const company = {
+            name: "Asia Direct - Africa (Pty) Ltd",
+            address: "Unit 4, Villa Valencia Office Park, 2 Anemoon Ave, Kempton Park, South Africa, 1619",
+            reg_no: "2017 / 667803 / 07",
+            vat_no: "4740280377"
+        };
+
+        // 9. Final response structured strictly for the PDF report
         return res.status(200).json({
             success: true,
             message: "Batch report fetched successfully",
-
             data: {
-                batch: {
-                    batch_id: batch.batch_id,
-                    batch_reference: batch.batch_number,
-                    batch_name: batch.batch_name,
-                    waybill: batch.batch_waybill,
-                    freight: batch.batch_freight,
-                    freight_option: batch.freight_option,
-                    freight_speed: batch.freight_speed,
-                    date_start: batch.date_start,
-                    destination: batch.destination,
-                    agent: batch.batch_agent,
-                    forwarding_agent: batch.forwarding_agent,
-                    carrier: batch.batch_carrier,
-                    vessel: batch.batch_vessel,
-                    track_status: batch.track_status,
-                    dispatched: batch.dispatched,
-                    date_dispatch: batch.date_dispatch,
-                    ETD: batch.batch_etd,
-                    port_loading: batch.batch_port_loading,
-                    port_discharge: batch.batch_port_discharge,
-                    master_waybill: batch.master_waybill,
-                    house_waybill: batch.house_waybill
-                },
-
+                company,
+                title: "AIR / SEA LCL Consolidations",
+                batch_reference: batch.batch_number || "",
+                shipping_agent: shippingAgent,
                 routing_information: routingInformation,
-
                 consignments,
-
-                totals: {
-                    volume: Number(totalVolume.toFixed(3)),
-                    packages: totalPackages,
-                    weight: Number(totalWeight.toFixed(3))
-                },
-
-                summary: {
-                    total_consignments: consignments.length,
-                    total_volume: Number(totalVolume.toFixed(3)),
-                    total_packages: totalPackages,
-                    total_weight: Number(totalWeight.toFixed(3))
-                }
+                totals
             }
         });
     } catch (error) {
@@ -32987,6 +37558,4033 @@ const getBatchReport = async (req, res) => {
     }
 };
 
+const getCurrencySymbol = (currency) => {
+
+    const symbols = {
+        ZAR: "R",
+        USD: "$",
+        EUR: "€",
+        GBP: "£",
+        AUD: "A$",
+        CAD: "C$",
+        NZD: "NZ$",
+        INR: "₹"
+    };
+
+    return symbols[currency] || currency || "";
+};
+
+
+const formatNumber = (amount) => {
+
+    return Number(amount || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+
+};
+
+
+const formatCurrency = (amount, currency) => {
+
+    const symbol = getCurrencySymbol(currency);
+
+    return `${symbol} ${formatNumber(amount)}`;
+
+};
+
+const getCustomerStatementReport = async (req, res) => {
+    try {
+        // ============================================================
+        // HELPERS
+        // ============================================================
+
+        const normalizeFilterValue = (value) => {
+            if (value === undefined || value === null || value === "") {
+                return null;
+            }
+            if (typeof value === "string" && value.trim().toLowerCase() === "all") {
+                return null;
+            }
+            return typeof value === "string" ? value.trim() : value;
+        };
+
+        const createValidDate = (year, month, day) => {
+            const date = new Date(year, month - 1, day);
+            if (
+                date.getFullYear() !== year ||
+                date.getMonth() !== month - 1 ||
+                date.getDate() !== day
+            ) {
+                return null;
+            }
+            return (
+                `${year}-` +
+                `${String(month).padStart(2, "0")}-` +
+                `${String(day).padStart(2, "0")}`
+            );
+        };
+
+        const normalizeDate = (value) => {
+            if (!value) return null;
+
+            if (value instanceof Date && !isNaN(value.getTime())) {
+                return createValidDate(
+                    value.getFullYear(),
+                    value.getMonth() + 1,
+                    value.getDate()
+                );
+            }
+
+            let dateString = String(value).trim();
+            if (!dateString) return null;
+
+            if (dateString.includes("T")) {
+                dateString = dateString.split("T")[0];
+            }
+            if (dateString.includes(" ") && /^\d{4}-\d{1,2}-\d{1,2}/.test(dateString)) {
+                dateString = dateString.split(" ")[0];
+            }
+
+            let match;
+            // YYYY-MM-DD
+            match = dateString.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+            if (match) {
+                return createValidDate(Number(match[1]), Number(match[2]), Number(match[3]));
+            }
+
+            // DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+            match = dateString.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{4})$/);
+            if (match) {
+                return createValidDate(Number(match[3]), Number(match[2]), Number(match[1]));
+            }
+
+            const parsed = new Date(dateString);
+            if (!isNaN(parsed.getTime())) {
+                return createValidDate(
+                    parsed.getFullYear(),
+                    parsed.getMonth() + 1,
+                    parsed.getDate()
+                );
+            }
+
+            return null;
+        };
+
+        const formatDateDDMMYYYY = (value) => {
+            if (!value) return "";
+            const norm = normalizeDate(value);
+            if (!norm) return String(value);
+            const [y, m, d] = norm.split("-");
+            return `${d}/${m}/${y}`;
+        };
+
+        const formatDateOnly = (value) => {
+            if (!value) return null;
+            return normalizeDate(value);
+        };
+
+        const safeNumber = (value) => {
+            const number = Number(value || 0);
+            return Number.isFinite(number) ? number : 0;
+        };
+
+        const getCurrencySymbol = (currency) => {
+            if (!currency) return "R";
+            const upper = String(currency).toUpperCase().trim();
+            const symbols = {
+                ZAR: "R",
+                RAND: "R",
+                R: "R",
+                USD: "$",
+                EUR: "€",
+                GBP: "£",
+                AUD: "A$",
+                CAD: "C$",
+                NZD: "NZ$",
+                INR: "₹"
+            };
+            return symbols[upper] || upper || "R";
+        };
+
+        const formatNumber = (amount) => {
+            return Number(amount || 0).toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        };
+
+        const formatCurrency = (amount, currency) => {
+            const symbol = getCurrencySymbol(currency);
+            return `${symbol} ${formatNumber(amount)}`;
+        };
+
+        const queryAsync = (sql, params = []) => {
+            return new Promise((resolve, reject) => {
+                con.query(sql, params, (error, rows) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+                    resolve(rows);
+                });
+            });
+        };
+
+        // ============================================================
+        // REQUEST PARAMETERS & FILTERS
+        // ============================================================
+
+        const {
+            customer_from: rawCustomerFrom,
+            customer_to: rawCustomerTo,
+            active = "Both",
+            category_from: rawCategoryFrom,
+            category_to: rawCategoryTo,
+            date_from,
+            date_to,
+            statement_date,
+            show_balance_brought_forward = true,
+            exclude_fully_allocated_invoices = false,
+            show_detail = false,
+            use_foreign_currency = true,
+            exclude_zero_balance = false,
+            exclude_negative_balance = false,
+            exclude_less_than = false,
+            less_than_amount = 0
+        } = req.body;
+
+        const customer_from = normalizeFilterValue(rawCustomerFrom);
+        const customer_to = normalizeFilterValue(rawCustomerTo);
+        const category_from = normalizeFilterValue(rawCategoryFrom);
+        const category_to = normalizeFilterValue(rawCategoryTo);
+
+        const normalizedDateFrom = normalizeDate(date_from);
+        const normalizedDateTo = normalizeDate(date_to);
+        const normalizedStatementDate = statement_date
+            ? normalizeDate(statement_date)
+            : normalizedDateTo;
+
+        if (!normalizedDateFrom || !normalizedDateTo) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date_from or date_to."
+            });
+        }
+
+        if (statement_date && !normalizedStatementDate) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid statement_date."
+            });
+        }
+
+        if (normalizedDateFrom > normalizedDateTo) {
+            return res.status(400).json({
+                success: false,
+                message: "date_from cannot be greater than date_to."
+            });
+        }
+
+        const reportDate = normalizedStatementDate;
+
+        // ============================================================
+        // 1. COMPANY DETAILS (FROM SECTION)
+        // ============================================================
+
+        const companyRows = await queryAsync(`
+            SELECT
+                id,
+                company_name,
+                address_line,
+                city,
+                state_region,
+                country,
+                postal_code,
+                email,
+                telephone,
+                company_registration_no,
+                tax_vat_no
+            FROM company_addresses
+            WHERE is_deleted = 0
+            ORDER BY id ASC
+        `);
+
+        const getCompanyDetailsForCustomer = (customerCountry) => {
+            let comp = null;
+            if (customerCountry) {
+                comp = companyRows.find(
+                    c => c.country && c.country.toLowerCase().trim() === String(customerCountry).toLowerCase().trim()
+                );
+            }
+            if (!comp) {
+                comp = companyRows.find(
+                    c => c.country && c.country.toLowerCase().includes("south africa")
+                ) || companyRows[0] || {};
+            }
+
+            const addressParts = (comp.address_line || "")
+                .split(",")
+                .map(p => p.trim())
+                .filter(Boolean);
+
+            if (comp.country && !addressParts.includes(comp.country)) {
+                addressParts.push(comp.country);
+            }
+            if (comp.postal_code && !addressParts.includes(comp.postal_code)) {
+                addressParts.push(comp.postal_code);
+            }
+
+            return {
+                company_id: comp.id || 1,
+                company_name: "ASIA DIRECT AFRICA",
+                registered_name: comp.company_name || "Asia Direct - Africa (Pty) Ltd",
+                vat_no: comp.tax_vat_no || "4740280377",
+                company_registration_no: comp.company_registration_no || "",
+                telephone: comp.telephone || "",
+                email: comp.email || "",
+                postal_address: addressParts.join("\n"),
+                postal_address_lines: addressParts,
+                physical_address: addressParts.join("\n"),
+                physical_address_lines: addressParts
+            };
+        };
+
+        // ============================================================
+        // 2. CUSTOMER QUERY (DEDUPLICATED BY CUSTOMER NAME)
+        // ============================================================
+
+        let customerWhere = `
+            WHERE
+                u.user_type = '3'
+                AND u.is_deleted = 0
+                AND TRIM(COALESCE(u.full_name, '')) <> ''
+        `;
+        const customerParams = [];
+
+        // Active filter
+        const normalizedActive = String(active || "Both").toLowerCase();
+        if (normalizedActive === "active") {
+            customerWhere += ` AND u.status = 1`;
+        } else if (normalizedActive === "inactive") {
+            customerWhere += ` AND u.status = 0`;
+        }
+
+        // Category filter
+        const categoryExpr = `COALESCE(c.name, u.access_country, u.country_code, '')`;
+        if (category_from && category_to) {
+            if (category_from.toLowerCase().trim() === category_to.toLowerCase().trim()) {
+                customerWhere += ` AND LOWER(TRIM(${categoryExpr})) = LOWER(TRIM(?))`;
+                customerParams.push(category_from);
+            } else {
+                customerWhere += ` AND LOWER(TRIM(${categoryExpr})) >= LOWER(TRIM(?)) AND LOWER(TRIM(${categoryExpr})) <= LOWER(TRIM(?))`;
+                customerParams.push(category_from, category_to);
+            }
+        } else if (category_from) {
+            customerWhere += ` AND LOWER(TRIM(${categoryExpr})) >= LOWER(TRIM(?))`;
+            customerParams.push(category_from);
+        } else if (category_to) {
+            customerWhere += ` AND LOWER(TRIM(${categoryExpr})) <= LOWER(TRIM(?))`;
+            customerParams.push(category_to);
+        }
+
+        // Customer filter
+        const isSingleCustomerFilter = customer_from && customer_to && (customer_from.toLowerCase().trim() === customer_to.toLowerCase().trim());
+
+        if (isSingleCustomerFilter) {
+            customerWhere += `
+                AND (
+                    LOWER(TRIM(u.full_name)) = LOWER(TRIM(?))
+                    OR REPLACE(LOWER(u.full_name), ' ', '') = REPLACE(LOWER(?), ' ', '')
+                    OR REPLACE(LOWER(u.full_name), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(?), ' ', ''), '%')
+                    OR REPLACE(LOWER(?), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(u.full_name), ' ', ''), '%')
+                    OR REPLACE(LOWER(COALESCE(u.client_ref, '')), ' ', '') = REPLACE(LOWER(?), ' ', '')
+                )
+            `;
+            customerParams.push(
+                customer_from,
+                customer_from,
+                customer_from,
+                customer_from,
+                customer_from
+            );
+        } else if (customer_from && customer_to) {
+            customerWhere += `
+                AND u.full_name >= ?
+                AND u.full_name <= ?
+            `;
+            customerParams.push(customer_from, customer_to);
+        } else if (customer_from) {
+            customerWhere += ` AND u.full_name >= ?`;
+            customerParams.push(customer_from);
+        } else if (customer_to) {
+            customerWhere += ` AND u.full_name <= ?`;
+            customerParams.push(customer_to);
+        }
+
+        // Only check active transaction existence when running broad reports ("All")
+        // to avoid loading thousands of empty registrations while ensuring sub-second response
+        if (!isSingleCustomerFilter) {
+            customerWhere += `
+                AND (
+                    EXISTS (SELECT 1 FROM quote_invoice qi WHERE qi.client_id = u.id AND qi.is_deleted = 0)
+                    OR EXISTS (SELECT 1 FROM tbl_cashbook cb WHERE cb.customer_id = u.id)
+                )
+            `;
+        }
+
+        // GROUP BY TRIM(LOWER(u.full_name)) completely prevents duplicate customer records
+        const customerSql = `
+            SELECT
+                MIN(u.id) AS customer_id,
+                GROUP_CONCAT(DISTINCT u.id) AS all_customer_ids,
+                TRIM(u.full_name) AS customer_name,
+                COALESCE(MAX(c.name), MAX(u.access_country), MAX(u.country_code)) AS category,
+                MAX(u.country_code) AS country_code,
+                MAX(u.tax_ref) AS tax_ref,
+                MAX(u.address_1) AS address_1,
+                MAX(u.address_2) AS address_2,
+                MAX(u.city) AS city,
+                MAX(u.province) AS province,
+                MAX(u.country) AS country,
+                MAX(c.name) AS country_name,
+                MAX(u.code) AS postal_code,
+                MAX(u.status) AS status
+            FROM tbl_users u
+            LEFT JOIN countries c ON c.id = u.country
+            ${customerWhere}
+            GROUP BY TRIM(LOWER(u.full_name))
+            ORDER BY TRIM(u.full_name) ASC
+        `;
+
+        const customers = await queryAsync(customerSql, customerParams);
+
+        if (customers.length === 0) {
+            const primaryCompany = companyRows[0] ? getCompanyDetailsForCustomer(null) : {
+                company_name: "ASIA DIRECT AFRICA",
+                vat_no: "4740280377"
+            };
+            return res.status(200).json({
+                success: true,
+                statement: {
+                    title: "STATEMENT",
+                    date: formatDateDDMMYYYY(reportDate),
+                    statement_date: reportDate,
+                    page: "1/1"
+                },
+                company: primaryCompany,
+                filters: {
+                    customer_from: customer_from || "All",
+                    customer_to: customer_to || "All",
+                    active,
+                    category_from: category_from || "All",
+                    category_to: category_to || "All",
+                    date_from: normalizedDateFrom,
+                    date_from_formatted: formatDateDDMMYYYY(normalizedDateFrom),
+                    date_to: normalizedDateTo,
+                    date_to_formatted: formatDateDDMMYYYY(normalizedDateTo),
+                    statement_date: reportDate,
+                    statement_date_formatted: formatDateDDMMYYYY(reportDate),
+                    show_balance_brought_forward: Boolean(show_balance_brought_forward),
+                    exclude_fully_allocated_invoices: Boolean(exclude_fully_allocated_invoices),
+                    show_detail: Boolean(show_detail),
+                    use_foreign_currency: Boolean(use_foreign_currency),
+                    exclude_zero_balance: Boolean(exclude_zero_balance),
+                    exclude_negative_balance: Boolean(exclude_negative_balance),
+                    exclude_less_than: Boolean(exclude_less_than),
+                    less_than_amount: safeNumber(less_than_amount)
+                },
+                customers: [],
+                data: [],
+                totals: {
+                    debit: 0,
+                    credit: 0,
+                    cash_receipts: 0,
+                    amount_due: 0,
+                    amount_paid: 0,
+                    days_120_plus: 0,
+                    days_90: 0,
+                    days_60: 0,
+                    days_30: 0,
+                    current: 0,
+                    debit_display: "R 0.00",
+                    credit_display: "R 0.00",
+                    amount_due_display: "R 0.00",
+                    amount_paid_display: "R 0.00",
+                    days_120_plus_display: "R 0.00",
+                    days_90_display: "R 0.00",
+                    days_60_display: "R 0.00",
+                    days_30_display: "R 0.00",
+                    current_display: "R 0.00"
+                }
+            });
+        }
+
+        // ============================================================
+        // 3. HIGH-PERFORMANCE BATCH QUERIES (RUN IN PARALLEL)
+        // Eliminates the N+1 query problem that caused 504 timeouts!
+        // ============================================================
+
+        const [allInvoices, allSageInvoices, allCashbook] = await Promise.all([
+            // 3a. Batch quote_invoice
+            queryAsync(`
+                SELECT
+                    qi.id,
+                    qi.client_id,
+                    qi.client_name,
+                    qi.reference_no,
+                    qi.customer_invoice_no,
+                    DATE_FORMAT(qi.quote_date, '%Y-%m-%d') AS quote_date,
+                    DATE_FORMAT(qi.due_date, '%Y-%m-%d') AS due_date,
+                    qi.sumof_vatincl,
+                    qi.final_base_currency,
+                    qi.status,
+                    qi.is_deleted,
+                    qi.order_id,
+                    qi.balance
+                FROM quote_invoice qi
+                WHERE qi.is_deleted = 0
+                  AND LOWER(COALESCE(qi.status, '')) <> 'cancelled'
+                  AND DATE(qi.quote_date) <= ?
+                ORDER BY qi.quote_date ASC, qi.id ASC
+            `, [reportDate]),
+
+            // 3b. Batch sage_invoice_list
+            queryAsync(`
+                SELECT
+                    si.id,
+                    si.customer_name,
+                    si.document_number,
+                    si.customer_ref,
+                    DATE_FORMAT(si.date, '%Y-%m-%d') AS date,
+                    si.total,
+                    si.invoice_region
+                FROM sage_invoice_list si
+                WHERE DATE(si.date) <= ?
+                ORDER BY si.date ASC, si.id ASC
+            `, [reportDate]).catch(() => []),
+
+            // 3c. Batch tbl_cashbook
+            queryAsync(`
+                SELECT
+                    cb.id,
+                    DATE_FORMAT(cb.date, '%Y-%m-%d') AS date,
+                    cb.bank_ref,
+                    cb.description_on_receipt,
+                    cb.receipt,
+                    cb.payment,
+                    cb.customer_id,
+                    cb.supplier_id,
+                    cb.supplier_invoice_id,
+                    cb.order_id,
+                    cb.allocated,
+                    cb.allocation_type,
+                    cb.created_at
+                FROM tbl_cashbook cb
+                WHERE DATE(cb.date) <= ?
+                  AND (
+                      cb.allocation_type = 'Customer'
+                      OR cb.allocation_type IS NULL
+                      OR cb.allocation_type = ''
+                  )
+                ORDER BY cb.date ASC, cb.id ASC
+            `, [reportDate])
+        ]);
+
+        // Map order_id -> invoice to resolve linked invoice data in 0ms (no SQL subqueries!)
+        const invoiceByOrderId = new Map();
+        for (const inv of allInvoices) {
+            if (inv.order_id && !invoiceByOrderId.has(inv.order_id)) {
+                invoiceByOrderId.set(inv.order_id, inv);
+            }
+        }
+
+        // ============================================================
+        // 4. FAST IN-MEMORY INDEXING
+        // ============================================================
+
+        const invoicesByClientId = new Map();
+        const invoicesByCleanName = new Map();
+        const invoicesByStrippedName = new Map();
+
+        for (const inv of allInvoices) {
+            if (inv.client_id) {
+                if (!invoicesByClientId.has(inv.client_id)) invoicesByClientId.set(inv.client_id, []);
+                invoicesByClientId.get(inv.client_id).push(inv);
+            }
+            if (inv.client_name) {
+                const cn = inv.client_name.trim().toLowerCase();
+                const sn = cn.replace(/\s+/g, '');
+                if (!invoicesByCleanName.has(cn)) invoicesByCleanName.set(cn, []);
+                invoicesByCleanName.get(cn).push(inv);
+                if (!invoicesByStrippedName.has(sn)) invoicesByStrippedName.set(sn, []);
+                invoicesByStrippedName.get(sn).push(inv);
+            }
+        }
+
+        const sageByCleanName = new Map();
+        const sageByStrippedName = new Map();
+        for (const sage of allSageInvoices) {
+            if (sage.customer_name) {
+                const cn = sage.customer_name.trim().toLowerCase();
+                const sn = cn.replace(/\s+/g, '');
+                if (!sageByCleanName.has(cn)) sageByCleanName.set(cn, []);
+                sageByCleanName.get(cn).push(sage);
+                if (!sageByStrippedName.has(sn)) sageByStrippedName.set(sn, []);
+                sageByStrippedName.get(sn).push(sage);
+            }
+        }
+
+        const cashbookByCustomerId = new Map();
+        const cashbookByCleanDesc = new Map();
+        const cashbookByStrippedDesc = new Map();
+        for (const cb of allCashbook) {
+            if (cb.customer_id) {
+                if (!cashbookByCustomerId.has(cb.customer_id)) cashbookByCustomerId.set(cb.customer_id, []);
+                cashbookByCustomerId.get(cb.customer_id).push(cb);
+            }
+            if (cb.description_on_receipt) {
+                const cd = cb.description_on_receipt.trim().toLowerCase();
+                const sd = cd.replace(/\s+/g, '');
+                if (!cashbookByCleanDesc.has(cd)) cashbookByCleanDesc.set(cd, []);
+                cashbookByCleanDesc.get(cd).push(cb);
+                if (!cashbookByStrippedDesc.has(sd)) cashbookByStrippedDesc.set(sd, []);
+                cashbookByStrippedDesc.get(sd).push(cb);
+            }
+        }
+
+        // ============================================================
+        // 5. PROCESS EACH CUSTOMER IN MEMORY (LIGHTNING FAST)
+        // ============================================================
+
+        const result = [];
+        const seenCustomerNames = new Set();
+
+        for (const customer of customers) {
+            const customerName = (customer.customer_name || "").trim();
+            const cleanNameKey = customerName.toLowerCase();
+            const strippedNameKey = cleanNameKey.replace(/\s+/g, '');
+
+            // Guard against duplicate customer statements
+            if (seenCustomerNames.has(cleanNameKey)) {
+                continue;
+            }
+            seenCustomerNames.add(cleanNameKey);
+
+            // Collect all user IDs associated with this customer
+            const customerIds = String(customer.all_customer_ids || customer.customer_id)
+                .split(",")
+                .map(s => Number(s.trim()))
+                .filter(Boolean);
+
+            if (customerIds.length === 0) {
+                customerIds.push(customer.customer_id);
+            }
+
+            const transactions = [];
+            const seenInvoiceRefs = new Set();
+            const seenCashbookIds = new Set();
+
+            // 5a. Customer Invoices (quote_invoice)
+            const candidateInvoices = [];
+            for (const cid of customerIds) {
+                const list = invoicesByClientId.get(cid);
+                if (list) candidateInvoices.push(...list);
+            }
+            const nameInvList = invoicesByCleanName.get(cleanNameKey) || invoicesByStrippedName.get(strippedNameKey);
+            if (nameInvList) candidateInvoices.push(...nameInvList);
+
+            if (isSingleCustomerFilter) {
+                const singleClean = customer_from.toLowerCase().trim();
+                const singleStripped = singleClean.replace(/\s+/g, '');
+                const singleInvList = invoicesByCleanName.get(singleClean) || invoicesByStrippedName.get(singleStripped);
+                if (singleInvList) candidateInvoices.push(...singleInvList);
+            }
+
+            for (const invoice of candidateInvoices) {
+                const amount = safeNumber(invoice.sumof_vatincl);
+                const rawDate = formatDateOnly(invoice.quote_date);
+                const reference = (
+                    invoice.reference_no ||
+                    invoice.customer_invoice_no ||
+                    `INV_${invoice.id}`
+                ).trim();
+
+                const refLower = reference.toLowerCase();
+                if (seenInvoiceRefs.has(refLower)) {
+                    continue; // Deduplicate invoice
+                }
+                seenInvoiceRefs.add(refLower);
+
+                const currency = invoice.final_base_currency || "ZAR";
+                const descTarget =
+                    invoice.customer_invoice_no ||
+                    invoice.client_name ||
+                    customer.customer_name;
+                const description = descTarget
+                    ? `Tax Invoice - ${descTarget}`
+                    : "Tax Invoice";
+
+                transactions.push({
+                    type: "invoice",
+                    source: "invoice",
+                    date: formatDateDDMMYYYY(rawDate),
+                    formatted_date: formatDateDDMMYYYY(rawDate),
+                    raw_date: rawDate,
+                    reference: reference,
+                    description: description,
+                    debit: {
+                        amount: amount,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: formatCurrency(amount, currency)
+                    },
+                    credit: {
+                        amount: 0,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: ""
+                    },
+                    debit_amount: amount,
+                    debit_display: formatCurrency(amount, currency),
+                    credit_amount: 0,
+                    credit_display: "",
+                    cash_receipt: {
+                        amount: 0,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: ""
+                    },
+                    due_date: invoice.due_date ? formatDateOnly(invoice.due_date) : null,
+                    due_date_formatted: invoice.due_date ? formatDateDDMMYYYY(invoice.due_date) : null,
+                    invoice_id: invoice.id,
+                    order_id: invoice.order_id,
+                    balance: safeNumber(invoice.balance),
+                    status: invoice.status || "unpaid"
+                });
+            }
+
+            // 5b. Sage Invoices (sage_invoice_list)
+            const candidateSage = [];
+            const sageByName = sageByCleanName.get(cleanNameKey) || sageByStrippedName.get(strippedNameKey);
+            if (sageByName) candidateSage.push(...sageByName);
+
+            if (isSingleCustomerFilter) {
+                const singleClean = customer_from.toLowerCase().trim();
+                const singleStripped = singleClean.replace(/\s+/g, '');
+                const singleSageList = sageByCleanName.get(singleClean) || sageByStrippedName.get(singleStripped);
+                if (singleSageList) candidateSage.push(...singleSageList);
+            }
+
+            for (const sageInv of candidateSage) {
+                const ref = (sageInv.document_number || `SAGE_${sageInv.id}`).trim();
+                const refLower = ref.toLowerCase();
+
+                if (seenInvoiceRefs.has(refLower)) {
+                    continue; // Deduplicate invoice
+                }
+                seenInvoiceRefs.add(refLower);
+
+                const amount = safeNumber(sageInv.total);
+                const rawDate = formatDateOnly(sageInv.date);
+                const currency = "ZAR";
+                const descTarget =
+                    sageInv.customer_ref ||
+                    sageInv.customer_name ||
+                    customer.customer_name;
+                const description = descTarget
+                    ? `Tax Invoice - ${descTarget}`
+                    : "Tax Invoice";
+
+                transactions.push({
+                    type: "invoice",
+                    source: "sage_invoice",
+                    date: formatDateDDMMYYYY(rawDate),
+                    formatted_date: formatDateDDMMYYYY(rawDate),
+                    raw_date: rawDate,
+                    reference: ref,
+                    description: description,
+                    debit: {
+                        amount: amount,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: formatCurrency(amount, currency)
+                    },
+                    credit: {
+                        amount: 0,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: ""
+                    },
+                    debit_amount: amount,
+                    debit_display: formatCurrency(amount, currency),
+                    credit_amount: 0,
+                    credit_display: "",
+                    cash_receipt: {
+                        amount: 0,
+                        currency: currency,
+                        currency_symbol: getCurrencySymbol(currency),
+                        display: ""
+                    },
+                    due_date: rawDate,
+                    due_date_formatted: formatDateDDMMYYYY(rawDate),
+                    invoice_id: sageInv.id,
+                    order_id: null,
+                    balance: amount,
+                    status: "unpaid"
+                });
+            }
+
+            // 5c. Cashbook (tbl_cashbook)
+            const candidateCashbook = [];
+            for (const cid of customerIds) {
+                const list = cashbookByCustomerId.get(cid);
+                if (list) candidateCashbook.push(...list);
+            }
+            const descList = cashbookByCleanDesc.get(cleanNameKey) || cashbookByStrippedDesc.get(strippedNameKey);
+            if (descList) {
+                for (const item of descList) {
+                    if (!item.customer_id) candidateCashbook.push(item);
+                }
+            }
+            if (isSingleCustomerFilter) {
+                const singleClean = customer_from.toLowerCase().trim();
+                const singleStripped = singleClean.replace(/\s+/g, '');
+                const singleDescList = cashbookByCleanDesc.get(singleClean) || cashbookByStrippedDesc.get(singleStripped);
+                if (singleDescList) {
+                    for (const item of singleDescList) {
+                        if (!item.customer_id) candidateCashbook.push(item);
+                    }
+                }
+            }
+
+            for (const cashbook of candidateCashbook) {
+                if (seenCashbookIds.has(cashbook.id)) {
+                    continue; // Deduplicate cashbook
+                }
+                seenCashbookIds.add(cashbook.id);
+
+                const linkedInv = cashbook.order_id ? invoiceByOrderId.get(cashbook.order_id) : null;
+                const currency = linkedInv?.final_base_currency || "ZAR";
+
+                const receipt = safeNumber(cashbook.receipt);
+                const payment = safeNumber(cashbook.payment);
+                const rawDate = formatDateOnly(cashbook.date);
+
+                const bankRef = (cashbook.bank_ref || "").trim();
+                const descOnReceipt = (cashbook.description_on_receipt || "").trim();
+
+                let receiptRef = "";
+                if (bankRef && /^RCP/i.test(bankRef)) {
+                    receiptRef = bankRef;
+                } else {
+                    receiptRef = `RCP${String(cashbook.id).padStart(7, "0")}`;
+                }
+
+                let receiptDesc = "Cash Receipt";
+                if (bankRef && descOnReceipt) {
+                    if (descOnReceipt.toLowerCase().includes(bankRef.toLowerCase())) {
+                        receiptDesc = descOnReceipt;
+                    } else {
+                        receiptDesc = `${bankRef}, ${descOnReceipt}`;
+                    }
+                } else if (bankRef) {
+                    receiptDesc = bankRef;
+                } else if (descOnReceipt) {
+                    receiptDesc = descOnReceipt;
+                }
+
+                // RECEIPT (CREDIT)
+                if (receipt !== 0) {
+                    transactions.push({
+                        type: "cashbook_receipt",
+                        source: "cashbook",
+                        date: formatDateDDMMYYYY(rawDate),
+                        formatted_date: formatDateDDMMYYYY(rawDate),
+                        raw_date: rawDate,
+                        reference: receiptRef,
+                        bank_ref: bankRef,
+                        description: receiptDesc,
+                        debit: {
+                            amount: 0,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: ""
+                        },
+                        credit: {
+                            amount: receipt,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: formatCurrency(receipt, currency)
+                        },
+                        debit_amount: 0,
+                        debit_display: "",
+                        credit_amount: receipt,
+                        credit_display: formatCurrency(receipt, currency),
+                        cash_receipt: {
+                            amount: receipt,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: formatCurrency(receipt, currency)
+                        },
+                        cashbook_id: cashbook.id,
+                        order_id: cashbook.order_id || null,
+                        invoice_id: linkedInv?.id || null,
+                        invoice_reference:
+                            linkedInv?.reference_no ||
+                            linkedInv?.customer_invoice_no ||
+                            null
+                    });
+                }
+
+                // PAYMENT (DEBIT)
+                if (payment !== 0) {
+                    let paymentRef = "";
+                    if (bankRef && /^PMT/i.test(bankRef)) {
+                        paymentRef = bankRef;
+                    } else {
+                        paymentRef = `PMT${String(cashbook.id).padStart(7, "0")}`;
+                    }
+
+                    transactions.push({
+                        type: "cashbook_payment",
+                        source: "cashbook",
+                        date: formatDateDDMMYYYY(rawDate),
+                        formatted_date: formatDateDDMMYYYY(rawDate),
+                        raw_date: rawDate,
+                        reference: paymentRef,
+                        bank_ref: bankRef,
+                        description: descOnReceipt || "Cashbook Payment",
+                        debit: {
+                            amount: payment,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: formatCurrency(payment, currency)
+                        },
+                        credit: {
+                            amount: 0,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: ""
+                        },
+                        debit_amount: payment,
+                        debit_display: formatCurrency(payment, currency),
+                        credit_amount: 0,
+                        credit_display: "",
+                        cash_receipt: {
+                            amount: 0,
+                            currency: currency,
+                            currency_symbol: getCurrencySymbol(currency),
+                            display: ""
+                        },
+                        cashbook_id: cashbook.id,
+                        order_id: cashbook.order_id || null,
+                        invoice_id: linkedInv?.id || null,
+                        invoice_reference:
+                            linkedInv?.reference_no ||
+                            linkedInv?.customer_invoice_no ||
+                            null
+                    });
+                }
+            }
+
+            // ========================================================
+            // SORT ALL TRANSACTIONS CHRONOLOGICALLY
+            // ========================================================
+
+            transactions.sort((a, b) => {
+                const dateA = new Date(`${a.raw_date || "1900-01-01"}T00:00:00`).getTime();
+                const dateB = new Date(`${b.raw_date || "1900-01-01"}T00:00:00`).getTime();
+                if (dateA !== dateB) {
+                    return dateA - dateB;
+                }
+                if (a.source !== b.source) {
+                    return a.source.includes("invoice") ? -1 : 1;
+                }
+                return String(a.reference || "").localeCompare(String(b.reference || ""));
+            });
+
+            // ========================================================
+            // BALANCE BROUGHT FORWARD (PRIOR TO DATE_FROM)
+            // ========================================================
+
+            let balanceBroughtForward = 0;
+
+            for (const tx of transactions) {
+                if (!tx.raw_date) continue;
+                if (tx.raw_date < normalizedDateFrom) {
+                    const debit = safeNumber(tx.debit?.amount);
+                    const credit = safeNumber(tx.credit?.amount);
+                    balanceBroughtForward += debit - credit;
+                }
+            }
+
+            // ========================================================
+            // FILTER FOR STATEMENT DATE RANGE
+            // ========================================================
+
+            const statementTransactions = transactions.filter(tx => {
+                if (!tx.raw_date) return false;
+                return (
+                    tx.raw_date >= normalizedDateFrom &&
+                    tx.raw_date <= normalizedDateTo
+                );
+            });
+
+            // ========================================================
+            // EXCLUDE FULLY ALLOCATED INVOICES FILTER
+            // ========================================================
+
+            let filteredStatementTransactions = statementTransactions;
+
+            if (exclude_fully_allocated_invoices) {
+                filteredStatementTransactions = statementTransactions.filter(tx => {
+                    if (tx.type !== "invoice") {
+                        return true;
+                    }
+                    return safeNumber(tx.balance) !== 0 && String(tx.status).toLowerCase() !== "paid";
+                });
+            }
+
+            // ========================================================
+            // PREPEND BALANCE BROUGHT FORWARD LINE IF APPLICABLE
+            // ========================================================
+
+            const finalTransactionList = [];
+
+            if (show_balance_brought_forward && balanceBroughtForward !== 0) {
+                const bFwdCurrency = "ZAR";
+                const bFwdDebit = balanceBroughtForward > 0 ? balanceBroughtForward : 0;
+                const bFwdCredit = balanceBroughtForward < 0 ? Math.abs(balanceBroughtForward) : 0;
+
+                finalTransactionList.push({
+                    type: "balance_brought_forward",
+                    source: "balance_brought_forward",
+                    date: formatDateDDMMYYYY(normalizedDateFrom),
+                    formatted_date: formatDateDDMMYYYY(normalizedDateFrom),
+                    raw_date: normalizedDateFrom,
+                    reference: "",
+                    description: "Balance Brought Forward",
+                    debit: {
+                        amount: bFwdDebit,
+                        currency: bFwdCurrency,
+                        currency_symbol: getCurrencySymbol(bFwdCurrency),
+                        display: bFwdDebit > 0 ? formatCurrency(bFwdDebit, bFwdCurrency) : ""
+                    },
+                    credit: {
+                        amount: bFwdCredit,
+                        currency: bFwdCurrency,
+                        currency_symbol: getCurrencySymbol(bFwdCurrency),
+                        display: bFwdCredit > 0 ? formatCurrency(bFwdCredit, bFwdCurrency) : ""
+                    },
+                    debit_amount: bFwdDebit,
+                    debit_display: bFwdDebit > 0 ? formatCurrency(bFwdDebit, bFwdCurrency) : "",
+                    credit_amount: bFwdCredit,
+                    credit_display: bFwdCredit > 0 ? formatCurrency(bFwdCredit, bFwdCurrency) : ""
+                });
+            }
+
+            finalTransactionList.push(...filteredStatementTransactions);
+
+            // ========================================================
+            // PERIOD TOTALS & SUMMARY
+            // ========================================================
+
+            let totalDebit = 0;
+            let totalCredit = 0;
+            let totalCashReceipts = 0;
+
+            for (const tx of filteredStatementTransactions) {
+                totalDebit += safeNumber(tx.debit?.amount);
+                totalCredit += safeNumber(tx.credit?.amount);
+                totalCashReceipts += safeNumber(tx.cash_receipt?.amount);
+            }
+
+            const amountPaid = totalCredit;
+            const amountDue = (show_balance_brought_forward ? balanceBroughtForward : 0) + totalDebit - totalCredit;
+
+            // ========================================================
+            // INVOICE AGEING (ON STATEMENT DATE)
+            // ========================================================
+
+            let days120 = 0;
+            let days90 = 0;
+            let days60 = 0;
+            let days30 = 0;
+            let current = 0;
+
+            const reportDateObj = new Date(`${reportDate}T00:00:00`);
+
+            for (const tx of transactions) {
+                if (tx.type !== "invoice" || !tx.raw_date) continue;
+
+                const invDate = new Date(`${tx.raw_date}T00:00:00`);
+                if (invDate > reportDateObj) continue;
+
+                let outstanding = safeNumber(tx.balance);
+                if (outstanding === 0 && String(tx.status).toLowerCase() !== "paid") {
+                    outstanding = safeNumber(tx.debit?.amount);
+                }
+
+                if (outstanding <= 0) continue;
+
+                const dueDateObj = tx.due_date ? new Date(`${tx.due_date}T00:00:00`) : invDate;
+                const diffDays = Math.floor((reportDateObj.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+
+                if (diffDays > 120) {
+                    days120 += outstanding;
+                } else if (diffDays >= 91) {
+                    days90 += outstanding;
+                } else if (diffDays >= 61) {
+                    days60 += outstanding;
+                } else if (diffDays >= 31) {
+                    days30 += outstanding;
+                } else {
+                    current += outstanding;
+                }
+            }
+
+            // ========================================================
+            // CUSTOMER EXCLUSION FILTERS
+            // ========================================================
+
+            if (exclude_zero_balance && amountDue === 0) {
+                continue;
+            }
+            if (exclude_negative_balance && amountDue < 0) {
+                continue;
+            }
+            if (exclude_less_than && amountDue < safeNumber(less_than_amount)) {
+                continue;
+            }
+
+            // ========================================================
+            // CUSTOMER CURRENCY & FORMATTING
+            // ========================================================
+
+            let customerCurrency = "ZAR";
+            for (const tx of transactions) {
+                if (tx.debit?.currency) {
+                    customerCurrency = tx.debit.currency;
+                    break;
+                }
+                if (tx.credit?.currency) {
+                    customerCurrency = tx.credit.currency;
+                    break;
+                }
+            }
+
+            // Format customer addresses (TO SECTION)
+            const custAddressParts = [];
+            if (customer.address_1) custAddressParts.push(customer.address_1.trim());
+            if (customer.address_2 && customer.address_2.trim() !== customer.address_1.trim()) {
+                custAddressParts.push(customer.address_2.trim());
+            }
+            if (customer.city && !custAddressParts.some(p => p.includes(customer.city.trim()))) {
+                custAddressParts.push(customer.city.trim());
+            }
+            if (customer.province && !custAddressParts.some(p => p.includes(customer.province.trim()))) {
+                custAddressParts.push(customer.province.trim());
+            }
+            if (customer.country_name && !custAddressParts.some(p => p.includes(customer.country_name.trim()))) {
+                custAddressParts.push(customer.country_name.trim());
+            }
+            if (customer.postal_code && !custAddressParts.some(p => p.includes(customer.postal_code.trim()))) {
+                custAddressParts.push(customer.postal_code.trim());
+            }
+
+            const postalLines = (customer.address_1 || "")
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean);
+            if (customer.postal_code && !postalLines.includes(customer.postal_code.trim())) {
+                postalLines.push(customer.postal_code.trim());
+            }
+
+            // Customer display name (matching dropdown / PDF if specific customer filtered)
+            const displayName = (customer_from && customer_from === customer_to)
+                ? customer_from.toUpperCase()
+                : (customer.customer_name || "").toUpperCase().trim();
+
+            result.push({
+                customer_id: customer.customer_id,
+                customer_name: displayName,
+                customer_vat_no: customer.tax_ref || "",
+                vat_no: customer.tax_ref || "",
+                tax_ref: customer.tax_ref || "",
+                category: customer.category || null,
+                country_code: customer.country_code || null,
+                currency: customerCurrency,
+                currency_symbol: getCurrencySymbol(customerCurrency),
+                postal_address: postalLines.length > 0 ? postalLines.join("\n") : custAddressParts.join("\n"),
+                postal_address_lines: postalLines.length > 0 ? postalLines : custAddressParts,
+                physical_address: custAddressParts.join("\n"),
+                physical_address_lines: custAddressParts,
+                balance_brought_forward: Number(balanceBroughtForward.toFixed(2)),
+                balance_brought_forward_display: formatCurrency(balanceBroughtForward, customerCurrency),
+                transactions: finalTransactionList,
+                ageing: {
+                    days_120_plus: Number(days120.toFixed(2)),
+                    days_90: Number(days90.toFixed(2)),
+                    days_60: Number(days60.toFixed(2)),
+                    days_30: Number(days30.toFixed(2)),
+                    current: Number(current.toFixed(2)),
+                    days_120_plus_display: formatCurrency(days120, customerCurrency),
+                    days_90_display: formatCurrency(days90, customerCurrency),
+                    days_60_display: formatCurrency(days60, customerCurrency),
+                    days_30_display: formatCurrency(days30, customerCurrency),
+                    current_display: formatCurrency(current, customerCurrency)
+                },
+                totals: {
+                    debit: Number(totalDebit.toFixed(2)),
+                    credit: Number(totalCredit.toFixed(2)),
+                    cash_receipts: Number(totalCashReceipts.toFixed(2)),
+                    amount_due: Number(amountDue.toFixed(2)),
+                    amount_paid: Number(amountPaid.toFixed(2)),
+                    debit_display: formatCurrency(totalDebit, customerCurrency),
+                    credit_display: formatCurrency(totalCredit, customerCurrency),
+                    cash_receipts_display: formatCurrency(totalCashReceipts, customerCurrency),
+                    amount_due_display: formatCurrency(amountDue, customerCurrency),
+                    amount_paid_display: formatCurrency(amountPaid, customerCurrency)
+                }
+            });
+        }
+
+        // ============================================================
+        // 6. SHOW DETAIL (BATCH FETCH LINE ITEMS IF REQUESTED)
+        // ============================================================
+
+        if (show_detail) {
+            const allInvoiceIds = [];
+            for (const cust of result) {
+                for (const tx of cust.transactions) {
+                    if (tx.type === "invoice" && tx.invoice_id) {
+                        allInvoiceIds.push(tx.invoice_id);
+                    }
+                }
+            }
+
+            if (allInvoiceIds.length > 0) {
+                const detailsSql = `
+                    SELECT
+                        id,
+                        quote_invoice_id,
+                        description,
+                        qty,
+                        unit,
+                        sales_price,
+                        exclusive,
+                        vat,
+                        vat_incl
+                    FROM quote_invoice_details
+                    WHERE quote_invoice_id IN (?)
+                    ORDER BY id ASC
+                `;
+                const allDetails = await queryAsync(detailsSql, [allInvoiceIds]).catch(() => []);
+                const detailsByInvoiceId = new Map();
+                for (const d of allDetails) {
+                    const invId = Number(d.quote_invoice_id);
+                    if (!detailsByInvoiceId.has(invId)) detailsByInvoiceId.set(invId, []);
+                    detailsByInvoiceId.get(invId).push(d);
+                }
+
+                for (const cust of result) {
+                    for (const tx of cust.transactions) {
+                        if (tx.type === "invoice" && tx.invoice_id) {
+                            tx.items = detailsByInvoiceId.get(Number(tx.invoice_id)) || [];
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // 7. GRAND TOTALS
+        // ============================================================
+
+        const grandTotals = {
+            debit: 0,
+            credit: 0,
+            cash_receipts: 0,
+            amount_due: 0,
+            amount_paid: 0,
+            days_120_plus: 0,
+            days_90: 0,
+            days_60: 0,
+            days_30: 0,
+            current: 0
+        };
+
+        for (const customer of result) {
+            grandTotals.debit += customer.totals.debit;
+            grandTotals.credit += customer.totals.credit;
+            grandTotals.cash_receipts += customer.totals.cash_receipts;
+            grandTotals.amount_due += customer.totals.amount_due;
+            grandTotals.amount_paid += customer.totals.amount_paid;
+            grandTotals.days_120_plus += customer.ageing.days_120_plus;
+            grandTotals.days_90 += customer.ageing.days_90;
+            grandTotals.days_60 += customer.ageing.days_60;
+            grandTotals.days_30 += customer.ageing.days_30;
+            grandTotals.current += customer.ageing.current;
+        }
+
+        Object.keys(grandTotals).forEach(key => {
+            grandTotals[key] = Number(grandTotals[key].toFixed(2));
+        });
+
+        const defaultCurrency = result[0]?.currency || "ZAR";
+        grandTotals.debit_display = formatCurrency(grandTotals.debit, defaultCurrency);
+        grandTotals.credit_display = formatCurrency(grandTotals.credit, defaultCurrency);
+        grandTotals.amount_due_display = formatCurrency(grandTotals.amount_due, defaultCurrency);
+        grandTotals.amount_paid_display = formatCurrency(grandTotals.amount_paid, defaultCurrency);
+        grandTotals.days_120_plus_display = formatCurrency(grandTotals.days_120_plus, defaultCurrency);
+        grandTotals.days_90_display = formatCurrency(grandTotals.days_90, defaultCurrency);
+        grandTotals.days_60_display = formatCurrency(grandTotals.days_60, defaultCurrency);
+        grandTotals.days_30_display = formatCurrency(grandTotals.days_30, defaultCurrency);
+        grandTotals.current_display = formatCurrency(grandTotals.current, defaultCurrency);
+
+        const primaryCompany = companyRows[0] ? getCompanyDetailsForCustomer(result[0]?.category) : {
+            company_name: "ASIA DIRECT AFRICA",
+            vat_no: "4740280377"
+        };
+
+        // ============================================================
+        // 8. FINAL RESPONSE
+        // ============================================================
+
+        return res.status(200).json({
+            success: true,
+            statement: {
+                title: "STATEMENT",
+                date: formatDateDDMMYYYY(reportDate),
+                statement_date: reportDate,
+                page: "1/1"
+            },
+            company: primaryCompany,
+            filters: {
+                customer_from: customer_from || "All",
+                customer_to: customer_to || "All",
+                active,
+                category_from: category_from || "All",
+                category_to: category_to || "All",
+                date_from: normalizedDateFrom,
+                date_from_formatted: formatDateDDMMYYYY(normalizedDateFrom),
+                date_to: normalizedDateTo,
+                date_to_formatted: formatDateDDMMYYYY(normalizedDateTo),
+                statement_date: reportDate,
+                statement_date_formatted: formatDateDDMMYYYY(reportDate),
+                show_balance_brought_forward: Boolean(show_balance_brought_forward),
+                exclude_fully_allocated_invoices: Boolean(exclude_fully_allocated_invoices),
+                show_detail: Boolean(show_detail),
+                use_foreign_currency: Boolean(use_foreign_currency),
+                exclude_zero_balance: Boolean(exclude_zero_balance),
+                exclude_negative_balance: Boolean(exclude_negative_balance),
+                exclude_less_than: Boolean(exclude_less_than),
+                less_than_amount: safeNumber(less_than_amount)
+            },
+            customers: result,
+            data: result,
+            totals: grandTotals
+        });
+    } catch (error) {
+        console.error("Customer Statement Report Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred.",
+            error: error.message
+        });
+    }
+};
+
+// =========================================================================
+// SALES BY CUSTOMER REPORT API (Detailed & Summary)
+// Tables: tbl_freight, quote_invoice, quote_invoice_details, admin_frieght_component
+// =========================================================================
+
+const cleanReportVal = (val, defaultVal = "") => {
+    if (val === null || val === undefined) return defaultVal;
+    const str = String(val).trim();
+    if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
+        return defaultVal;
+    }
+    return str;
+};
+
+const safeReportNumber = (val, defaultVal = 0) => {
+    if (val === null || val === undefined || val === '') return defaultVal;
+    const num = Number(val);
+    return isNaN(num) ? defaultVal : num;
+};
+
+const formatReportCurrency = (amount, currency = "ZAR") => {
+    const num = safeReportNumber(amount);
+    const formatted = num.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+    return `R${formatted}`;
+};
+
+const formatReportQty = (qty) => {
+    const num = safeReportNumber(qty);
+    return num.toFixed(4);
+};
+
+const formatReportDate = (date) => {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+};
+
+const parseReportDateInput = (val) => {
+    if (!val) return null;
+    const str = String(val).trim();
+    if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return null;
+
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+        const parts = str.split('/');
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(str)) {
+        return str.substring(0, 10);
+    }
+
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    return null;
+};
+
+const newSalesByCustomerReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const fromCustomer = cleanReportVal(body.from_customer || body.customer_from || body.fromCustomer);
+        const toCustomer = cleanReportVal(body.to_customer || body.customer_to || body.toCustomer);
+        const activeFilter = cleanReportVal(body.active || "Both").toLowerCase();
+        const fromCategory = cleanReportVal(body.from_category || body.category_from);
+        const toCategory = cleanReportVal(body.to_category || body.category_to);
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date;
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "fqe.is_deleted = 0",
+            "(fqed.admin_frieght_component_id IN (20, 22, 23) OR afc.code IN ('AFT', 'RFT', 'SFT') OR LOWER(TRIM(afc.description)) IN ('airfreight', 'road freight', 'sea freight'))"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(fqe.created_at) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(fqe.created_at) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(fqe.created_at) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (activeFilter === "active" || activeFilter === "1") {
+            whereClauses.push("(tu.status = 1 OR tu.status IS NULL)");
+        } else if (activeFilter === "inactive" || activeFilter === "0") {
+            whereClauses.push("tu.status = 0");
+        }
+
+        const isCategoryPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanCatFrom = isCategoryPlaceholder(fromCategory) ? "" : fromCategory;
+        const cleanCatTo = isCategoryPlaceholder(toCategory) ? "" : toCategory;
+
+        if (cleanCatFrom && cleanCatTo && cleanCatFrom.toLowerCase() === cleanCatTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(COALESCE(fqe.invoice_for_country, tu.access_country, f.freight_type, ''))) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom);
+        } else if (cleanCatFrom && cleanCatTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(fqe.invoice_for_country, tu.access_country, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(fqe.invoice_for_country, tu.access_country, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanCatFrom, cleanCatTo);
+        } else if (cleanCatFrom) {
+            whereClauses.push("LOWER(TRIM(COALESCE(fqe.invoice_for_country, tu.access_country, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            queryParams.push(cleanCatFrom);
+        } else if (cleanCatTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(fqe.invoice_for_country, tu.access_country, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanCatTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (fqe.reference_no LIKE 'CN%' OR fqe.reference_no LIKE 'CR%' OR fqe.status = 'credit_note')");
+        }
+
+        const isSelectPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanFrom = isSelectPlaceholder(fromCustomer) ? "" : fromCustomer;
+        const cleanTo = isSelectPlaceholder(toCustomer) ? "" : toCustomer;
+
+        if (cleanFrom && cleanTo && cleanFrom.toLowerCase() === cleanTo.toLowerCase()) {
+            if (/^\d+$/.test(cleanFrom)) {
+                whereClauses.push("(fqe.client_id = ? OR f.client_id = ? OR tu.id = ?)");
+                queryParams.push(Number(cleanFrom), Number(cleanFrom), Number(cleanFrom));
+            } else {
+                whereClauses.push(`(
+                    LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                )`);
+                queryParams.push(cleanFrom, cleanFrom);
+            }
+        } else if (cleanFrom && cleanTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanFrom, cleanTo);
+        } else if (cleanFrom) {
+            if (/^\d+$/.test(cleanFrom)) {
+                whereClauses.push("(fqe.client_id = ? OR f.client_id = ? OR tu.id = ?)");
+                queryParams.push(Number(cleanFrom), Number(cleanFrom), Number(cleanFrom));
+            } else {
+                whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) >= LOWER(TRIM(?))");
+                queryParams.push(cleanFrom);
+            }
+        } else if (cleanTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, fqe.client_name, f.client_name, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanTo);
+        }
+
+        const sql = `
+            SELECT 
+                fqe.id AS invoice_id,
+                fqe.reference_no,
+                fqe.quote_date,
+                fqe.created_at,
+                fqe.created_at AS invoice_created_at,
+                fqe.final_base_currency,
+                fqe.sumof_finalamount,
+                fqe.sumof_vatincl,
+                COALESCE(tu.full_name, fqe.client_name, f.client_name, 'Unknown Customer') AS customer_name,
+                COALESCE(fqe.client_id, f.client_id, tu.id) AS customer_id,
+                f.freight_number,
+                f.freight,
+                f.fcl_lcl,
+                f.dimension,
+                f.weight,
+                f.volumetric_weight,
+                f.weight_unit,
+                f.dimension_unit,
+                fqed.id AS detail_id,
+                fqed.admin_frieght_component_id,
+                fqed.description AS item_description,
+                afc.name AS component_name,
+                afc.code AS component_code,
+                afc.description AS component_desc,
+                fqed.qty AS item_qty,
+                fqed.sales_price AS item_sales_price,
+                COALESCE(fqed.vat_incl, fqed.final_amount, 0) AS item_total_selling
+            FROM freight_quote_estimate fqe
+            LEFT JOIN tbl_freight f ON (f.id = fqe.freight_id OR f.freight_quote_estimate_id = fqe.id)
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(fqe.client_id, f.client_id)
+            INNER JOIN freight_quote_estimate_details fqed ON fqed.freight_quote_estimate_id = fqe.id
+            LEFT JOIN admin_frieght_component afc ON afc.id = fqed.admin_frieght_component_id
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY customer_name ASC, fqe.created_at ASC, fqe.reference_no ASC, fqed.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const customersMap = new Map();
+            const seenInvoiceRefs = new Set();
+            let grandTotalQty = 0;
+            let grandTotalSelling = 0;
+            let grandTotalWeight = 0;
+            let grandTotalVolume = 0;
+            let grandTotalDimension = 0;
+
+            for (const row of (rows || [])) {
+                const custName = cleanReportVal(row.customer_name, "Unknown Customer");
+                const custKey = custName.toLowerCase();
+
+                if (!customersMap.has(custKey)) {
+                    customersMap.set(custKey, {
+                        customer_id: row.customer_id || null,
+                        customer_name: custName,
+                        name: custName,
+                        invoicesMap: new Map(),
+                        total_qty: 0,
+                        total_selling: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0
+                    });
+                }
+
+                const custObj = customersMap.get(custKey);
+                const invId = row.invoice_id;
+
+                if (!custObj.invoicesMap.has(invId)) {
+                    const invoiceDate = row.created_at || row.invoice_created_at || row.quote_date;
+                    const ref = cleanReportVal(row.reference_no, `QO${invId}`);
+                    seenInvoiceRefs.add(ref.toLowerCase());
+
+                    const invWeight = safeReportNumber(row.weight, 0);
+                    const invVolume = safeReportNumber(row.volumetric_weight, 0);
+                    const invDimension = safeReportNumber(row.dimension, 0);
+                    const fclLcl = cleanReportVal(row.fcl_lcl);
+
+                    custObj.invoicesMap.set(invId, {
+                        invoice_id: invId,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        quote_date: formatReportDate(row.quote_date),
+                        created_at: formatReportDate(row.created_at || row.invoice_created_at),
+                        reference: ref,
+                        reference_no: ref,
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        type: fclLcl,
+                        fcl_lcl: fclLcl,
+                        weight: Number(invWeight.toFixed(2)),
+                        weight_display: formatReportQty(invWeight),
+                        volume: Number(invVolume.toFixed(2)),
+                        volume_display: formatReportQty(invVolume),
+                        volumetric_weight: Number(invVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(invVolume),
+                        dimension: Number(invDimension.toFixed(2)),
+                        dimension_display: formatReportQty(invDimension),
+                        diamension: Number(invDimension.toFixed(2)),
+                        diamension_display: formatReportQty(invDimension),
+                        currency: cleanReportVal(row.final_base_currency, "ZAR"),
+                        total_qty: 0,
+                        total_selling: 0,
+                        admin_frieght_component_id: row.admin_frieght_component_id,
+                        code: row.component_code,
+                        component_code: row.component_code,
+                        items: []
+                    });
+                }
+
+                const invObj = custObj.invoicesMap.get(invId);
+
+                if (row.detail_id) {
+                    let desc = cleanReportVal(row.item_description) || cleanReportVal(row.component_desc) || "Item";
+                    const code = cleanReportVal(row.component_code);
+                    if (code && !desc.startsWith(code + " - ") && !desc.startsWith(code + "-")) {
+                        desc = `${code} - ${desc}`;
+                    }
+
+                    const qty = safeReportNumber(row.item_qty, 1);
+                    const selling = safeReportNumber(row.item_total_selling, 0);
+
+                    invObj.total_qty += qty;
+                    invObj.total_selling += selling;
+
+                    if (style === "Detailed") {
+                        invObj.items.push({
+                            admin_frieght_component_id: row.admin_frieght_component_id,
+                            code: row.component_code,
+                            component_code: row.component_code,
+                            component_name: row.component_name || "Freight Charges",
+                            description: desc,
+                            qty: Number(qty.toFixed(4)),
+                            qty_display: formatReportQty(qty),
+                            sales_price: safeReportNumber(row.item_sales_price, 0),
+                            total_selling: Number(selling.toFixed(2)),
+                            total_selling_display: formatReportCurrency(selling, invObj.currency),
+                            weight: invObj.weight,
+                            weight_display: invObj.weight_display,
+                            volume: invObj.volume,
+                            volume_display: invObj.volume_display,
+                            volumetric_weight: invObj.volumetric_weight,
+                            volumetric_weight_display: invObj.volumetric_weight_display,
+                            dimension: invObj.dimension,
+                            dimension_display: invObj.dimension_display,
+                            diamension: invObj.diamension,
+                            diamension_display: invObj.diamension_display,
+                            freight: invObj.freight,
+                            type: invObj.type,
+                            fcl_lcl: invObj.fcl_lcl
+                        });
+                    }
+                }
+            }
+
+            // Finalize totals across customers and invoices
+            const customersList = [];
+
+            for (const [, custObj] of customersMap) {
+                const invoicesList = [];
+
+                for (const [, invObj] of custObj.invoicesMap) {
+                    invObj.total_qty = Number(invObj.total_qty.toFixed(4));
+                    invObj.total_qty_display = formatReportQty(invObj.total_qty);
+                    invObj.total_selling = Number(invObj.total_selling.toFixed(2));
+                    invObj.total_selling_display = formatReportCurrency(invObj.total_selling, invObj.currency);
+
+                    custObj.total_qty += invObj.total_qty;
+                    custObj.total_selling += invObj.total_selling;
+                    custObj.total_weight += (invObj.weight || 0);
+                    custObj.total_volume += (invObj.volume || 0);
+                    custObj.total_dimension += (invObj.dimension || 0);
+
+                    grandTotalWeight += (invObj.weight || 0);
+                    grandTotalVolume += (invObj.volume || 0);
+                    grandTotalDimension += (invObj.dimension || 0);
+
+                    invoicesList.push({
+                        invoice_id: invObj.invoice_id,
+                        date: invObj.date,
+                        raw_date: invObj.raw_date,
+                        reference: invObj.reference,
+                        reference_no: invObj.reference_no,
+                        freight_number: invObj.freight_number,
+                        freight: invObj.freight,
+                        type: invObj.type,
+                        fcl_lcl: invObj.fcl_lcl,
+                        weight: invObj.weight,
+                        weight_display: invObj.weight_display,
+                        volume: invObj.volume,
+                        volume_display: invObj.volume_display,
+                        volumetric_weight: invObj.volumetric_weight,
+                        volumetric_weight_display: invObj.volumetric_weight_display,
+                        dimension: invObj.dimension,
+                        dimension_display: invObj.dimension_display,
+                        diamension: invObj.diamension,
+                        diamension_display: invObj.diamension_display,
+                        total_qty: invObj.total_qty,
+                        total_qty_display: invObj.total_qty_display,
+                        total_selling: invObj.total_selling,
+                        total_selling_display: invObj.total_selling_display,
+                        admin_frieght_component_id: invObj.admin_frieght_component_id,
+                        code: invObj.code,
+                        component_code: invObj.component_code,
+                        items: invObj.items
+                    });
+                }
+
+                if (invoicesList.length === 0) continue;
+
+                custObj.total_qty = Number(custObj.total_qty.toFixed(4));
+                custObj.total_qty_display = formatReportQty(custObj.total_qty);
+                custObj.total_selling = Number(custObj.total_selling.toFixed(2));
+                custObj.total_selling_display = formatReportCurrency(custObj.total_selling);
+
+                grandTotalQty += custObj.total_qty;
+                grandTotalSelling += custObj.total_selling;
+
+                customersList.push({
+                    customer_id: custObj.customer_id,
+                    customer_name: custObj.customer_name,
+                    name: custObj.customer_name,
+                    total_qty: custObj.total_qty,
+                    total_qty_display: custObj.total_qty_display,
+                    total_selling: custObj.total_selling,
+                    total_selling_display: custObj.total_selling_display,
+                    total_weight: Number((custObj.total_weight || 0).toFixed(2)),
+                    total_weight_display: formatReportQty(custObj.total_weight || 0),
+                    total_volume: Number((custObj.total_volume || 0).toFixed(2)),
+                    total_volume_display: formatReportQty(custObj.total_volume || 0),
+                    total_dimension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    total_dimension_display: formatReportQty(custObj.total_dimension || 0),
+                    weight: Number((custObj.total_weight || 0).toFixed(2)),
+                    volume: Number((custObj.total_volume || 0).toFixed(2)),
+                    dimension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    diamension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    invoices: invoicesList
+                });
+            }
+
+            grandTotalQty = Number(grandTotalQty.toFixed(4));
+            grandTotalSelling = Number(grandTotalSelling.toFixed(2));
+
+            const totalRecords = customersList.reduce((sum, c) => sum + c.invoices.length, 0);
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Customer Report fetched successfully",
+                report_info: {
+                    title: "Sales By Customer Report",
+                    company: "Asia Direct Africa",
+                    start_date: formatReportDate(startDate) || "01/03/2026",
+                    end_date: formatReportDate(endDate) || "20/07/2026",
+                    page: "1/1",
+                    style: style
+                },
+                filters: {
+                    from_customer: fromCustomer || "All",
+                    to_customer: toCustomer || "All",
+                    active: body.active || "Both",
+                    from_category: fromCategory || "All",
+                    to_category: toCategory || "All",
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    include_credit_notes: includeCreditNotes,
+                    style: style
+                },
+                totalRecords: totalRecords,
+                totalCustomers: customersList.length,
+                grand_total: {
+                    total_qty: grandTotalQty,
+                    total_qty_display: formatReportQty(grandTotalQty),
+                    total_selling: grandTotalSelling,
+                    total_selling_display: formatReportCurrency(grandTotalSelling),
+                    total_weight: Number(grandTotalWeight.toFixed(2)),
+                    total_weight_display: formatReportQty(grandTotalWeight),
+                    total_volume: Number(grandTotalVolume.toFixed(2)),
+                    total_volume_display: formatReportQty(grandTotalVolume),
+                    total_dimension: Number(grandTotalDimension.toFixed(2)),
+                    total_dimension_display: formatReportQty(grandTotalDimension),
+                    weight: Number(grandTotalWeight.toFixed(2)),
+                    volume: Number(grandTotalVolume.toFixed(2)),
+                    dimension: Number(grandTotalDimension.toFixed(2)),
+                    diamension: Number(grandTotalDimension.toFixed(2))
+                },
+                totals: {
+                    total_qty: grandTotalQty,
+                    total_qty_display: formatReportQty(grandTotalQty),
+                    total_selling: grandTotalSelling,
+                    total_selling_display: formatReportCurrency(grandTotalSelling),
+                    total_weight: Number(grandTotalWeight.toFixed(2)),
+                    total_weight_display: formatReportQty(grandTotalWeight),
+                    total_volume: Number(grandTotalVolume.toFixed(2)),
+                    total_volume_display: formatReportQty(grandTotalVolume),
+                    total_dimension: Number(grandTotalDimension.toFixed(2)),
+                    total_dimension_display: formatReportQty(grandTotalDimension),
+                    weight: Number(grandTotalWeight.toFixed(2)),
+                    volume: Number(grandTotalVolume.toFixed(2)),
+                    dimension: Number(grandTotalDimension.toFixed(2)),
+                    diamension: Number(grandTotalDimension.toFixed(2))
+                },
+                customers: customersList,
+                // data: customersList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
+
+
+// =========================================================================
+// SALES BY CUSTOMER ORDER REPORT API (Detailed & Summary)
+// Tables: quote_invoice, tbl_orders, tbl_freight, tbl_users, quote_invoice_details
+// Fallback: weight, dimension, volume from tbl_orders, fallback to tbl_freight
+// =========================================================================
+
+const newSalesByCustomerOrderReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const fromCustomer = cleanReportVal(body.from_customer || body.customer_from || body.fromCustomer);
+        const toCustomer = cleanReportVal(body.to_customer || body.customer_to || body.toCustomer);
+        const activeFilter = cleanReportVal(body.active || "Both").toLowerCase();
+        const fromCategory = cleanReportVal(body.from_category || body.category_from);
+        const toCategory = cleanReportVal(body.to_category || body.category_to);
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date;
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "qi.is_deleted = 0",
+            "(qid.admin_frieght_component_id IN (20, 22, 23) OR afc.code IN ('AFT', 'RFT', 'SFT') OR LOWER(TRIM(afc.description)) IN ('airfreight', 'road freight', 'sea freight'))"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(COALESCE(qi.quote_date, qi.created_at)) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(COALESCE(qi.quote_date, qi.created_at)) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(COALESCE(qi.quote_date, qi.created_at)) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (activeFilter === "active" || activeFilter === "1") {
+            whereClauses.push("(tu.status = 1 OR tu.status IS NULL)");
+        } else if (activeFilter === "inactive" || activeFilter === "0") {
+            whereClauses.push("tu.status = 0");
+        }
+
+        const isCategoryPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanCatFrom = isCategoryPlaceholder(fromCategory) ? "" : fromCategory;
+        const cleanCatTo = isCategoryPlaceholder(toCategory) ? "" : toCategory;
+
+        if (cleanCatFrom && cleanCatTo && cleanCatFrom.toLowerCase() === cleanCatTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(COALESCE(qi.invoice_for_country, tu.access_country, f.freight_type, ''))) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom);
+        } else if (cleanCatFrom && cleanCatTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(qi.invoice_for_country, tu.access_country, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(qi.invoice_for_country, tu.access_country, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanCatFrom, cleanCatTo);
+        } else if (cleanCatFrom) {
+            whereClauses.push("LOWER(TRIM(COALESCE(qi.invoice_for_country, tu.access_country, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            queryParams.push(cleanCatFrom);
+        } else if (cleanCatTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(qi.invoice_for_country, tu.access_country, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanCatTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (qi.reference_no LIKE 'CN%' OR qi.reference_no LIKE 'CR%' OR qi.status = 'credit_note' OR qi.is_credit_note = 1)");
+        }
+
+        const isSelectPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanFrom = isSelectPlaceholder(fromCustomer) ? "" : fromCustomer;
+        const cleanTo = isSelectPlaceholder(toCustomer) ? "" : toCustomer;
+
+        if (cleanFrom && cleanTo && cleanFrom.toLowerCase() === cleanTo.toLowerCase()) {
+            if (/^\d+$/.test(cleanFrom)) {
+                whereClauses.push("(qi.client_id = ? OR f.client_id = ? OR tu.id = ?)");
+                queryParams.push(Number(cleanFrom), Number(cleanFrom), Number(cleanFrom));
+            } else {
+                whereClauses.push(`(
+                    LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                )`);
+                queryParams.push(cleanFrom, cleanFrom);
+            }
+        } else if (cleanFrom && cleanTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanFrom, cleanTo);
+        } else if (cleanFrom) {
+            if (/^\d+$/.test(cleanFrom)) {
+                whereClauses.push("(qi.client_id = ? OR f.client_id = ? OR tu.id = ?)");
+                queryParams.push(Number(cleanFrom), Number(cleanFrom), Number(cleanFrom));
+            } else {
+                whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) >= LOWER(TRIM(?))");
+                queryParams.push(cleanFrom);
+            }
+        } else if (cleanTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(tu.full_name, qi.client_name, f.client_name, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanTo);
+        }
+
+        const sql = `
+            SELECT 
+                qi.id AS invoice_id,
+                qi.reference_no,
+                qi.quote_date,
+                qi.created_at AS invoice_created_at,
+                qi.final_base_currency,
+                qi.sumof_finalamount,
+                qi.sumof_vatincl,
+                COALESCE(tu.full_name, qi.client_name, f.client_name, ord.client_name, 'Unknown Customer') AS customer_name,
+                COALESCE(qi.client_id, f.client_id, ord.client_id, tu.id) AS customer_id,
+                f.freight_number,
+                f.freight,
+                f.fcl_lcl,
+                f.dimension AS freight_dimension,
+                f.weight AS freight_weight,
+                f.volumetric_weight AS freight_volumetric_weight,
+                f.weight_unit,
+                f.dimension_unit,
+                ord.id AS order_id,
+                ord.order_number,
+                ord.dimensions AS order_dimensions,
+                ord.weight AS order_weight,
+                ord.CBM AS order_cbm,
+                qid.id AS detail_id,
+                qid.admin_frieght_component_id,
+                qid.description AS item_description,
+                afc.name AS component_name,
+                afc.code AS component_code,
+                afc.description AS component_desc,
+                qid.qty AS item_qty,
+                qid.sales_price AS item_sales_price,
+                COALESCE(qid.vat_incl, qid.final_amount, 0) AS item_total_selling
+            FROM quote_invoice qi
+            LEFT JOIN tbl_freight f ON (f.id = qi.freight_id OR f.quote_invoice_id = qi.id)
+            LEFT JOIN tbl_orders ord ON ord.id = (
+                SELECT MAX(o2.id) 
+                FROM tbl_orders o2 
+                WHERE o2.freight_id = COALESCE(qi.freight_id, f.id) 
+                  AND o2.freight_id > 0
+            )
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(qi.client_id, f.client_id)
+            INNER JOIN quote_invoice_details qid ON qid.quote_invoice_id = qi.id
+            LEFT JOIN admin_frieght_component afc ON afc.id = qid.admin_frieght_component_id
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY customer_name ASC, COALESCE(qi.quote_date, qi.created_at) ASC, qi.reference_no ASC, qid.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const parseOrderNumeric = (val) => {
+                if (val === null || val === undefined) return null;
+                const str = String(val).trim();
+                if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return null;
+                const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+                if (!match) return null;
+                const num = parseFloat(match[0]);
+                return isNaN(num) ? null : num;
+            };
+
+            const customersMap = new Map();
+            const seenInvoiceRefs = new Set();
+            let grandTotalQty = 0;
+            let grandTotalSelling = 0;
+            let grandTotalWeight = 0;
+            let grandTotalVolume = 0;
+            let grandTotalDimension = 0;
+
+            for (const row of (rows || [])) {
+                const custName = cleanReportVal(row.customer_name, "Unknown Customer");
+                const custKey = custName.toLowerCase();
+
+                if (!customersMap.has(custKey)) {
+                    customersMap.set(custKey, {
+                        customer_id: row.customer_id || null,
+                        customer_name: custName,
+                        name: custName,
+                        invoicesMap: new Map(),
+                        total_qty: 0,
+                        total_selling: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0
+                    });
+                }
+
+                const custObj = customersMap.get(custKey);
+                const invId = row.invoice_id;
+
+                if (!custObj.invoicesMap.has(invId)) {
+                    const invoiceDate = row.quote_date || row.invoice_created_at;
+                    const ref = cleanReportVal(row.reference_no, `INV${invId}`);
+                    seenInvoiceRefs.add(ref.toLowerCase());
+
+                    // Prioritize tbl_orders, fallback to tbl_freight
+                    const ordWeight = parseOrderNumeric(row.order_weight);
+                    const fWeight = safeReportNumber(row.freight_weight, 0);
+                    const invWeight = (ordWeight !== null && ordWeight > 0) ? ordWeight : fWeight;
+
+                    const ordDim = parseOrderNumeric(row.order_dimensions);
+                    const fDim = safeReportNumber(row.freight_dimension, 0);
+                    const invDimension = (ordDim !== null && ordDim > 0) ? ordDim : fDim;
+
+                    const ordVol = parseOrderNumeric(row.order_cbm);
+                    const fVol = safeReportNumber(row.freight_volumetric_weight, 0);
+                    const invVolume = (ordVol !== null && ordVol > 0) ? ordVol : fVol;
+
+                    const fclLcl = cleanReportVal(row.fcl_lcl);
+
+                    custObj.invoicesMap.set(invId, {
+                        invoice_id: invId,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        reference: ref,
+                        reference_no: ref,
+                        order_id: row.order_id || null,
+                        order_number: cleanReportVal(row.order_number),
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        type: fclLcl,
+                        fcl_lcl: fclLcl,
+                        weight: Number(invWeight.toFixed(2)),
+                        weight_display: formatReportQty(invWeight),
+                        volume: Number(invVolume.toFixed(2)),
+                        volume_display: formatReportQty(invVolume),
+                        volumetric_weight: Number(invVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(invVolume),
+                        dimension: Number(invDimension.toFixed(2)),
+                        dimension_display: formatReportQty(invDimension),
+                        diamension: Number(invDimension.toFixed(2)),
+                        diamension_display: formatReportQty(invDimension),
+                        currency: cleanReportVal(row.final_base_currency, "ZAR"),
+                        total_qty: 0,
+                        total_selling: 0,
+                        admin_frieght_component_id: row.admin_frieght_component_id,
+                        code: row.component_code,
+                        component_code: row.component_code,
+                        items: []
+                    });
+                }
+
+                const invObj = custObj.invoicesMap.get(invId);
+
+                if (row.detail_id) {
+                    let desc = cleanReportVal(row.item_description) || cleanReportVal(row.component_desc) || "Item";
+                    const code = cleanReportVal(row.component_code);
+                    if (code && !desc.startsWith(code + " - ") && !desc.startsWith(code + "-")) {
+                        desc = `${code} - ${desc}`;
+                    }
+
+                    const qty = safeReportNumber(row.item_qty, 1);
+                    const selling = safeReportNumber(row.item_total_selling, 0);
+
+                    invObj.total_qty += qty;
+                    invObj.total_selling += selling;
+
+                    if (style === "Detailed") {
+                        invObj.items.push({
+                            admin_frieght_component_id: row.admin_frieght_component_id,
+                            code: row.component_code,
+                            component_code: row.component_code,
+                            component_name: row.component_name || "Freight Charges",
+                            name: "Freight Charges",
+                            description: desc,
+                            qty: Number(qty.toFixed(4)),
+                            qty_display: formatReportQty(qty),
+                            sales_price: safeReportNumber(row.item_sales_price, 0),
+                            total_selling: Number(selling.toFixed(2)),
+                            total_selling_display: formatReportCurrency(selling, invObj.currency),
+                            weight: invObj.weight,
+                            weight_display: invObj.weight_display,
+                            volume: invObj.volume,
+                            volume_display: invObj.volume_display,
+                            volumetric_weight: invObj.volumetric_weight,
+                            volumetric_weight_display: invObj.volumetric_weight_display,
+                            dimension: invObj.dimension,
+                            dimension_display: invObj.dimension_display,
+                            diamension: invObj.diamension,
+                            diamension_display: invObj.diamension_display,
+                            freight: invObj.freight,
+                            type: invObj.type,
+                            fcl_lcl: invObj.fcl_lcl,
+                            order_number: invObj.order_number
+                        });
+                    }
+                }
+            }
+
+            // Finalize totals across customers and invoices
+            const customersList = [];
+
+            for (const [, custObj] of customersMap) {
+                const invoicesList = [];
+
+                for (const [, invObj] of custObj.invoicesMap) {
+                    invObj.total_qty = Number(invObj.total_qty.toFixed(4));
+                    invObj.total_qty_display = formatReportQty(invObj.total_qty);
+                    invObj.total_selling = Number(invObj.total_selling.toFixed(2));
+                    invObj.total_selling_display = formatReportCurrency(invObj.total_selling, invObj.currency);
+
+                    custObj.total_qty += invObj.total_qty;
+                    custObj.total_selling += invObj.total_selling;
+                    custObj.total_weight += (invObj.weight || 0);
+                    custObj.total_volume += (invObj.volume || 0);
+                    custObj.total_dimension += (invObj.dimension || 0);
+
+                    grandTotalWeight += (invObj.weight || 0);
+                    grandTotalVolume += (invObj.volume || 0);
+                    grandTotalDimension += (invObj.dimension || 0);
+
+                    invoicesList.push({
+                        invoice_id: invObj.invoice_id,
+                        date: invObj.date,
+                        raw_date: invObj.raw_date,
+                        reference: invObj.reference,
+                        reference_no: invObj.reference_no,
+                        order_id: invObj.order_id,
+                        order_number: invObj.order_number,
+                        freight_number: invObj.freight_number,
+                        freight: invObj.freight,
+                        type: invObj.type,
+                        fcl_lcl: invObj.fcl_lcl,
+                        weight: invObj.weight,
+                        weight_display: invObj.weight_display,
+                        volume: invObj.volume,
+                        volume_display: invObj.volume_display,
+                        volumetric_weight: invObj.volumetric_weight,
+                        volumetric_weight_display: invObj.volumetric_weight_display,
+                        dimension: invObj.dimension,
+                        dimension_display: invObj.dimension_display,
+                        diamension: invObj.diamension,
+                        diamension_display: invObj.diamension_display,
+                        total_qty: invObj.total_qty,
+                        total_qty_display: invObj.total_qty_display,
+                        total_selling: invObj.total_selling,
+                        total_selling_display: invObj.total_selling_display,
+                        admin_frieght_component_id: invObj.admin_frieght_component_id,
+                        code: invObj.code,
+                        component_code: invObj.component_code,
+                        items: invObj.items
+                    });
+                }
+
+                if (invoicesList.length === 0) continue;
+
+                custObj.total_qty = Number(custObj.total_qty.toFixed(4));
+                custObj.total_qty_display = formatReportQty(custObj.total_qty);
+                custObj.total_selling = Number(custObj.total_selling.toFixed(2));
+                custObj.total_selling_display = formatReportCurrency(custObj.total_selling);
+
+                grandTotalQty += custObj.total_qty;
+                grandTotalSelling += custObj.total_selling;
+
+                customersList.push({
+                    customer_id: custObj.customer_id,
+                    customer_name: custObj.customer_name,
+                    name: custObj.customer_name,
+                    total_qty: custObj.total_qty,
+                    total_qty_display: custObj.total_qty_display,
+                    total_selling: custObj.total_selling,
+                    total_selling_display: custObj.total_selling_display,
+                    total_weight: Number((custObj.total_weight || 0).toFixed(2)),
+                    total_weight_display: formatReportQty(custObj.total_weight || 0),
+                    total_volume: Number((custObj.total_volume || 0).toFixed(2)),
+                    total_volume_display: formatReportQty(custObj.total_volume || 0),
+                    total_dimension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    total_dimension_display: formatReportQty(custObj.total_dimension || 0),
+                    weight: Number((custObj.total_weight || 0).toFixed(2)),
+                    volume: Number((custObj.total_volume || 0).toFixed(2)),
+                    dimension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    diamension: Number((custObj.total_dimension || 0).toFixed(2)),
+                    invoices: invoicesList
+                });
+            }
+
+            grandTotalQty = Number(grandTotalQty.toFixed(4));
+            grandTotalSelling = Number(grandTotalSelling.toFixed(2));
+
+            const totalRecords = customersList.reduce((sum, c) => sum + c.invoices.length, 0);
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Customer Order Report fetched successfully",
+                report_info: {
+                    title: "Sales By Customer Order Report",
+                    company: "Asia Direct Africa",
+                    start_date: formatReportDate(startDate) || "01/03/2026",
+                    end_date: formatReportDate(endDate) || "20/07/2026",
+                    page: "1/1",
+                    style: style
+                },
+                filters: {
+                    from_customer: fromCustomer || "All",
+                    to_customer: toCustomer || "All",
+                    active: body.active || "Both",
+                    from_category: fromCategory || "All",
+                    to_category: toCategory || "All",
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    include_credit_notes: includeCreditNotes,
+                    style: style
+                },
+                totalRecords: totalRecords,
+                totalCustomers: customersList.length,
+                grand_total: {
+                    total_qty: grandTotalQty,
+                    total_qty_display: formatReportQty(grandTotalQty),
+                    total_selling: grandTotalSelling,
+                    total_selling_display: formatReportCurrency(grandTotalSelling),
+                    total_weight: Number(grandTotalWeight.toFixed(2)),
+                    total_weight_display: formatReportQty(grandTotalWeight),
+                    total_volume: Number(grandTotalVolume.toFixed(2)),
+                    total_volume_display: formatReportQty(grandTotalVolume),
+                    total_dimension: Number(grandTotalDimension.toFixed(2)),
+                    total_dimension_display: formatReportQty(grandTotalDimension),
+                    weight: Number(grandTotalWeight.toFixed(2)),
+                    volume: Number(grandTotalVolume.toFixed(2)),
+                    dimension: Number(grandTotalDimension.toFixed(2)),
+                    diamension: Number(grandTotalDimension.toFixed(2))
+                },
+                totals: {
+                    total_qty: grandTotalQty,
+                    total_qty_display: formatReportQty(grandTotalQty),
+                    total_selling: grandTotalSelling,
+                    total_selling_display: formatReportCurrency(grandTotalSelling),
+                    total_weight: Number(grandTotalWeight.toFixed(2)),
+                    total_weight_display: formatReportQty(grandTotalWeight),
+                    total_volume: Number(grandTotalVolume.toFixed(2)),
+                    total_volume_display: formatReportQty(grandTotalVolume),
+                    total_dimension: Number(grandTotalDimension.toFixed(2)),
+                    total_dimension_display: formatReportQty(grandTotalDimension),
+                    weight: Number(grandTotalWeight.toFixed(2)),
+                    volume: Number(grandTotalVolume.toFixed(2)),
+                    dimension: Number(grandTotalDimension.toFixed(2)),
+                    diamension: Number(grandTotalDimension.toFixed(2))
+                },
+                customers: customersList,
+                // data: customersList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
+
+
+// =========================================================================
+// SALES BY ITEM REPORT API (Freight/ Admin - By Freight Type)
+// Tables: quote_invoice, quote_invoice_details, admin_frieght_component, tbl_freight
+// =========================================================================
+
+const newSalesByItemReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date;
+
+        const itemFrom = cleanReportVal(body.item_from || body.from_item);
+        const itemTo = cleanReportVal(body.item_to || body.to_item);
+
+        const categoryFrom = cleanReportVal(body.category_from || body.from_category);
+        const categoryTo = cleanReportVal(body.category_to || body.to_category);
+
+        const salesAccount = cleanReportVal(body.sales_account || body.salesAccount);
+        const statusFilter = cleanReportVal(body.status || body.active || "Both").toLowerCase();
+        const itemType = cleanReportVal(body.item_type || body.itemType || "Both").toLowerCase();
+        const costType = cleanReportVal(body.cost || body.cost_type || "Average Cost");
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "fqe.is_deleted = 0",
+            "(fqed.admin_frieght_component_id IN (20, 22, 23) OR afc.code IN ('AFT', 'RFT', 'SFT') OR LOWER(TRIM(afc.description)) IN ('airfreight', 'road freight', 'sea freight'))"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(fqe.created_at) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(fqe.created_at) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(fqe.created_at) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (statusFilter === "active" || statusFilter === "1") {
+            whereClauses.push("(tu.status = 1 OR tu.status IS NULL)");
+        } else if (statusFilter === "inactive" || statusFilter === "0") {
+            whereClauses.push("tu.status = 0");
+        }
+
+        const isItemPlaceholder = (val) => !val || val.toLowerCase().includes("from") || val.toLowerCase().includes("to") || val.toLowerCase() === "all";
+        const cleanItemFrom = isItemPlaceholder(itemFrom) ? "" : itemFrom;
+        const cleanItemTo = isItemPlaceholder(itemTo) ? "" : itemTo;
+
+        if (cleanItemFrom && cleanItemTo && cleanItemFrom.toLowerCase() === cleanItemTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(afc.code)) = LOWER(TRIM(?)) OR LOWER(TRIM(afc.description)) LIKE CONCAT('%', LOWER(TRIM(?)), '%'))");
+            queryParams.push(cleanItemFrom, cleanItemFrom);
+        } else if (cleanItemFrom && cleanItemTo) {
+            whereClauses.push("LOWER(TRIM(afc.code)) >= LOWER(TRIM(?)) AND LOWER(TRIM(afc.code)) <= LOWER(TRIM(?))");
+            queryParams.push(cleanItemFrom, cleanItemTo);
+        } else if (cleanItemFrom) {
+            whereClauses.push("(LOWER(TRIM(afc.code)) >= LOWER(TRIM(?)) OR LOWER(TRIM(afc.description)) LIKE CONCAT('%', LOWER(TRIM(?)), '%'))");
+            queryParams.push(cleanItemFrom, cleanItemFrom);
+        } else if (cleanItemTo) {
+            whereClauses.push("LOWER(TRIM(afc.code)) <= LOWER(TRIM(?))");
+            queryParams.push(cleanItemTo);
+        }
+
+        const isCatPlaceholder = (val) => !val || val.toLowerCase().includes("from") || val.toLowerCase().includes("to") || val.toLowerCase() === "all" || val.toLowerCase().includes("select");
+        const normalizeFreightCat = (val) => {
+            if (!val) return "";
+            const v = String(val).toLowerCase().trim();
+            if (v.includes("air")) return "Air";
+            if (v.includes("sea") || v.includes("ocean")) return "Sea";
+            if (v.includes("road") || v.includes("truck") || v.includes("land")) return "Road";
+            return val.trim();
+        };
+
+        const cleanCatFrom = isCatPlaceholder(categoryFrom) ? "" : normalizeFreightCat(categoryFrom);
+        const cleanCatTo = isCatPlaceholder(categoryTo) ? "" : normalizeFreightCat(categoryTo);
+
+        if (cleanCatFrom && cleanCatTo && cleanCatFrom.toLowerCase() === cleanCatTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom, cleanCatFrom);
+        } else if (cleanCatFrom && cleanCatTo) {
+            const fromLower = cleanCatFrom.toLowerCase();
+            const toLower = cleanCatTo.toLowerCase();
+            const minCat = fromLower <= toLower ? cleanCatFrom : cleanCatTo;
+            const maxCat = fromLower <= toLower ? cleanCatTo : cleanCatFrom;
+            whereClauses.push("LOWER(TRIM(COALESCE(f.freight, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(f.freight, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(minCat, maxCat);
+        } else if (cleanCatFrom) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom, cleanCatFrom);
+        } else if (cleanCatTo) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatTo, cleanCatTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (fqe.reference_no LIKE 'CN%' OR fqe.reference_no LIKE 'CR%' OR fqe.status = 'credit_note')");
+        }
+
+        const sql = `
+            SELECT 
+                fqe.id AS invoice_id,
+                fqe.reference_no,
+                fqe.quote_date,
+                fqe.created_at,
+                fqe.created_at AS invoice_created_at,
+                fqe.final_base_currency,
+                fqe.status AS invoice_status,
+                COALESCE(tu.full_name, fqe.client_name, f.client_name, 'Unknown Customer') AS customer_name,
+                f.freight_number,
+                f.freight_type,
+                f.freight,
+                f.fcl_lcl,
+                f.dimension,
+                f.weight,
+                f.volumetric_weight,
+                f.weight_unit,
+                f.dimension_unit,
+                fqed.id AS detail_id,
+                fqed.admin_frieght_component_id,
+                fqed.description AS item_description,
+                afc.id AS component_id,
+                afc.code AS component_code,
+                afc.description AS component_desc,
+                afc.name AS category_name,
+                COALESCE(fqed.qty, 1) AS qty,
+                COALESCE(fqed.total_cost, 0) AS total_cost,
+                COALESCE(fqed.sales_price, 0) AS sales_price,
+                COALESCE(fqed.vat_incl, fqed.final_amount, 0) AS total_selling
+            FROM freight_quote_estimate fqe
+            INNER JOIN freight_quote_estimate_details fqed ON fqed.freight_quote_estimate_id = fqe.id
+            LEFT JOIN admin_frieght_component afc ON afc.id = fqed.admin_frieght_component_id
+            LEFT JOIN tbl_freight f ON (f.id = fqe.freight_id OR f.freight_quote_estimate_id = fqe.id)
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(fqe.client_id, f.client_id)
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY 
+                COALESCE(afc.code, afc.description, fqed.description) ASC,
+                fqe.created_at ASC,
+                fqe.reference_no ASC,
+                fqed.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const groupsMap = new Map();
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+            let grandGPAmount = 0;
+            let grandWeight = 0;
+            let grandVolume = 0;
+            let grandDimension = 0;
+
+            for (const row of (rows || [])) {
+                let code = cleanReportVal(row.component_code);
+                let desc = cleanReportVal(row.component_desc) || cleanReportVal(row.item_description) || "Other";
+                let groupKey = code ? `${code} - ${desc}` : desc;
+                const rowType = cleanReportVal(row.fcl_lcl);
+                const compId = row.component_id || row.admin_frieght_component_id;
+
+                if (!groupsMap.has(groupKey)) {
+                    groupsMap.set(groupKey, {
+                        admin_frieght_component_id: compId,
+                        code: code,
+                        component_code: code,
+                        description: desc,
+                        name: cleanReportVal(row.category_name, "Freight Charges"),
+                        status: 1,
+                        item_name: groupKey,
+                        item_code: code || null,
+                        item_description: desc,
+                        category_name: cleanReportVal(row.freight || row.freight_type || row.category_name, "Freight Charges"),
+                        freight_type: cleanReportVal(row.freight || row.freight_type, "Unassigned"),
+                        type: rowType,
+                        fcl_lcl: rowType,
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0,
+                        rows: [],
+                        refsSet: new Set()
+                    });
+                }
+
+                const groupObj = groupsMap.get(groupKey);
+                if (row.reference_no) {
+                    groupObj.refsSet.add(cleanReportVal(row.reference_no));
+                }
+                if (!groupObj.type && rowType) {
+                    groupObj.type = rowType;
+                    groupObj.fcl_lcl = rowType;
+                }
+
+                const qty = safeReportNumber(row.qty, 1);
+                const cost = safeReportNumber(row.total_cost, 0);
+                const selling = safeReportNumber(row.total_selling, 0);
+                const gpAmount = selling - cost;
+                const gpPercent = selling !== 0 ? (gpAmount / selling) * 100 : 0;
+
+                const rowWeight = safeReportNumber(row.weight, 0);
+                const rowVolume = safeReportNumber(row.volumetric_weight, 0);
+                const rowDimension = safeReportNumber(row.dimension, 0);
+
+                groupObj.total_qty += qty;
+                groupObj.total_cost += cost;
+                groupObj.total_selling += selling;
+                groupObj.gp_amount += gpAmount;
+                groupObj.total_weight += rowWeight;
+                groupObj.total_volume += rowVolume;
+                groupObj.total_dimension += rowDimension;
+
+                grandQty += qty;
+                grandCost += cost;
+                grandSelling += selling;
+                grandGPAmount += gpAmount;
+                grandWeight += rowWeight;
+                grandVolume += rowVolume;
+                grandDimension += rowDimension;
+
+                const invoiceDate = row.created_at || row.invoice_created_at || row.quote_date;
+
+                if (style === "Detailed") {
+                    groupObj.rows.push({
+                        invoice_id: row.invoice_id,
+                        reference: cleanReportVal(row.reference_no),
+                        reference_no: cleanReportVal(row.reference_no),
+                        document_no: cleanReportVal(row.reference_no),
+                        admin_frieght_component_id: compId,
+                        code: code,
+                        component_code: code,
+                        description: desc,
+                        name: cleanReportVal(row.category_name, "Freight Charges"),
+                        status: 1,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        quote_date: formatReportDate(row.quote_date),
+                        created_at: formatReportDate(row.created_at || row.invoice_created_at),
+                        customer: cleanReportVal(row.customer_name),
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        freight_type: cleanReportVal(row.freight || row.freight_type),
+                        type: rowType,
+                        fcl_lcl: rowType,
+                        weight: Number(rowWeight.toFixed(2)),
+                        weight_display: formatReportQty(rowWeight),
+                        volume: Number(rowVolume.toFixed(2)),
+                        volume_display: formatReportQty(rowVolume),
+                        volumetric_weight: Number(rowVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(rowVolume),
+                        dimension: Number(rowDimension.toFixed(2)),
+                        dimension_display: formatReportQty(rowDimension),
+                        diamension: Number(rowDimension.toFixed(2)),
+                        diamension_display: formatReportQty(rowDimension),
+                        qty_sold: Number(qty.toFixed(4)),
+                        qty_sold_display: formatReportQty(qty),
+                        total_cost: Number(cost.toFixed(2)),
+                        total_cost_display: formatReportCurrency(cost),
+                        total_selling: Number(selling.toFixed(2)),
+                        total_selling_display: formatReportCurrency(selling),
+                        gp_amount: Number(gpAmount.toFixed(2)),
+                        gp_amount_display: formatReportCurrency(gpAmount),
+                        gp_percent: Number(gpPercent.toFixed(4)),
+                        gp_percent_display: `${gpPercent.toFixed(4)}%`
+                    });
+                }
+            }
+
+            const itemsList = [];
+            for (const [, grp] of groupsMap) {
+                grp.total_qty = Number(grp.total_qty.toFixed(4));
+                grp.total_qty_display = formatReportQty(grp.total_qty);
+
+                grp.total_cost = Number(grp.total_cost.toFixed(2));
+                grp.total_cost_display = formatReportCurrency(grp.total_cost);
+
+                grp.total_selling = Number(grp.total_selling.toFixed(2));
+                grp.total_selling_display = formatReportCurrency(grp.total_selling);
+
+                grp.gp_amount = Number(grp.gp_amount.toFixed(2));
+                grp.gp_amount_display = formatReportCurrency(grp.gp_amount);
+
+                const groupGPPercent = grp.total_selling !== 0 ? (grp.gp_amount / grp.total_selling) * 100 : 0;
+                grp.gp_percent = Number(groupGPPercent.toFixed(4));
+                grp.gp_percent_display = `${groupGPPercent.toFixed(4)}%`;
+
+                grp.total_weight = Number(grp.total_weight.toFixed(2));
+                grp.total_weight_display = formatReportQty(grp.total_weight);
+                grp.total_volume = Number(grp.total_volume.toFixed(2));
+                grp.total_volume_display = formatReportQty(grp.total_volume);
+                grp.total_dimension = Number(grp.total_dimension.toFixed(2));
+                grp.total_dimension_display = formatReportQty(grp.total_dimension);
+
+                grp.weight = grp.total_weight;
+                grp.weight_display = grp.total_weight_display;
+                grp.volume = grp.total_volume;
+                grp.volume_display = grp.total_volume_display;
+                grp.volumetric_weight = grp.total_volume;
+                grp.volumetric_weight_display = grp.total_volume_display;
+                grp.dimension = grp.total_dimension;
+                grp.dimension_display = grp.total_dimension_display;
+                grp.diamension = grp.total_dimension;
+                grp.diamension_display = grp.total_dimension_display;
+
+                const uniqueRefs = Array.from(grp.refsSet || []);
+                grp.reference_no = uniqueRefs.join(", ") || "";
+                grp.reference = grp.reference_no;
+                grp.document_no = grp.reference_no;
+                delete grp.refsSet;
+
+                itemsList.push(grp);
+            }
+
+            grandQty = Number(grandQty.toFixed(4));
+            grandCost = Number(grandCost.toFixed(2));
+            grandSelling = Number(grandSelling.toFixed(2));
+            grandGPAmount = Number(grandGPAmount.toFixed(2));
+            grandWeight = Number(grandWeight.toFixed(2));
+            grandVolume = Number(grandVolume.toFixed(2));
+            grandDimension = Number(grandDimension.toFixed(2));
+
+            const grandGPPercent = grandSelling !== 0 ? (grandGPAmount / grandSelling) * 100 : 0;
+
+            const grandTotalObj = {
+                qty_sold: grandQty,
+                qty_sold_display: formatReportQty(grandQty),
+                total_qty: grandQty,
+                total_qty_display: formatReportQty(grandQty),
+                total_cost: grandCost,
+                total_cost_display: formatReportCurrency(grandCost),
+                total_selling: grandSelling,
+                total_selling_display: formatReportCurrency(grandSelling),
+                gp_amount: grandGPAmount,
+                gp_amount_display: formatReportCurrency(grandGPAmount),
+                gp_percent: Number(grandGPPercent.toFixed(4)),
+                gp_percent_display: `${grandGPPercent.toFixed(4)}%`,
+                total_weight: grandWeight,
+                total_weight_display: formatReportQty(grandWeight),
+                total_volume: grandVolume,
+                total_volume_display: formatReportQty(grandVolume),
+                total_volumetric_weight: grandVolume,
+                total_volumetric_weight_display: formatReportQty(grandVolume),
+                total_dimension: grandDimension,
+                total_dimension_display: formatReportQty(grandDimension),
+                weight: grandWeight,
+                weight_display: formatReportQty(grandWeight),
+                volume: grandVolume,
+                volume_display: formatReportQty(grandVolume),
+                volumetric_weight: grandVolume,
+                volumetric_weight_display: formatReportQty(grandVolume),
+                dimension: grandDimension,
+                dimension_display: formatReportQty(grandDimension),
+                diamension: grandDimension,
+                diamension_display: formatReportQty(grandDimension)
+            };
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Item Report fetched successfully",
+                report_info: {
+                    title: "Freight/ Admin - By Freight Type",
+                    company: "Asia Direct Africa",
+                    item: cleanItemFrom && cleanItemTo ? `${cleanItemFrom} to ${cleanItemTo}` : (cleanItemFrom || "All Items"),
+                    category: cleanCatFrom && cleanCatTo ? `${cleanCatFrom} to ${cleanCatTo}` : (cleanCatFrom || cleanCatTo || "All Categories"),
+                    date_range: `${formatReportDate(startDate) || '01/07/2026'} - ${formatReportDate(endDate) || '31/07/2026'}`,
+                    cost: costType || "Average Cost at time of Sale",
+                    freight_types: "Airfreight Sea freight Road Freight",
+                    style: style
+                },
+                filters: {
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    item_from: itemFrom || "All",
+                    item_to: itemTo || "All",
+                    category_from: categoryFrom || "All",
+                    category_to: categoryTo || "All",
+                    sales_account: salesAccount || "All",
+                    status: body.status || "Both",
+                    item_type: body.item_type || "Both",
+                    cost: costType,
+                    style: style,
+                    include_credit_notes: includeCreditNotes
+                },
+                totalItems: itemsList.length,
+                grand_total: grandTotalObj,
+                totals: grandTotalObj,
+                items: itemsList,
+                // data: itemsList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
+
+
+// =========================================================================
+// SALES BY ITEM ORDER REPORT API (Freight/ Admin - By Freight Type)
+// Tables: quote_invoice, quote_invoice_details, admin_frieght_component, tbl_freight, tbl_orders, tbl_users
+// =========================================================================
+
+const newSalesByItemOrderReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date;
+
+        const itemFrom = cleanReportVal(body.item_from || body.from_item);
+        const itemTo = cleanReportVal(body.item_to || body.to_item);
+
+        const categoryFrom = cleanReportVal(body.category_from || body.from_category);
+        const categoryTo = cleanReportVal(body.category_to || body.to_category);
+
+        const salesAccount = cleanReportVal(body.sales_account || body.salesAccount);
+        const statusFilter = cleanReportVal(body.status || body.active || "Both").toLowerCase();
+        const itemType = cleanReportVal(body.item_type || body.itemType || "Both").toLowerCase();
+        const costType = cleanReportVal(body.cost || body.cost_type || "Average Cost");
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "qi.is_deleted = 0",
+            "(qid.admin_frieght_component_id IN (20, 22, 23) OR afc.code IN ('AFT', 'RFT', 'SFT') OR LOWER(TRIM(afc.description)) IN ('airfreight', 'road freight', 'sea freight'))"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(qi.created_at) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(qi.created_at) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(qi.created_at) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (statusFilter === "active" || statusFilter === "1") {
+            whereClauses.push("(tu.status = 1 OR tu.status IS NULL)");
+        } else if (statusFilter === "inactive" || statusFilter === "0") {
+            whereClauses.push("tu.status = 0");
+        }
+
+        const isItemPlaceholder = (val) => !val || val.toLowerCase().includes("from") || val.toLowerCase().includes("to") || val.toLowerCase() === "all";
+        const cleanItemFrom = isItemPlaceholder(itemFrom) ? "" : itemFrom;
+        const cleanItemTo = isItemPlaceholder(itemTo) ? "" : itemTo;
+
+        if (cleanItemFrom && cleanItemTo && cleanItemFrom.toLowerCase() === cleanItemTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(afc.code)) = LOWER(TRIM(?)) OR LOWER(TRIM(afc.description)) LIKE CONCAT('%', LOWER(TRIM(?)), '%'))");
+            queryParams.push(cleanItemFrom, cleanItemFrom);
+        } else if (cleanItemFrom && cleanItemTo) {
+            whereClauses.push("LOWER(TRIM(afc.code)) >= LOWER(TRIM(?)) AND LOWER(TRIM(afc.code)) <= LOWER(TRIM(?))");
+            queryParams.push(cleanItemFrom, cleanItemTo);
+        } else if (cleanItemFrom) {
+            whereClauses.push("(LOWER(TRIM(afc.code)) >= LOWER(TRIM(?)) OR LOWER(TRIM(afc.description)) LIKE CONCAT('%', LOWER(TRIM(?)), '%'))");
+            queryParams.push(cleanItemFrom, cleanItemFrom);
+        } else if (cleanItemTo) {
+            whereClauses.push("LOWER(TRIM(afc.code)) <= LOWER(TRIM(?))");
+            queryParams.push(cleanItemTo);
+        }
+
+        const isCatPlaceholder = (val) => !val || val.toLowerCase().includes("from") || val.toLowerCase().includes("to") || val.toLowerCase() === "all" || val.toLowerCase().includes("select");
+        const normalizeFreightCat = (val) => {
+            if (!val) return "";
+            const v = String(val).toLowerCase().trim();
+            if (v.includes("air")) return "Air";
+            if (v.includes("sea") || v.includes("ocean")) return "Sea";
+            if (v.includes("road") || v.includes("truck") || v.includes("land")) return "Road";
+            return val.trim();
+        };
+
+        const cleanCatFrom = isCatPlaceholder(categoryFrom) ? "" : normalizeFreightCat(categoryFrom);
+        const cleanCatTo = isCatPlaceholder(categoryTo) ? "" : normalizeFreightCat(categoryTo);
+
+        if (cleanCatFrom && cleanCatTo && cleanCatFrom.toLowerCase() === cleanCatTo.toLowerCase()) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom, cleanCatFrom);
+        } else if (cleanCatFrom && cleanCatTo) {
+            const fromLower = cleanCatFrom.toLowerCase();
+            const toLower = cleanCatTo.toLowerCase();
+            const minCat = fromLower <= toLower ? cleanCatFrom : cleanCatTo;
+            const maxCat = fromLower <= toLower ? cleanCatTo : cleanCatFrom;
+            whereClauses.push("LOWER(TRIM(COALESCE(f.freight, f.freight_type, ''))) >= LOWER(TRIM(?))");
+            whereClauses.push("LOWER(TRIM(COALESCE(f.freight, f.freight_type, ''))) <= LOWER(TRIM(?))");
+            queryParams.push(minCat, maxCat);
+        } else if (cleanCatFrom) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatFrom, cleanCatFrom);
+        } else if (cleanCatTo) {
+            whereClauses.push("(LOWER(TRIM(f.freight)) = LOWER(TRIM(?)) OR LOWER(TRIM(f.freight_type)) = LOWER(TRIM(?)))");
+            queryParams.push(cleanCatTo, cleanCatTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (qi.reference_no LIKE 'CN%' OR qi.reference_no LIKE 'CR%' OR qi.status = 'credit_note' OR qi.is_credit_note = 1)");
+        }
+
+        const sql = `
+            SELECT 
+                qi.id AS invoice_id,
+                qi.reference_no,
+                qi.customer_invoice_no,
+                qi.quote_date,
+                qi.created_at,
+                qi.created_at AS invoice_created_at,
+                qi.final_base_currency,
+                qi.status AS invoice_status,
+                COALESCE(tu.full_name, qi.client_name, f.client_name, ord.client_name, 'Unknown Customer') AS customer_name,
+                f.freight_number,
+                f.freight_type,
+                f.freight,
+                f.fcl_lcl,
+                f.dimension AS freight_dimension,
+                f.weight AS freight_weight,
+                f.volumetric_weight AS freight_volumetric_weight,
+                f.weight_unit,
+                f.dimension_unit,
+                ord.id AS order_id,
+                ord.order_number,
+                ord.dimensions AS order_dimensions,
+                ord.weight AS order_weight,
+                ord.CBM AS order_cbm,
+                qid.id AS detail_id,
+                qid.admin_frieght_component_id,
+                qid.description AS item_description,
+                afc.id AS component_id,
+                afc.code AS component_code,
+                afc.description AS component_desc,
+                afc.name AS category_name,
+                COALESCE(qid.qty, 1) AS qty,
+                COALESCE(qid.total_cost, 0) AS total_cost,
+                COALESCE(qid.sales_price, 0) AS sales_price,
+                COALESCE(qid.vat_incl, qid.final_amount, 0) AS total_selling
+            FROM quote_invoice qi
+            INNER JOIN quote_invoice_details qid ON qid.quote_invoice_id = qi.id
+            LEFT JOIN admin_frieght_component afc ON afc.id = qid.admin_frieght_component_id
+            LEFT JOIN tbl_freight f ON (f.id = qi.freight_id OR f.quote_invoice_id = qi.id)
+            LEFT JOIN tbl_orders ord ON (ord.id = qi.order_id OR (qi.order_id IS NULL AND ord.id = (
+                SELECT MAX(o2.id) 
+                FROM tbl_orders o2 
+                WHERE o2.freight_id = COALESCE(qi.freight_id, f.id) 
+                  AND o2.freight_id > 0
+            )))
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(qi.client_id, f.client_id)
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY 
+                COALESCE(afc.code, afc.description, qid.description) ASC,
+                qi.created_at ASC,
+                qi.reference_no ASC,
+                qid.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const parseOrderNumeric = (val) => {
+                if (val === null || val === undefined) return null;
+                const str = String(val).trim();
+                if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return null;
+                const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+                if (!match) return null;
+                const num = parseFloat(match[0]);
+                return isNaN(num) ? null : num;
+            };
+
+            const groupsMap = new Map();
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+            let grandGPAmount = 0;
+            let grandWeight = 0;
+            let grandVolume = 0;
+            let grandDimension = 0;
+
+            for (const row of (rows || [])) {
+                let code = cleanReportVal(row.component_code);
+                let desc = cleanReportVal(row.component_desc) || cleanReportVal(row.item_description) || "Other";
+                let groupKey = code ? `${code} - ${desc}` : desc;
+                const rowType = cleanReportVal(row.fcl_lcl);
+                const rowRefNo = cleanReportVal(row.reference_no) || cleanReportVal(row.customer_invoice_no) || cleanReportVal(row.order_number) || `INV${row.invoice_id}`;
+                const compId = row.component_id || row.admin_frieght_component_id;
+
+                if (!groupsMap.has(groupKey)) {
+                    groupsMap.set(groupKey, {
+                        admin_frieght_component_id: compId,
+                        code: code,
+                        component_code: code,
+                        description: desc,
+                        name: cleanReportVal(row.category_name, "Freight Charges"),
+                        status: 1,
+                        item_name: groupKey,
+                        item_code: code || null,
+                        item_description: desc,
+                        reference: rowRefNo,
+                        reference_no: rowRefNo,
+                        document_no: rowRefNo,
+                        category_name: cleanReportVal(row.freight || row.freight_type || row.category_name, "Freight Charges"),
+                        freight_type: cleanReportVal(row.freight || row.freight_type, "Unassigned"),
+                        type: rowType,
+                        fcl_lcl: rowType,
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0,
+                        rows: [],
+                        refsSet: new Set()
+                    });
+                }
+
+                const groupObj = groupsMap.get(groupKey);
+                if (rowRefNo) {
+                    groupObj.refsSet.add(rowRefNo);
+                }
+                if (!groupObj.type && rowType) {
+                    groupObj.type = rowType;
+                    groupObj.fcl_lcl = rowType;
+                }
+
+                const qty = safeReportNumber(row.qty, 1);
+                const cost = safeReportNumber(row.total_cost, 0);
+                const selling = safeReportNumber(row.total_selling, 0);
+                const gpAmount = selling - cost;
+                const gpPercent = selling !== 0 ? (gpAmount / selling) * 100 : 0;
+
+                const orderWeight = parseOrderNumeric(row.order_weight);
+                const freightWeight = safeReportNumber(row.freight_weight, 0);
+                const rowWeight = (orderWeight !== null && orderWeight !== undefined) ? orderWeight : freightWeight;
+
+                const orderDim = parseOrderNumeric(row.order_dimensions);
+                const freightDim = safeReportNumber(row.freight_dimension, 0);
+                const rowDimension = (orderDim !== null && orderDim !== undefined) ? orderDim : freightDim;
+
+                const orderCbm = parseOrderNumeric(row.order_cbm);
+                const freightVol = safeReportNumber(row.freight_volumetric_weight, 0);
+                const rowVolume = (orderCbm !== null && orderCbm !== undefined) ? orderCbm : freightVol;
+
+                groupObj.total_qty += qty;
+                groupObj.total_cost += cost;
+                groupObj.total_selling += selling;
+                groupObj.gp_amount += gpAmount;
+                groupObj.total_weight += rowWeight;
+                groupObj.total_volume += rowVolume;
+                groupObj.total_dimension += rowDimension;
+
+                grandQty += qty;
+                grandCost += cost;
+                grandSelling += selling;
+                grandGPAmount += gpAmount;
+                grandWeight += rowWeight;
+                grandVolume += rowVolume;
+                grandDimension += rowDimension;
+
+                const invoiceDate = row.created_at || row.invoice_created_at || row.quote_date;
+
+                if (style === "Detailed") {
+                    groupObj.rows.push({
+                        invoice_id: row.invoice_id,
+                        reference: rowRefNo,
+                        reference_no: rowRefNo,
+                        document_no: rowRefNo,
+                        customer_invoice_no: cleanReportVal(row.customer_invoice_no),
+                        order_number: cleanReportVal(row.order_number),
+                        admin_frieght_component_id: compId,
+                        code: code,
+                        component_code: code,
+                        description: desc,
+                        name: cleanReportVal(row.category_name, "Freight Charges"),
+                        status: 1,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        quote_date: formatReportDate(row.quote_date),
+                        created_at: formatReportDate(row.created_at || row.invoice_created_at),
+                        customer: cleanReportVal(row.customer_name),
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        freight_type: cleanReportVal(row.freight || row.freight_type),
+                        type: rowType,
+                        fcl_lcl: rowType,
+                        weight: Number(rowWeight.toFixed(2)),
+                        weight_display: formatReportQty(rowWeight),
+                        volume: Number(rowVolume.toFixed(2)),
+                        volume_display: formatReportQty(rowVolume),
+                        volumetric_weight: Number(rowVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(rowVolume),
+                        dimension: Number(rowDimension.toFixed(2)),
+                        dimension_display: formatReportQty(rowDimension),
+                        diamension: Number(rowDimension.toFixed(2)),
+                        diamension_display: formatReportQty(rowDimension),
+                        qty_sold: Number(qty.toFixed(4)),
+                        qty_sold_display: formatReportQty(qty),
+                        total_cost: Number(cost.toFixed(2)),
+                        total_cost_display: formatReportCurrency(cost),
+                        total_selling: Number(selling.toFixed(2)),
+                        total_selling_display: formatReportCurrency(selling),
+                        gp_amount: Number(gpAmount.toFixed(2)),
+                        gp_amount_display: formatReportCurrency(gpAmount),
+                        gp_percent: Number(gpPercent.toFixed(4)),
+                        gp_percent_display: `${gpPercent.toFixed(4)}%`
+                    });
+                }
+            }
+
+            const itemsList = [];
+            for (const [, grp] of groupsMap) {
+                grp.total_qty = Number(grp.total_qty.toFixed(4));
+                grp.total_qty_display = formatReportQty(grp.total_qty);
+
+                grp.total_cost = Number(grp.total_cost.toFixed(2));
+                grp.total_cost_display = formatReportCurrency(grp.total_cost);
+
+                grp.total_selling = Number(grp.total_selling.toFixed(2));
+                grp.total_selling_display = formatReportCurrency(grp.total_selling);
+
+                grp.gp_amount = Number(grp.gp_amount.toFixed(2));
+                grp.gp_amount_display = formatReportCurrency(grp.gp_amount);
+
+                const groupGPPercent = grp.total_selling !== 0 ? (grp.gp_amount / grp.total_selling) * 100 : 0;
+                grp.gp_percent = Number(groupGPPercent.toFixed(4));
+                grp.gp_percent_display = `${groupGPPercent.toFixed(4)}%`;
+
+                grp.total_weight = Number(grp.total_weight.toFixed(2));
+                grp.total_weight_display = formatReportQty(grp.total_weight);
+                grp.total_volume = Number(grp.total_volume.toFixed(2));
+                grp.total_volume_display = formatReportQty(grp.total_volume);
+                grp.total_dimension = Number(grp.total_dimension.toFixed(2));
+                grp.total_dimension_display = formatReportQty(grp.total_dimension);
+
+                grp.weight = grp.total_weight;
+                grp.weight_display = grp.total_weight_display;
+                grp.volume = grp.total_volume;
+                grp.volume_display = grp.total_volume_display;
+                grp.volumetric_weight = grp.total_volume;
+                grp.volumetric_weight_display = grp.total_volume_display;
+                grp.dimension = grp.total_dimension;
+                grp.dimension_display = grp.total_dimension_display;
+                grp.diamension = grp.total_dimension;
+                grp.diamension_display = grp.total_dimension_display;
+
+                const uniqueRefs = Array.from(grp.refsSet || []);
+                if (uniqueRefs.length > 0) {
+                    grp.reference_no = uniqueRefs.join(", ");
+                    grp.reference = grp.reference_no;
+                    grp.document_no = grp.reference_no;
+                }
+                delete grp.refsSet;
+                grp.invoices = grp.rows;
+
+                itemsList.push(grp);
+            }
+
+            grandQty = Number(grandQty.toFixed(4));
+            grandCost = Number(grandCost.toFixed(2));
+            grandSelling = Number(grandSelling.toFixed(2));
+            grandGPAmount = Number(grandGPAmount.toFixed(2));
+            grandWeight = Number(grandWeight.toFixed(2));
+            grandVolume = Number(grandVolume.toFixed(2));
+            grandDimension = Number(grandDimension.toFixed(2));
+
+            const grandGPPercent = grandSelling !== 0 ? (grandGPAmount / grandSelling) * 100 : 0;
+
+            const grandTotalObj = {
+                qty_sold: grandQty,
+                qty_sold_display: formatReportQty(grandQty),
+                total_qty: grandQty,
+                total_qty_display: formatReportQty(grandQty),
+                total_cost: grandCost,
+                total_cost_display: formatReportCurrency(grandCost),
+                total_selling: grandSelling,
+                total_selling_display: formatReportCurrency(grandSelling),
+                gp_amount: grandGPAmount,
+                gp_amount_display: formatReportCurrency(grandGPAmount),
+                gp_percent: Number(grandGPPercent.toFixed(4)),
+                gp_percent_display: `${grandGPPercent.toFixed(4)}%`,
+                total_weight: grandWeight,
+                total_weight_display: formatReportQty(grandWeight),
+                total_volume: grandVolume,
+                total_volume_display: formatReportQty(grandVolume),
+                total_volumetric_weight: grandVolume,
+                total_volumetric_weight_display: formatReportQty(grandVolume),
+                total_dimension: grandDimension,
+                total_dimension_display: formatReportQty(grandDimension),
+                weight: grandWeight,
+                weight_display: formatReportQty(grandWeight),
+                volume: grandVolume,
+                volume_display: formatReportQty(grandVolume),
+                volumetric_weight: grandVolume,
+                volumetric_weight_display: formatReportQty(grandVolume),
+                dimension: grandDimension,
+                dimension_display: formatReportQty(grandDimension),
+                diamension: grandDimension,
+                diamension_display: formatReportQty(grandDimension)
+            };
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Item Order Report fetched successfully",
+                report_info: {
+                    title: "Freight/ Admin - By Freight Type",
+                    company: "Asia Direct Africa",
+                    item: cleanItemFrom && cleanItemTo ? `${cleanItemFrom} to ${cleanItemTo}` : (cleanItemFrom || "All Items"),
+                    category: cleanCatFrom && cleanCatTo ? `${cleanCatFrom} to ${cleanCatTo}` : (cleanCatFrom || cleanCatTo || "All Categories"),
+                    date_range: `${formatReportDate(startDate) || '01/07/2026'} - ${formatReportDate(endDate) || '31/07/2026'}`,
+                    cost: costType || "Average Cost at time of Sale",
+                    freight_types: "Airfreight Sea freight Road Freight",
+                    style: style
+                },
+                filters: {
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    item_from: itemFrom || "All",
+                    item_to: itemTo || "All",
+                    category_from: categoryFrom || "All",
+                    category_to: categoryTo || "All",
+                    sales_account: salesAccount || "All",
+                    status: body.status || "Both",
+                    item_type: body.item_type || "Both",
+                    cost: costType,
+                    style: style,
+                    include_credit_notes: includeCreditNotes
+                },
+                totalItems: itemsList.length,
+                grand_total: grandTotalObj,
+                totals: grandTotalObj,
+                items: itemsList,
+                // data: itemsList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
+
+
+// =========================================================================
+// SALES BY SALES REP REPORT API
+// Tables: quote_invoice, quote_invoice_details, tbl_freight, tbl_users
+// =========================================================================
+
+const newSalesBySalesRepReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date;
+
+        const fromSalesRep = cleanReportVal(body.from_sales_rep || body.sales_rep_from || body.fromSalesRep);
+        const toSalesRep = cleanReportVal(body.to_sales_rep || body.sales_rep_to || body.toSalesRep);
+
+        const activeFilter = cleanReportVal(body.active || body.status || "Both").toLowerCase();
+        const salesType = cleanReportVal(body.sales_type || body.salesType || "All");
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "fqe.is_deleted = 0"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(fqe.created_at) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(fqe.created_at) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(fqe.created_at) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (activeFilter === "active" || activeFilter === "1") {
+            whereClauses.push("(rep.status = 1 OR rep.status IS NULL)");
+        } else if (activeFilter === "inactive" || activeFilter === "0") {
+            whereClauses.push("rep.status = 0");
+        }
+
+        const isRepPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanRepFrom = isRepPlaceholder(fromSalesRep) ? "" : fromSalesRep;
+        const cleanRepTo = isRepPlaceholder(toSalesRep) ? "" : toSalesRep;
+
+        if (cleanRepFrom && cleanRepTo && cleanRepFrom.toLowerCase() === cleanRepTo.toLowerCase()) {
+            if (/^\d+$/.test(cleanRepFrom)) {
+                whereClauses.push("(rep.id = ? OR tf.sales_representative = ?)");
+                queryParams.push(Number(cleanRepFrom), Number(cleanRepFrom));
+            } else {
+                whereClauses.push(`(
+                    LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                )`);
+                queryParams.push(cleanRepFrom, cleanRepFrom);
+            }
+        } else if (cleanRepFrom && cleanRepTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) >= LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanRepFrom, cleanRepTo);
+        } else if (cleanRepFrom) {
+            if (/^\d+$/.test(cleanRepFrom)) {
+                whereClauses.push("(rep.id = ? OR tf.sales_representative = ?)");
+                queryParams.push(Number(cleanRepFrom), Number(cleanRepFrom));
+            } else {
+                whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) >= LOWER(TRIM(?))");
+                queryParams.push(cleanRepFrom);
+            }
+        } else if (cleanRepTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanRepTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (fqe.reference_no LIKE 'CN%' OR fqe.reference_no LIKE 'CR%' OR fqe.status = 'credit_note')");
+        }
+
+        const sql = `
+            SELECT 
+                COALESCE(rep.id, tf.sales_representative) AS sales_rep_id,
+                COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned') AS sales_rep_name,
+                fqe.id AS invoice_id,
+                fqe.reference_no,
+                fqe.quote_date,
+                fqe.created_at,
+                fqe.created_at AS invoice_created_at,
+                fqe.final_base_currency,
+                fqe.sumof_totalcost,
+                fqe.sumof_finalamount,
+                fqe.sumof_vatincl,
+                COALESCE(tu.full_name, fqe.client_name, tf.client_name, 'Unknown Customer') AS customer_name,
+                tf.freight_number,
+                tf.freight,
+                tf.fcl_lcl,
+                tf.dimension,
+                tf.weight,
+                tf.volumetric_weight,
+                tf.weight_unit,
+                tf.dimension_unit,
+                fqed.id AS detail_id,
+                COALESCE(fqed.qty, 1) AS qty,
+                COALESCE(fqed.total_cost, 0) AS total_cost,
+                COALESCE(fqed.vat_incl, fqed.final_amount, 0) AS total_selling
+            FROM freight_quote_estimate fqe
+            LEFT JOIN tbl_freight tf ON (tf.id = fqe.freight_id OR tf.freight_quote_estimate_id = fqe.id)
+            LEFT JOIN tbl_users rep ON (rep.id = tf.sales_representative)
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(fqe.client_id, tf.client_id)
+            LEFT JOIN freight_quote_estimate_details fqed ON fqed.freight_quote_estimate_id = fqe.id
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY 
+                sales_rep_name ASC,
+                fqe.created_at ASC,
+                fqe.reference_no ASC,
+                fqed.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const repsMap = new Map();
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+            let grandGPAmount = 0;
+            let grandWeight = 0;
+            let grandVolume = 0;
+            let grandDimension = 0;
+
+            for (const row of (rows || [])) {
+                const repName = cleanReportVal(row.sales_rep_name, "Unassigned");
+                const repKey = repName.toLowerCase();
+
+                if (!repsMap.has(repKey)) {
+                    repsMap.set(repKey, {
+                        sales_rep_id: row.sales_rep_id || null,
+                        sales_rep: repName,
+                        sales_rep_name: repName,
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0,
+                        invoicesMap: new Map()
+                    });
+                }
+
+                const repObj = repsMap.get(repKey);
+                const invId = row.invoice_id;
+                const rowWeight = safeReportNumber(row.weight, 0);
+                const rowVolume = safeReportNumber(row.volumetric_weight, 0);
+                const rowDimension = safeReportNumber(row.dimension, 0);
+
+                if (!repObj.invoicesMap.has(invId)) {
+                    const invoiceDate = row.created_at || row.invoice_created_at || row.quote_date;
+                    const fclLcl = cleanReportVal(row.fcl_lcl);
+                    repObj.invoicesMap.set(invId, {
+                        invoice_id: invId,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        quote_date: formatReportDate(row.quote_date),
+                        created_at: formatReportDate(row.created_at || row.invoice_created_at),
+                        reference: cleanReportVal(row.reference_no, `QO${invId}`),
+                        reference_no: cleanReportVal(row.reference_no, `QO${invId}`),
+                        customer: cleanReportVal(row.customer_name),
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        type: fclLcl,
+                        fcl_lcl: fclLcl,
+                        weight: Number(rowWeight.toFixed(2)),
+                        weight_display: formatReportQty(rowWeight),
+                        volume: Number(rowVolume.toFixed(2)),
+                        volume_display: formatReportQty(rowVolume),
+                        volumetric_weight: Number(rowVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(rowVolume),
+                        dimension: Number(rowDimension.toFixed(2)),
+                        dimension_display: formatReportQty(rowDimension),
+                        diamension: Number(rowDimension.toFixed(2)),
+                        diamension_display: formatReportQty(rowDimension),
+                        currency: cleanReportVal(row.final_base_currency, "ZAR"),
+                        qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0
+                    });
+                }
+
+                const invObj = repObj.invoicesMap.get(invId);
+                const fclLcl = cleanReportVal(row.fcl_lcl);
+                if (!invObj.type && fclLcl) {
+                    invObj.type = fclLcl;
+                    invObj.fcl_lcl = fclLcl;
+                }
+                if (!invObj.freight && row.freight) invObj.freight = cleanReportVal(row.freight);
+                if (!invObj.freight_number && row.freight_number) invObj.freight_number = cleanReportVal(row.freight_number);
+
+                if ((!invObj.weight || invObj.weight === 0) && rowWeight > 0) {
+                    invObj.weight = Number(rowWeight.toFixed(2));
+                    invObj.weight_display = formatReportQty(rowWeight);
+                }
+                if ((!invObj.volume || invObj.volume === 0) && rowVolume > 0) {
+                    invObj.volume = Number(rowVolume.toFixed(2));
+                    invObj.volume_display = formatReportQty(rowVolume);
+                    invObj.volumetric_weight = Number(rowVolume.toFixed(2));
+                    invObj.volumetric_weight_display = formatReportQty(rowVolume);
+                }
+                if ((!invObj.dimension || invObj.dimension === 0) && rowDimension > 0) {
+                    invObj.dimension = Number(rowDimension.toFixed(2));
+                    invObj.dimension_display = formatReportQty(rowDimension);
+                    invObj.diamension = Number(rowDimension.toFixed(2));
+                    invObj.diamension_display = formatReportQty(rowDimension);
+                }
+
+                if (row.detail_id) {
+                    const qty = safeReportNumber(row.qty, 1);
+                    const cost = safeReportNumber(row.total_cost, 0);
+                    const selling = safeReportNumber(row.total_selling, 0);
+
+                    invObj.qty += qty;
+                    invObj.total_cost += cost;
+                    invObj.total_selling += selling;
+                } else if (invObj.qty === 0 && invObj.total_selling === 0) {
+                    const cost = safeReportNumber(row.sumof_totalcost, 0);
+                    const selling = safeReportNumber(row.sumof_vatincl || row.sumof_finalamount, 0);
+                    invObj.qty = 1;
+                    invObj.total_cost = cost;
+                    invObj.total_selling = selling;
+                }
+            }
+
+            const repsList = [];
+
+            for (const [, repObj] of repsMap) {
+                const invoicesList = [];
+                const seenInvoiceKeys = new Set();
+
+                for (const [, inv] of repObj.invoicesMap) {
+                    const invKey = (inv.reference_no || "").toLowerCase().trim();
+                    if (invKey && seenInvoiceKeys.has(invKey)) {
+                        continue;
+                    }
+                    if (invKey) seenInvoiceKeys.add(invKey);
+
+                    const invGPAmount = inv.total_selling - inv.total_cost;
+                    const invGPPercent = inv.total_selling !== 0 ? (invGPAmount / inv.total_selling) * 100 : 0;
+
+                    inv.qty = Number(inv.qty.toFixed(4));
+                    inv.qty_display = formatReportQty(inv.qty);
+
+                    inv.total_cost = Number(inv.total_cost.toFixed(2));
+                    inv.total_cost_display = formatReportCurrency(inv.total_cost);
+
+                    inv.total_selling = Number(inv.total_selling.toFixed(2));
+                    inv.total_selling_display = formatReportCurrency(inv.total_selling);
+
+                    inv.gp_amount = Number(invGPAmount.toFixed(2));
+                    inv.gp_amount_display = formatReportCurrency(invGPAmount);
+
+                    inv.gp_percent = Number(invGPPercent.toFixed(2));
+                    inv.gp_percent_display = `${inv.gp_percent.toFixed(2)}%`;
+
+                    repObj.total_qty += inv.qty;
+                    repObj.total_cost += inv.total_cost;
+                    repObj.total_selling += inv.total_selling;
+                    repObj.gp_amount += invGPAmount;
+                    repObj.total_weight += (inv.weight || 0);
+                    repObj.total_volume += (inv.volume || 0);
+                    repObj.total_dimension += (inv.dimension || 0);
+
+                    grandQty += inv.qty;
+                    grandCost += inv.total_cost;
+                    grandSelling += inv.total_selling;
+                    grandGPAmount += invGPAmount;
+                    grandWeight += (inv.weight || 0);
+                    grandVolume += (inv.volume || 0);
+                    grandDimension += (inv.dimension || 0);
+
+                    invoicesList.push(inv);
+                }
+
+                repObj.total_qty = Number(repObj.total_qty.toFixed(4));
+                repObj.total_qty_display = formatReportQty(repObj.total_qty);
+
+                repObj.total_cost = Number(repObj.total_cost.toFixed(2));
+                repObj.total_cost_display = formatReportCurrency(repObj.total_cost);
+
+                repObj.total_selling = Number(repObj.total_selling.toFixed(2));
+                repObj.total_selling_display = formatReportCurrency(repObj.total_selling);
+
+                repObj.gp_amount = Number(repObj.gp_amount.toFixed(2));
+                repObj.gp_amount_display = formatReportCurrency(repObj.gp_amount);
+
+                const repGPPercent = repObj.total_selling !== 0 ? (repObj.gp_amount / repObj.total_selling) * 100 : 0;
+                repObj.gp_percent = Number(repGPPercent.toFixed(2));
+                repObj.gp_percent_display = `${repObj.gp_percent.toFixed(2)}%`;
+
+                repObj.total_weight = Number(repObj.total_weight.toFixed(2));
+                repObj.total_weight_display = formatReportQty(repObj.total_weight);
+                repObj.total_volume = Number(repObj.total_volume.toFixed(2));
+                repObj.total_volume_display = formatReportQty(repObj.total_volume);
+                repObj.total_dimension = Number(repObj.total_dimension.toFixed(2));
+                repObj.total_dimension_display = formatReportQty(repObj.total_dimension);
+
+                repsList.push({
+                    sales_rep_id: repObj.sales_rep_id,
+                    sales_rep: repObj.sales_rep,
+                    sales_rep_name: repObj.sales_rep_name,
+                    total_qty: repObj.total_qty,
+                    total_qty_display: repObj.total_qty_display,
+                    total_cost: repObj.total_cost,
+                    total_cost_display: repObj.total_cost_display,
+                    total_selling: repObj.total_selling,
+                    total_selling_display: repObj.total_selling_display,
+                    gp_amount: repObj.gp_amount,
+                    gp_amount_display: repObj.gp_amount_display,
+                    gp_percent: repObj.gp_percent,
+                    gp_percent_display: repObj.gp_percent_display,
+                    total_weight: repObj.total_weight,
+                    total_weight_display: repObj.total_weight_display,
+                    total_volume: repObj.total_volume,
+                    total_volume_display: repObj.total_volume_display,
+                    total_dimension: repObj.total_dimension,
+                    total_dimension_display: repObj.total_dimension_display,
+                    weight: repObj.total_weight,
+                    volume: repObj.total_volume,
+                    dimension: repObj.total_dimension,
+                    diamension: repObj.total_dimension,
+                    invoices: style === "Detailed" ? invoicesList : []
+                });
+            }
+
+            grandQty = Number(grandQty.toFixed(4));
+            grandCost = Number(grandCost.toFixed(2));
+            grandSelling = Number(grandSelling.toFixed(2));
+            grandGPAmount = Number(grandGPAmount.toFixed(2));
+            grandWeight = Number(grandWeight.toFixed(2));
+            grandVolume = Number(grandVolume.toFixed(2));
+            grandDimension = Number(grandDimension.toFixed(2));
+
+            const grandGPPercent = grandSelling !== 0 ? (grandGPAmount / grandSelling) * 100 : 0;
+
+            const grandTotalObj = {
+                qty: grandQty,
+                qty_display: formatReportQty(grandQty),
+                total_cost: grandCost,
+                total_cost_display: formatReportCurrency(grandCost),
+                total_selling: grandSelling,
+                total_selling_display: formatReportCurrency(grandSelling),
+                gp_amount: grandGPAmount,
+                gp_amount_display: formatReportCurrency(grandGPAmount),
+                gp_percent: Number(grandGPPercent.toFixed(2)),
+                gp_percent_display: `${grandGPPercent.toFixed(2)}%`,
+                total_weight: grandWeight,
+                total_weight_display: formatReportQty(grandWeight),
+                total_volume: grandVolume,
+                total_volume_display: formatReportQty(grandVolume),
+                total_dimension: grandDimension,
+                total_dimension_display: formatReportQty(grandDimension),
+                weight: grandWeight,
+                volume: grandVolume,
+                dimension: grandDimension,
+                diamension: grandDimension
+            };
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Sales Rep Report fetched successfully",
+                report_info: {
+                    title: "Sales By Sales Rep Report",
+                    company: "Asia Direct Africa",
+                    start_date: formatReportDate(startDate) || "01/07/2026",
+                    end_date: formatReportDate(endDate) || "31/07/2026",
+                    style: style
+                },
+                filters: {
+                    from_sales_rep: fromSalesRep || "All",
+                    to_sales_rep: toSalesRep || "All",
+                    active: body.active || "Both",
+                    sales_type: salesType,
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    style: style,
+                    include_credit_notes: includeCreditNotes
+                },
+                totalSalesReps: repsList.length,
+                grand_total: grandTotalObj,
+                totals: grandTotalObj,
+                sales_reps: repsList,
+                // data: repsList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
+
+
+// =========================================================================
+// SALES BY SALES REP ORDER REPORT API
+// Tables: quote_invoice, quote_invoice_details, tbl_freight, tbl_orders, tbl_users
+// =========================================================================
+
+const newSalesBySalesRepOrderReport = async (req, res) => {
+    try {
+        const body = { ...(req.query || {}), ...(req.body || {}) };
+
+        const startDateRaw = body.start_date || body.date_from || body.startDate || body.from_date || body.startdate;
+        const endDateRaw = body.end_date || body.date_to || body.endDate || body.to_date || body.enddate;
+
+        const fromSalesRep = cleanReportVal(body.from_sales_rep || body.sales_rep_from || body.fromSalesRep);
+        const toSalesRep = cleanReportVal(body.to_sales_rep || body.sales_rep_to || body.toSalesRep);
+
+        const activeFilter = cleanReportVal(body.active || body.status || "Both").toLowerCase();
+        const salesType = cleanReportVal(body.sales_type || body.salesType || "All");
+        const includeCreditNotes = body.include_credit_notes !== undefined ? (body.include_credit_notes === true || body.include_credit_notes === 'true' || body.include_credit_notes === 1 || body.include_credit_notes === '1') : true;
+        const style = cleanReportVal(body.style, "Detailed").toLowerCase() === "summary" ? "Summary" : "Detailed";
+
+        const startDate = parseReportDateInput(startDateRaw);
+        const endDate = parseReportDateInput(endDateRaw);
+
+        let whereClauses = [
+            "qi.is_deleted = 0"
+        ];
+        let queryParams = [];
+
+        if (startDate && endDate) {
+            whereClauses.push("DATE(qi.created_at) BETWEEN ? AND ?");
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereClauses.push("DATE(qi.created_at) >= ?");
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereClauses.push("DATE(qi.created_at) <= ?");
+            queryParams.push(endDate);
+        }
+
+        if (activeFilter === "active" || activeFilter === "1") {
+            whereClauses.push("(rep.status = 1 OR rep.status IS NULL)");
+        } else if (activeFilter === "inactive" || activeFilter === "0") {
+            whereClauses.push("rep.status = 0");
+        }
+
+        const isRepPlaceholder = (val) => !val || val.toLowerCase().includes("select") || val.toLowerCase() === "all";
+        const cleanRepFrom = isRepPlaceholder(fromSalesRep) ? "" : fromSalesRep;
+        const cleanRepTo = isRepPlaceholder(toSalesRep) ? "" : toSalesRep;
+
+        if (cleanRepFrom && cleanRepTo && cleanRepFrom.toLowerCase() === cleanRepTo.toLowerCase()) {
+            if (/^\d+$/.test(cleanRepFrom)) {
+                whereClauses.push("(rep.id = ? OR tf.sales_representative = ?)");
+                queryParams.push(Number(cleanRepFrom), Number(cleanRepFrom));
+            } else {
+                whereClauses.push(`(
+                    LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                )`);
+                queryParams.push(cleanRepFrom, cleanRepFrom);
+            }
+        } else if (cleanRepFrom && cleanRepTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) >= LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanRepFrom, cleanRepTo);
+        } else if (cleanRepFrom) {
+            if (/^\d+$/.test(cleanRepFrom)) {
+                whereClauses.push("(rep.id = ? OR tf.sales_representative = ?)");
+                queryParams.push(Number(cleanRepFrom), Number(cleanRepFrom));
+            } else {
+                whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) >= LOWER(TRIM(?))");
+                queryParams.push(cleanRepFrom);
+            }
+        } else if (cleanRepTo) {
+            whereClauses.push("LOWER(TRIM(COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned'))) <= LOWER(TRIM(?))");
+            queryParams.push(cleanRepTo);
+        }
+
+        if (!includeCreditNotes) {
+            whereClauses.push("NOT (qi.reference_no LIKE 'CN%' OR qi.reference_no LIKE 'CR%' OR qi.status = 'credit_note' OR qi.is_credit_note = 1)");
+        }
+
+        const sql = `
+            SELECT 
+                COALESCE(rep.id, tf.sales_representative) AS sales_rep_id,
+                COALESCE(rep.full_name, tf.sales_representative_name, 'Unassigned') AS sales_rep_name,
+                qi.id AS invoice_id,
+                qi.reference_no,
+                qi.customer_invoice_no,
+                qi.quote_date,
+                qi.created_at,
+                qi.created_at AS invoice_created_at,
+                qi.final_base_currency,
+                qi.sumof_totalcost,
+                qi.sumof_finalamount,
+                qi.sumof_vatincl,
+                COALESCE(tu.full_name, qi.client_name, tf.client_name, ord.client_name, 'Unknown Customer') AS customer_name,
+                tf.freight_number,
+                tf.freight,
+                tf.fcl_lcl,
+                tf.dimension AS freight_dimension,
+                tf.weight AS freight_weight,
+                tf.volumetric_weight AS freight_volumetric_weight,
+                tf.weight_unit,
+                tf.dimension_unit,
+                ord.id AS order_id,
+                ord.order_number,
+                ord.dimensions AS order_dimensions,
+                ord.weight AS order_weight,
+                ord.CBM AS order_cbm,
+                qid.id AS detail_id,
+                COALESCE(qid.qty, 1) AS qty,
+                COALESCE(qid.total_cost, 0) AS total_cost,
+                COALESCE(qid.vat_incl, qid.final_amount, 0) AS total_selling
+            FROM quote_invoice qi
+            LEFT JOIN tbl_freight tf ON (tf.id = qi.freight_id OR tf.quote_invoice_id = qi.id)
+            LEFT JOIN tbl_users rep ON (rep.id = tf.sales_representative)
+            LEFT JOIN tbl_users tu ON tu.id = COALESCE(qi.client_id, tf.client_id)
+            LEFT JOIN tbl_orders ord ON (ord.id = qi.order_id OR (qi.order_id IS NULL AND ord.id = (
+                SELECT MAX(o2.id) 
+                FROM tbl_orders o2 
+                WHERE o2.freight_id = COALESCE(qi.freight_id, tf.id) 
+                  AND o2.freight_id > 0
+            )))
+            LEFT JOIN quote_invoice_details qid ON qid.quote_invoice_id = qi.id
+            WHERE ${whereClauses.join(" AND ")}
+            ORDER BY 
+                sales_rep_name ASC,
+                qi.created_at ASC,
+                qi.reference_no ASC,
+                qid.id ASC
+        `;
+
+        con.query(sql, queryParams, (err, rows) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database query error: " + err.message
+                });
+            }
+
+            const parseOrderNumeric = (val) => {
+                if (val === null || val === undefined) return null;
+                const str = String(val).trim();
+                if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return null;
+                const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+                if (!match) return null;
+                const num = parseFloat(match[0]);
+                return isNaN(num) ? null : num;
+            };
+
+            const repsMap = new Map();
+            let grandQty = 0;
+            let grandCost = 0;
+            let grandSelling = 0;
+            let grandGPAmount = 0;
+            let grandWeight = 0;
+            let grandVolume = 0;
+            let grandDimension = 0;
+
+            for (const row of (rows || [])) {
+                const repName = cleanReportVal(row.sales_rep_name, "Unassigned");
+                const repKey = repName.toLowerCase();
+
+                if (!repsMap.has(repKey)) {
+                    repsMap.set(repKey, {
+                        sales_rep_id: row.sales_rep_id || null,
+                        sales_rep: repName,
+                        sales_rep_name: repName,
+                        total_qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0,
+                        total_weight: 0,
+                        total_volume: 0,
+                        total_dimension: 0,
+                        invoicesMap: new Map()
+                    });
+                }
+
+                const repObj = repsMap.get(repKey);
+                const invId = row.invoice_id;
+
+                const orderWeight = parseOrderNumeric(row.order_weight);
+                const freightWeight = safeReportNumber(row.freight_weight, 0);
+                const rowWeight = (orderWeight !== null && orderWeight !== undefined) ? orderWeight : freightWeight;
+
+                const orderDim = parseOrderNumeric(row.order_dimensions);
+                const freightDim = safeReportNumber(row.freight_dimension, 0);
+                const rowDimension = (orderDim !== null && orderDim !== undefined) ? orderDim : freightDim;
+
+                const orderCbm = parseOrderNumeric(row.order_cbm);
+                const freightVol = safeReportNumber(row.freight_volumetric_weight, 0);
+                const rowVolume = (orderCbm !== null && orderCbm !== undefined) ? orderCbm : freightVol;
+
+                const rowRefNo = cleanReportVal(row.reference_no) || cleanReportVal(row.customer_invoice_no) || cleanReportVal(row.order_number) || `INV${invId}`;
+
+                if (!repObj.invoicesMap.has(invId)) {
+                    const invoiceDate = row.created_at || row.invoice_created_at || row.quote_date;
+                    const fclLcl = cleanReportVal(row.fcl_lcl);
+                    repObj.invoicesMap.set(invId, {
+                        invoice_id: invId,
+                        date: formatReportDate(invoiceDate),
+                        raw_date: invoiceDate,
+                        quote_date: formatReportDate(row.quote_date),
+                        created_at: formatReportDate(row.created_at || row.invoice_created_at),
+                        reference: rowRefNo,
+                        reference_no: rowRefNo,
+                        document_no: rowRefNo,
+                        customer_invoice_no: cleanReportVal(row.customer_invoice_no),
+                        order_number: cleanReportVal(row.order_number),
+                        customer: cleanReportVal(row.customer_name),
+                        freight_number: cleanReportVal(row.freight_number),
+                        freight: cleanReportVal(row.freight),
+                        type: fclLcl,
+                        fcl_lcl: fclLcl,
+                        weight: Number(rowWeight.toFixed(2)),
+                        weight_display: formatReportQty(rowWeight),
+                        volume: Number(rowVolume.toFixed(2)),
+                        volume_display: formatReportQty(rowVolume),
+                        volumetric_weight: Number(rowVolume.toFixed(2)),
+                        volumetric_weight_display: formatReportQty(rowVolume),
+                        dimension: Number(rowDimension.toFixed(2)),
+                        dimension_display: formatReportQty(rowDimension),
+                        diamension: Number(rowDimension.toFixed(2)),
+                        diamension_display: formatReportQty(rowDimension),
+                        currency: cleanReportVal(row.final_base_currency, "ZAR"),
+                        qty: 0,
+                        total_cost: 0,
+                        total_selling: 0,
+                        gp_amount: 0,
+                        gp_percent: 0
+                    });
+                }
+
+                const invObj = repObj.invoicesMap.get(invId);
+                const fclLcl = cleanReportVal(row.fcl_lcl);
+                if (!invObj.type && fclLcl) {
+                    invObj.type = fclLcl;
+                    invObj.fcl_lcl = fclLcl;
+                }
+                if (!invObj.freight && row.freight) invObj.freight = cleanReportVal(row.freight);
+                if (!invObj.freight_number && row.freight_number) invObj.freight_number = cleanReportVal(row.freight_number);
+
+                if ((!invObj.weight || invObj.weight === 0) && rowWeight > 0) {
+                    invObj.weight = Number(rowWeight.toFixed(2));
+                    invObj.weight_display = formatReportQty(rowWeight);
+                }
+                if ((!invObj.volume || invObj.volume === 0) && rowVolume > 0) {
+                    invObj.volume = Number(rowVolume.toFixed(2));
+                    invObj.volume_display = formatReportQty(rowVolume);
+                    invObj.volumetric_weight = Number(rowVolume.toFixed(2));
+                    invObj.volumetric_weight_display = formatReportQty(rowVolume);
+                }
+                if ((!invObj.dimension || invObj.dimension === 0) && rowDimension > 0) {
+                    invObj.dimension = Number(rowDimension.toFixed(2));
+                    invObj.dimension_display = formatReportQty(rowDimension);
+                    invObj.diamension = Number(rowDimension.toFixed(2));
+                    invObj.diamension_display = formatReportQty(rowDimension);
+                }
+
+                if (row.detail_id) {
+                    const qty = safeReportNumber(row.qty, 1);
+                    const cost = safeReportNumber(row.total_cost, 0);
+                    const selling = safeReportNumber(row.total_selling, 0);
+
+                    invObj.qty += qty;
+                    invObj.total_cost += cost;
+                    invObj.total_selling += selling;
+                } else if (invObj.qty === 0 && invObj.total_selling === 0) {
+                    const cost = safeReportNumber(row.sumof_totalcost, 0);
+                    const selling = safeReportNumber(row.sumof_vatincl || row.sumof_finalamount, 0);
+                    invObj.qty = 1;
+                    invObj.total_cost = cost;
+                    invObj.total_selling = selling;
+                }
+            }
+
+            const repsList = [];
+
+            for (const [, repObj] of repsMap) {
+                const invoicesList = [];
+                const seenInvoiceKeys = new Set();
+
+                for (const [, inv] of repObj.invoicesMap) {
+                    const invKey = (inv.reference_no || "").toLowerCase().trim();
+                    if (invKey && seenInvoiceKeys.has(invKey)) {
+                        continue;
+                    }
+                    if (invKey) seenInvoiceKeys.add(invKey);
+
+                    const invGPAmount = inv.total_selling - inv.total_cost;
+                    const invGPPercent = inv.total_selling !== 0 ? (invGPAmount / inv.total_selling) * 100 : 0;
+
+                    inv.qty = Number(inv.qty.toFixed(4));
+                    inv.qty_display = formatReportQty(inv.qty);
+
+                    inv.total_cost = Number(inv.total_cost.toFixed(2));
+                    inv.total_cost_display = formatReportCurrency(inv.total_cost);
+
+                    inv.total_selling = Number(inv.total_selling.toFixed(2));
+                    inv.total_selling_display = formatReportCurrency(inv.total_selling);
+
+                    inv.gp_amount = Number(invGPAmount.toFixed(2));
+                    inv.gp_amount_display = formatReportCurrency(invGPAmount);
+
+                    inv.gp_percent = Number(invGPPercent.toFixed(2));
+                    inv.gp_percent_display = `${inv.gp_percent.toFixed(2)}%`;
+
+                    repObj.total_qty += inv.qty;
+                    repObj.total_cost += inv.total_cost;
+                    repObj.total_selling += inv.total_selling;
+                    repObj.gp_amount += invGPAmount;
+                    repObj.total_weight += (inv.weight || 0);
+                    repObj.total_volume += (inv.volume || 0);
+                    repObj.total_dimension += (inv.dimension || 0);
+
+                    grandQty += inv.qty;
+                    grandCost += inv.total_cost;
+                    grandSelling += inv.total_selling;
+                    grandGPAmount += invGPAmount;
+                    grandWeight += (inv.weight || 0);
+                    grandVolume += (inv.volume || 0);
+                    grandDimension += (inv.dimension || 0);
+
+                    invoicesList.push(inv);
+                }
+
+                repObj.total_qty = Number(repObj.total_qty.toFixed(4));
+                repObj.total_qty_display = formatReportQty(repObj.total_qty);
+
+                repObj.total_cost = Number(repObj.total_cost.toFixed(2));
+                repObj.total_cost_display = formatReportCurrency(repObj.total_cost);
+
+                repObj.total_selling = Number(repObj.total_selling.toFixed(2));
+                repObj.total_selling_display = formatReportCurrency(repObj.total_selling);
+
+                repObj.gp_amount = Number(repObj.gp_amount.toFixed(2));
+                repObj.gp_amount_display = formatReportCurrency(repObj.gp_amount);
+
+                const repGPPercent = repObj.total_selling !== 0 ? (repObj.gp_amount / repObj.total_selling) * 100 : 0;
+                repObj.gp_percent = Number(repGPPercent.toFixed(2));
+                repObj.gp_percent_display = `${repObj.gp_percent.toFixed(2)}%`;
+
+                repObj.total_weight = Number(repObj.total_weight.toFixed(2));
+                repObj.total_weight_display = formatReportQty(repObj.total_weight);
+                repObj.total_volume = Number(repObj.total_volume.toFixed(2));
+                repObj.total_volume_display = formatReportQty(repObj.total_volume);
+                repObj.total_dimension = Number(repObj.total_dimension.toFixed(2));
+                repObj.total_dimension_display = formatReportQty(repObj.total_dimension);
+
+                const uniqueRefs = [...new Set(invoicesList.map(i => i.reference_no).filter(Boolean))];
+                const repRefNo = uniqueRefs.join(", ") || (invoicesList[0]?.reference_no) || "";
+
+                repsList.push({
+                    sales_rep_id: repObj.sales_rep_id,
+                    sales_rep: repObj.sales_rep,
+                    sales_rep_name: repObj.sales_rep_name,
+                    reference_no: repRefNo,
+                    reference: repRefNo,
+                    document_no: repRefNo,
+                    total_qty: repObj.total_qty,
+                    total_qty_display: repObj.total_qty_display,
+                    total_cost: repObj.total_cost,
+                    total_cost_display: repObj.total_cost_display,
+                    total_selling: repObj.total_selling,
+                    total_selling_display: repObj.total_selling_display,
+                    gp_amount: repObj.gp_amount,
+                    gp_amount_display: repObj.gp_amount_display,
+                    gp_percent: repObj.gp_percent,
+                    gp_percent_display: repObj.gp_percent_display,
+                    total_weight: repObj.total_weight,
+                    total_weight_display: repObj.total_weight_display,
+                    total_volume: repObj.total_volume,
+                    total_volume_display: repObj.total_volume_display,
+                    total_dimension: repObj.total_dimension,
+                    total_dimension_display: repObj.total_dimension_display,
+                    weight: repObj.total_weight,
+                    volume: repObj.total_volume,
+                    dimension: repObj.total_dimension,
+                    diamension: repObj.total_dimension,
+                    invoices: style === "Detailed" ? invoicesList : [],
+                    rows: invoicesList
+                });
+            }
+
+            grandQty = Number(grandQty.toFixed(4));
+            grandCost = Number(grandCost.toFixed(2));
+            grandSelling = Number(grandSelling.toFixed(2));
+            grandGPAmount = Number(grandGPAmount.toFixed(2));
+            grandWeight = Number(grandWeight.toFixed(2));
+            grandVolume = Number(grandVolume.toFixed(2));
+            grandDimension = Number(grandDimension.toFixed(2));
+
+            const grandGPPercent = grandSelling !== 0 ? (grandGPAmount / grandSelling) * 100 : 0;
+
+            const grandTotalObj = {
+                qty: grandQty,
+                qty_display: formatReportQty(grandQty),
+                total_cost: grandCost,
+                total_cost_display: formatReportCurrency(grandCost),
+                total_selling: grandSelling,
+                total_selling_display: formatReportCurrency(grandSelling),
+                gp_amount: grandGPAmount,
+                gp_amount_display: formatReportCurrency(grandGPAmount),
+                gp_percent: Number(grandGPPercent.toFixed(2)),
+                gp_percent_display: `${grandGPPercent.toFixed(2)}%`,
+                total_weight: grandWeight,
+                total_weight_display: formatReportQty(grandWeight),
+                total_volume: grandVolume,
+                total_volume_display: formatReportQty(grandVolume),
+                total_dimension: grandDimension,
+                total_dimension_display: formatReportQty(grandDimension),
+                weight: grandWeight,
+                volume: grandVolume,
+                dimension: grandDimension,
+                diamension: grandDimension
+            };
+
+            return res.status(200).json({
+                success: true,
+                message: "Sales By Sales Rep Order Report fetched successfully",
+                report_info: {
+                    title: "Sales By Sales Rep Order Report",
+                    company: "Asia Direct Africa",
+                    start_date: formatReportDate(startDate) || "01/07/2026",
+                    end_date: formatReportDate(endDate) || "31/07/2026",
+                    style: style
+                },
+                filters: {
+                    from_sales_rep: fromSalesRep || "All",
+                    to_sales_rep: toSalesRep || "All",
+                    active: body.active || "Both",
+                    sales_type: salesType,
+                    start_date: startDate,
+                    start_date_formatted: formatReportDate(startDate),
+                    end_date: endDate,
+                    end_date_formatted: formatReportDate(endDate),
+                    style: style,
+                    include_credit_notes: includeCreditNotes
+                },
+                totalSalesReps: repsList.length,
+                grand_total: grandTotalObj,
+                totals: grandTotalObj,
+                sales_reps: repsList,
+                // data: repsList
+            });
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message
+        });
+    }
+};
 
 module.exports = {
     AdminLogin, ChangePassword, PrivacyPolicy, GetPrivacy, TermCondition, GetTerms, Addfreight,
@@ -33009,7 +41607,9 @@ module.exports = {
     getAllFreightQuoteInvoiceList, GetFreightQuoteInvoiceBySupplier, getAdminFrieghtComponentList, addUpdateFreightQuotes, GetFreightQuoteEstimateById, GetFreightQuoteEstimateList, deleteFreightQuoteEstimateById,
     approveRejectFreightQuote, getFreightQuoteEstimateBySupplier, addUpdateSupplierShipmentInvoice, GetSupplierShipmentInvoiceById, getAllSupplierShipmentInvoices, deleteSupplierShipmentInvoiceById, getFreightOrderList,
     getCompanyAddresses, getCompanyAddressById, addUpdateCountryAddresses, deleteCountryAddress, addUpdateNewFreightQuoteInvoice, GetNewFreightQuoteInvoiceById, getAllNewFreightQuoteInvoices, deleteNewFreightQuoteInvoiceById, createQuoteInvoice,
-    getCompanyAddressWithBankDetails, confirmCollectionCompletion, addUpdateCollectionDelivery, getCustomerQuotesReport, getCustomerInvoicesReport, getCustomerBalancesOutstandingReport, getCustomerUnallocatedReceiptsReport,
-    GetCustomerQuoteReportById, getCustomerQuotesByItemReport, getSalesByCustomerReport, getSalesByCustomerSummaryReport, GetSalesByItemReport, getSalesBySalesRepReport, getSupplierBalancesDaysOutstandingReport,
-    getSupplierInvoicesReport, GetCollectionDelivery, GetCollectionDeliveryDetails, assignCollectionDeliveryToSupplier, qouteEstimateDetailsByFreight, getBatchReport
+    getCompanyAddressWithBankDetails, confirmCollectionCompletion, addUpdateCollectionDelivery, getCustomerQuotesReport, getCustomerInvoicesReport, getCustomerBalancesOutstandingReport, getCustomerReceiptsReport,
+    GetCustomerQuoteReportById, getCustomerQuotesByItemReport, getSalesByCustomerReport, getQuoteByCustomerReport, getSalesByCustomerSummaryReport, GetSalesByItemReport, getSalesBySalesRepReport, getQuotesSalesBySalesRepReport, getSupplierBalancesDaysOutstandingReport,
+    getSupplierInvoicesReport, GetCollectionDelivery, GetCollectionDeliveryDetails, assignCollectionDeliveryToSupplier, qouteEstimateDetailsByFreight, getBatchReport, getCustomerBalancesDaysOutstandingReport,
+    getSupplierWarehouseDaysOutstandingReport, getWarehouseDaysOutstandingReport, getCustomerStatementReport,
+    newSalesByCustomerReport, newSalesByCustomerOrderReport, newSalesByItemReport, newSalesByItemOrderReport, newSalesBySalesRepReport, newSalesBySalesRepOrderReport, updateFreightQuoteHistoryStatus, viewFreightQuoteStatusHistory, getNewAdminFrieghtComponentList
 }

@@ -547,7 +547,6 @@ const calculateClearanceByAdmin = async (req, res) => {
         res.status(500).send({ success: false, message: error.message });
     }
 };
-
 const deleteEstimateClearance = async (req, res) => {
     try {
         const { id } = req.body;

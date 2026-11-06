@@ -242,11 +242,14 @@ admin_route.post("/GetFreightQuoteInvoiceById", adminController.GetFreightQuoteI
 admin_route.post("/GetFreightQuoteInvoiceBySupplier", adminController.GetFreightQuoteInvoiceBySupplier);
 admin_route.get("/getAllFreightQuoteInvoiceList", adminController.getAllFreightQuoteInvoiceList);
 admin_route.get("/getAdminFrieghtComponentList", adminController.getAdminFrieghtComponentList);
+admin_route.get("/getNewAdminFrieghtComponentList", adminController.getNewAdminFrieghtComponentList);
 admin_route.post("/add-freight-quotes-estimate", adminController.addUpdateFreightQuotes);
 admin_route.post("/GetFreightQuoteEstimateById", adminController.GetFreightQuoteEstimateById);
 admin_route.post("/deleteFreightQuoteEstimate", adminController.deleteFreightQuoteEstimateById);
 admin_route.get("/GetFreightQuoteEstimateList", adminController.GetFreightQuoteEstimateList);
 admin_route.post("/approveRejectFreightQuote", adminController.approveRejectFreightQuote);
+admin_route.post("/updateFreightQuoteHistoryStatus", adminController.updateFreightQuoteHistoryStatus);
+admin_route.post("/viewFreightQuoteStatusHistory", adminController.viewFreightQuoteStatusHistory);
 admin_route.post("/getFreightQuoteEstimateBySupplier", adminController.getFreightQuoteEstimateBySupplier);
 admin_route.post("/addUpdateSupplierShipmentInvoice", adminController.addUpdateSupplierShipmentInvoice);
 admin_route.post("/GetSupplierShipmentInvoiceById", adminController.GetSupplierShipmentInvoiceById);
@@ -267,17 +270,29 @@ admin_route.get("/getFreightOrderList", adminController.getFreightOrderList);
 admin_route.post("/getCustomerQuotesReport", adminController.getCustomerQuotesReport);
 admin_route.post("/getCustomerInvoicesReport", adminController.getCustomerInvoicesReport);
 admin_route.post("/getCustomerBalancesOutstandingReport", adminController.getCustomerBalancesOutstandingReport);
-admin_route.post("/getCustomerUnallocatedReceiptsReport", adminController.getCustomerUnallocatedReceiptsReport);
+admin_route.post("/getCustomerReceiptsReport", adminController.getCustomerReceiptsReport);
 admin_route.post("/GetCustomerQuoteReportById", adminController.GetCustomerQuoteReportById);
 admin_route.post("/getCustomerQuotesByItemReport", adminController.getCustomerQuotesByItemReport);
 admin_route.post("/getSalesByCustomerReport", adminController.getSalesByCustomerReport);
+admin_route.post("/getQuoteBySalesCustomerReport", adminController.getQuoteByCustomerReport);
 admin_route.post("/getSalesByCustomerSummaryReport", adminController.getSalesByCustomerSummaryReport);
 admin_route.post("/getSalesByItemReport", adminController.GetSalesByItemReport);
 admin_route.post("/getSalesBySalesRepReport", adminController.getSalesBySalesRepReport);
+admin_route.post("/getQuotesSalesBySalesRepReport", adminController.getQuotesSalesBySalesRepReport);
 admin_route.post("/getSupplierBalancesDaysOutstandingReport", adminController.getSupplierBalancesDaysOutstandingReport);
+admin_route.post("/getCustomerBalancesDaysOutstandingReport", adminController.getCustomerBalancesDaysOutstandingReport);
+admin_route.post("/getSupplierWarehouseDaysOutstandingReport", adminController.getSupplierWarehouseDaysOutstandingReport);
+admin_route.post("/getWarehouseDaysOutstandingReport", adminController.getWarehouseDaysOutstandingReport);
 admin_route.post("/getSupplierInvoicesReport", adminController.getSupplierInvoicesReport);
+admin_route.post("/getCustomerStatementReport", adminController.getCustomerStatementReport);
 
 admin_route.post("/qouteEstimateDetailsByFreight", adminController.qouteEstimateDetailsByFreight);    // for PDF
 admin_route.get("/getBatchReport/:batch_id", adminController.getBatchReport);
+admin_route.post("/newSalesByCustomerReport", adminController.newSalesByCustomerReport);
+admin_route.post("/newSalesByCustomerOrderReport", adminController.newSalesByCustomerOrderReport);
+admin_route.post("/newSalesByItemReport", adminController.newSalesByItemReport);
+admin_route.post("/newSalesByItemOrderReport", adminController.newSalesByItemOrderReport);
+admin_route.post("/newSalesBySalesRepReport", adminController.newSalesBySalesRepReport);
+admin_route.post("/newSalesBySalesRepOrderReport", adminController.newSalesBySalesRepOrderReport);
 
 module.exports = admin_route;

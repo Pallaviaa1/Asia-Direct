@@ -7,6 +7,7 @@ const PDFDocument = require("pdfkit");
 const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
+const { recalcOrderPayment, recalcSupplierInvoicePayment } = require("../helpers/recalcOrderPayment");
 
 const AddInvoiceDetails = async (req, res) => {
     try {
@@ -244,188 +245,641 @@ const updateInvoice = (invoice_id, fields, res) => {
     });
 };
 
-/* const ADDcashbook = async (req, res) => {
-    try {
-        const {
-            cashbook_id,
-            customer_id,
-            order_id,
-            allocated,
-            receipt,
-        } = req.body;
+// const ADDcashbook = async (req, res) => {
+//     try {
+//         const {
+//             cashbook_id,
+//             customer_id,
+//             supplier_id,
+//             order_id,
+//             supplier_invoice_id,
+//             allocation_type = "Customer",
+//             allocated,
+//             receipt,
+//         } = req.body;
 
-        if (!cashbook_id) {
-            return res.status(400).send({
-                success: false,
-                message: "Cashbook ID is required.",
-            });
-        }
+//         // ======================================================
+//         // BASIC VALIDATION
+//         // ======================================================
 
-        // Dynamically build the update query and parameters
-        let updateQuery = "UPDATE tbl_cashbook SET ";
-        const updateFields = [];
-        const updateParams = [];
+//         if (!cashbook_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Cashbook ID is required.",
+//             });
+//         }
 
-        if (customer_id) {
-            updateFields.push("customer_id = ?");
-            updateParams.push(customer_id);
-        }
-        if (order_id) {
-            updateFields.push("order_id = ?");
-            updateParams.push(order_id);
-        }
-        if (allocated) {
-            updateFields.push("allocated = ?");
-            updateParams.push(allocated);
-        }
+//         if (!["Customer", "Supplier"].includes(allocation_type)) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Invalid allocation type. Use Customer or Supplier.",
+//             });
+//         }
 
-        updateParams.push(cashbook_id);
+//         if (allocation_type === "Customer" && !customer_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Customer ID is required.",
+//             });
+//         }
 
-        if (updateFields.length === 0) {
-            return res.status(400).send({
-                success: false,
-                message: "No fields provided for update.",
-            });
-        }
+//         if (allocation_type === "Supplier" && !supplier_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Supplier ID is required.",
+//             });
+//         }
 
-        updateQuery += updateFields.join(", ") + " WHERE id = ?";
+//         if (allocation_type === "Supplier" && !supplier_invoice_id) {
+//             return res.status(400).send({
+//                 success: false,
+//                 message: "Supplier Invoice ID is required.",
+//             });
+//         }
 
-        // Update tbl_cashbook
-        con.query(updateQuery, updateParams, (err, result) => {
-            if (err) {
-                console.error("Error updating cashbook:", err.message);
-                return res.status(500).send({
-                    success: false,
-                    message: "Failed to update cashbook.",
-                });
-            }
+//         // =====================================================
+//         // CHECK CASHBOOK
+//         // =====================================================
 
-            if (result.affectedRows === 0) {
-                return res.status(404).send({
-                    success: false,
-                    message: "Cashbook not found for the given cashbook_id.",
-                });
-            }
+//         const checkCashbookQuery = `
+//             SELECT *
+//             FROM tbl_cashbook
+//             WHERE id = ?
+//         `;
 
-            if (!order_id) {
-                return res.status(200).send({
-                    success: true,
-                    message: "Cashbook updated successfully.",
-                });
-            }
+//         con.query(
+//             checkCashbookQuery,
+//             [cashbook_id],
+//             (err, cashbookResult) => {
+//                 if (err) {
+//                     console.error(
+//                         "Error checking cashbook:",
+//                         err.message
+//                     );
 
-            // Step 1: Fetch total receipt sum from tbl_cashbook for this order_id
-            const fetchReceiptsQuery = `
-                SELECT SUM(receipt) AS total_receipt 
-                FROM tbl_cashbook 
-                WHERE order_id = ?
-            `;
+//                     return res.status(500).send({
+//                         success: false,
+//                         message: "Failed to check cashbook.",
+//                     });
+//                 }
 
-            con.query(fetchReceiptsQuery, [order_id], (err, receiptResult) => {
-                if (err) {
-                    console.error("Error fetching receipt total:", err.message);
-                    return res.status(500).send({
-                        success: false,
-                        message: "Failed to fetch receipt total.",
-                    });
-                }
+//                 // =================================================
+//                 // CASE 1: CASHBOOK DOES NOT EXIST
+//                 // =================================================
 
-                const totalReceipt = receiptResult[0]?.total_receipt || 0;
+//                 if (cashbookResult.length === 0) {
 
-                // Step 2: Update payment in tbl_invoices
-                const updatePaymentQuery = `
-                    UPDATE tbl_invoices
-                    SET 
-                        payment = ?,
-                        status = ?
-                    WHERE order_id = ?
-                `;
+//                     const insertCashbookQuery = `
+//                         INSERT INTO tbl_cashbook
+//                         (
+//                             id,
+//                             customer_id,
+//                             supplier_id,
+//                             supplier_invoice_id,
+//                             order_id,
+//                             allocated,
+//                             allocation_type,
+//                             receipt
+//                         )
+//                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+//                     `;
 
-                con.query(updatePaymentQuery, [totalReceipt, "Part Paid", order_id], (err, paymentUpdateResult) => {
-                    if (err) {
-                        console.error("Error updating payment:", err.message);
-                        return res.status(500).send({
-                            success: false,
-                            message: "Failed to update payment.",
-                        });
-                    }
+//                     const insertParams = [
+//                         cashbook_id,
 
-                    if (paymentUpdateResult.affectedRows === 0) {
-                        return res.status(404).send({
-                            success: false,
-                            message: "No invoice found for the given order ID.",
-                        });
-                    }
+//                         allocation_type === "Customer"
+//                             ? customer_id
+//                             : null,
 
-                    // Step 3: Fetch updated invoice details
-                    const selectInvoiceQuery = `
-                        SELECT invoice_amt, payment 
-                        FROM tbl_invoices
-                        WHERE order_id = ?
-                    `;
+//                         allocation_type === "Supplier"
+//                             ? supplier_id
+//                             : null,
 
-                    con.query(selectInvoiceQuery, [order_id], (err, invoiceResult) => {
-                        if (err) {
-                            console.error("Error fetching invoice:", err.message);
-                            return res.status(500).send({
-                                success: false,
-                                message: "Failed to fetch invoice details.",
-                            });
-                        }
+//                         allocation_type === "Supplier"
+//                             ? supplier_invoice_id
+//                             : null,
 
-                        if (invoiceResult.length === 0) {
-                            return res.status(404).send({
-                                success: false,
-                                message: "No invoice found for the given order ID.",
-                            });
-                        }
+//                         allocation_type === "Customer"
+//                             ? order_id
+//                             : null,
 
-                        const { invoice_amt, payment } = invoiceResult[0];
-                        const finalBalance = invoice_amt ? invoice_amt - payment : 0;
+//                         "Yes",
+//                         allocation_type,
+//                         receipt || 0,
+//                     ];
 
-                        // Step 4: Update balance in tbl_invoices
-                        const updateStatusQuery = `
-                            UPDATE tbl_invoices
-                            SET balance = ?
-                            WHERE order_id = ?
-                        `;
+//                     con.query(
+//                         insertCashbookQuery,
+//                         insertParams,
+//                         (err) => {
+//                             if (err) {
+//                                 console.error(
+//                                     "Error inserting cashbook:",
+//                                     err.message
+//                                 );
 
-                        con.query(updateStatusQuery, [finalBalance, order_id], (err) => {
-                            if (err) {
-                                console.error("Error updating invoice balance:", err.message);
-                                return res.status(500).send({
-                                    success: false,
-                                    message: "Failed to update invoice balance.",
-                                });
-                            }
+//                                 return res.status(500).send({
+//                                     success: false,
+//                                     message: "Failed to insert cashbook.",
+//                                 });
+//                             }
 
-                            return res.status(200).send({
-                                success: true,
-                                message: "Cashbook and invoice updated successfully.",
-                            });
-                        });
-                    });
-                });
-            });
-        });
-    } catch (error) {
-        console.error("Unexpected error:", error.message);
-        return res.status(500).send({
-            success: false,
-            message: "An unexpected error occurred.",
-        });
-    }
-}; */
+//                             // -----------------------------------------
+//                             // CUSTOMER
+//                             // -----------------------------------------
+
+//                             if (allocation_type === "Customer") {
+
+//                                 // Existing code previously stopped here
+//                                 // when a new cashbook record was inserted.
+//                                 //
+//                                 // To preserve that behavior:
+//                                 return res.status(200).send({
+//                                     success: true,
+//                                     message:
+//                                         "New cashbook entry created successfully.",
+//                                 });
+//                             }
+
+//                             // -----------------------------------------
+//                             // SUPPLIER
+//                             // -----------------------------------------
+
+//                             updateSupplierInvoicePayment(
+//                                 supplier_invoice_id,
+//                                 (supplierErr, supplierResponse) => {
+
+//                                     if (supplierErr) {
+//                                         console.error(
+//                                             "Supplier invoice update error:",
+//                                             supplierErr.message
+//                                         );
+
+//                                         return res.status(500).send({
+//                                             success: false,
+//                                             message:
+//                                                 supplierErr.message,
+//                                         });
+//                                     }
+
+//                                     return res.status(200).send({
+//                                         success: true,
+//                                         message:
+//                                             "New cashbook entry created and supplier invoice updated successfully.",
+//                                         data: supplierResponse,
+//                                     });
+//                                 }
+//                             );
+//                         }
+//                     );
+
+//                     return;
+//                 }
+
+//                 // =================================================
+//                 // CASE 2: CASHBOOK ALREADY EXISTS
+//                 // =================================================
+
+//                 let updateQuery = `
+//                     UPDATE tbl_cashbook
+//                     SET
+//                 `;
+
+//                 const updateFields = [];
+//                 const updateParams = [];
+
+//                 // -----------------------------------------
+//                 // CUSTOMER
+//                 // -----------------------------------------
+
+//                 if (allocation_type === "Customer") {
+
+//                     if (customer_id) {
+//                         updateFields.push("customer_id = ?");
+//                         updateParams.push(customer_id);
+//                     }
+
+//                     // Remove supplier allocation if changing
+//                     // this cashbook back to Customer
+//                     updateFields.push("supplier_id = NULL");
+//                     updateFields.push("supplier_invoice_id = NULL");
+
+//                     updateFields.push("allocation_type = ?");
+//                     updateParams.push("Customer");
+
+//                     if (order_id) {
+//                         updateFields.push("order_id = ?");
+//                         updateParams.push(order_id);
+
+//                         updateFields.push("allocated = ?");
+//                         updateParams.push("Yes");
+//                     }
+//                 }
+
+//                 // -----------------------------------------
+//                 // SUPPLIER
+//                 // -----------------------------------------
+
+//                 if (allocation_type === "Supplier") {
+
+//                     updateFields.push("supplier_id = ?");
+//                     updateParams.push(supplier_id);
+
+//                     updateFields.push("supplier_invoice_id = ?");
+//                     updateParams.push(supplier_invoice_id);
+
+//                     updateFields.push("customer_id = NULL");
+//                     updateFields.push("order_id = NULL");
+
+//                     updateFields.push("allocation_type = ?");
+//                     updateParams.push("Supplier");
+
+//                     updateFields.push("allocated = ?");
+//                     updateParams.push("Yes");
+//                 }
+
+//                 updateParams.push(cashbook_id);
+
+//                 if (updateFields.length === 0) {
+//                     return res.status(400).send({
+//                         success: false,
+//                         message: "No fields provided for update.",
+//                     });
+//                 }
+
+//                 updateQuery +=
+//                     updateFields.join(", ") +
+//                     " WHERE id = ?";
+
+//                 con.query(
+//                     updateQuery,
+//                     updateParams,
+//                     (err, result) => {
+
+//                         if (err) {
+//                             console.error(
+//                                 "Error updating cashbook:",
+//                                 err.message
+//                             );
+
+//                             return res.status(500).send({
+//                                 success: false,
+//                                 message: "Failed to update cashbook.",
+//                             });
+//                         }
+
+//                         // =================================================
+//                         // SUPPLIER FLOW
+//                         // =================================================
+
+//                         if (allocation_type === "Supplier") {
+
+//                             updateSupplierInvoicePayment(
+//                                 supplier_invoice_id,
+//                                 (supplierErr, supplierResponse) => {
+
+//                                     if (supplierErr) {
+//                                         console.error(
+//                                             "Supplier invoice update error:",
+//                                             supplierErr.message
+//                                         );
+
+//                                         return res.status(500).send({
+//                                             success: false,
+//                                             message:
+//                                                 supplierErr.message,
+//                                         });
+//                                     }
+
+//                                     return res.status(200).send({
+//                                         success: true,
+//                                         message:
+//                                             "Supplier payment allocated and invoice updated successfully.",
+//                                         data: supplierResponse,
+//                                     });
+//                                 }
+//                             );
+
+//                             return;
+//                         }
+
+//                         // =================================================
+//                         // CUSTOMER FLOW
+//                         // =================================================
+
+//                         if (!order_id) {
+//                             return res.status(200).send({
+//                                 success: true,
+//                                 message:
+//                                     "Cashbook updated successfully.",
+//                             });
+//                         }
+
+//                         // -----------------------------------------
+//                         // STEP 1:
+//                         // GET TOTAL RECEIPT FOR ORDER
+//                         // -----------------------------------------
+
+//                         const fetchReceiptsQuery = `
+//                             SELECT
+//                                 SUM(receipt) AS total_receipt
+//                             FROM tbl_cashbook
+//                             WHERE order_id = ?
+//                         `;
+
+//                         con.query(
+//                             fetchReceiptsQuery,
+//                             [order_id],
+//                             (err, receiptResult) => {
+
+//                                 if (err) {
+//                                     console.error(
+//                                         "Error fetching receipt total:",
+//                                         err.message
+//                                     );
+
+//                                     return res.status(500).send({
+//                                         success: false,
+//                                         message:
+//                                             "Failed to fetch receipt total.",
+//                                     });
+//                                 }
+
+//                                 const totalReceipt =
+//                                     Number(
+//                                         receiptResult[0]?.total_receipt
+//                                     ) || 0;
+
+//                                 // -----------------------------------------
+//                                 // STEP 2:
+//                                 // CHECK CUSTOMER INVOICE
+//                                 // -----------------------------------------
+
+//                                 const checkInvoiceQuery = `
+//                                     SELECT *
+//                                     FROM tbl_invoices
+//                                     WHERE order_id = ?
+//                                 `;
+
+//                                 con.query(
+//                                     checkInvoiceQuery,
+//                                     [order_id],
+//                                     (err, invoiceResult) => {
+
+//                                         if (err) {
+//                                             console.error(
+//                                                 "Error checking invoice:",
+//                                                 err.message
+//                                             );
+
+//                                             return res.status(500).send({
+//                                                 success: false,
+//                                                 message:
+//                                                     "Failed to check invoice.",
+//                                             });
+//                                         }
+
+//                                         // =================================
+//                                         // EXISTING CUSTOMER INVOICE
+//                                         // =================================
+
+//                                         if (
+//                                             invoiceResult.length > 0
+//                                         ) {
+
+//                                             const updatePaymentQuery = `
+//                                                 UPDATE tbl_invoices
+//                                                 SET
+//                                                     payment = ?,
+//                                                     status = ?
+//                                                 WHERE order_id = ?
+//                                             `;
+
+//                                             con.query(
+//                                                 updatePaymentQuery,
+//                                                 [
+//                                                     totalReceipt,
+//                                                     "Part Paid",
+//                                                     order_id,
+//                                                 ],
+//                                                 (err) => {
+
+//                                                     if (err) {
+//                                                         console.error(
+//                                                             "Error updating payment:",
+//                                                             err.message
+//                                                         );
+
+//                                                         return res.status(500).send({
+//                                                             success: false,
+//                                                             message:
+//                                                                 "Failed to update payment.",
+//                                                         });
+//                                                     }
+
+//                                                     // -------------------------
+//                                                     // GET INVOICE DETAILS
+//                                                     // -------------------------
+
+//                                                     const selectInvoiceQuery = `
+//                                                         SELECT
+//                                                             invoice_amt,
+//                                                             payment
+//                                                         FROM tbl_invoices
+//                                                         WHERE order_id = ?
+//                                                     `;
+
+//                                                     con.query(
+//                                                         selectInvoiceQuery,
+//                                                         [order_id],
+//                                                         (
+//                                                             err,
+//                                                             invoiceDetails
+//                                                         ) => {
+
+//                                                             if (err) {
+//                                                                 console.error(
+//                                                                     "Error fetching invoice:",
+//                                                                     err.message
+//                                                                 );
+
+//                                                                 return res.status(500).send({
+//                                                                     success: false,
+//                                                                     message:
+//                                                                         "Failed to fetch invoice details.",
+//                                                                 });
+//                                                             }
+
+//                                                             if (
+//                                                                 invoiceDetails.length ===
+//                                                                 0
+//                                                             ) {
+//                                                                 return res.status(404).send({
+//                                                                     success: false,
+//                                                                     message:
+//                                                                         "Invoice not found.",
+//                                                                 });
+//                                                             }
+
+//                                                             const invoiceAmt =
+//                                                                 Number(
+//                                                                     invoiceDetails[0]
+//                                                                         .invoice_amt
+//                                                                 ) || 0;
+
+//                                                             const payment =
+//                                                                 Number(
+//                                                                     invoiceDetails[0]
+//                                                                         .payment
+//                                                                 ) || 0;
+
+//                                                             const finalBalance =
+//                                                                 invoiceAmt -
+//                                                                 payment;
+
+//                                                             // -------------------------
+//                                                             // UPDATE BALANCE
+//                                                             // -------------------------
+
+//                                                             const updateBalanceQuery = `
+//                                                                 UPDATE tbl_invoices
+//                                                                 SET balance = ?
+//                                                                 WHERE order_id = ?
+//                                                             `;
+
+//                                                             con.query(
+//                                                                 updateBalanceQuery,
+//                                                                 [
+//                                                                     finalBalance,
+//                                                                     order_id,
+//                                                                 ],
+//                                                                 (err) => {
+
+//                                                                     if (err) {
+//                                                                         console.error(
+//                                                                             "Error updating invoice balance:",
+//                                                                             err.message
+//                                                                         );
+
+//                                                                         return res.status(500).send({
+//                                                                             success: false,
+//                                                                             message:
+//                                                                                 "Failed to update invoice balance.",
+//                                                                         });
+//                                                                     }
+
+//                                                                     return res.status(200).send({
+//                                                                         success: true,
+//                                                                         message:
+//                                                                             "Customer invoice updated successfully.",
+//                                                                         data: {
+//                                                                             payment:
+//                                                                                 payment,
+//                                                                             balance:
+//                                                                                 finalBalance,
+//                                                                         },
+//                                                                     });
+//                                                                 }
+//                                                             );
+//                                                         }
+//                                                     );
+//                                                 }
+//                                             );
+
+//                                         } else {
+
+//                                             // =================================
+//                                             // NEW CUSTOMER INVOICE
+//                                             // =================================
+
+//                                             const insertInvoiceQuery = `
+//                                                 INSERT INTO tbl_invoices
+//                                                 (
+//                                                     order_id,
+//                                                     payment,
+//                                                     status,
+//                                                     balance
+//                                                 )
+//                                                 VALUES (?, ?, ?, ?)
+//                                             `;
+
+//                                             con.query(
+//                                                 insertInvoiceQuery,
+//                                                 [
+//                                                     order_id,
+//                                                     totalReceipt,
+//                                                     "Part Paid",
+//                                                     0,
+//                                                 ],
+//                                                 (err) => {
+
+//                                                     if (err) {
+//                                                         console.error(
+//                                                             "Error inserting invoice:",
+//                                                             err.message
+//                                                         );
+
+//                                                         return res.status(500).send({
+//                                                             success: false,
+//                                                             message:
+//                                                                 "Failed to insert invoice.",
+//                                                         });
+//                                                     }
+
+//                                                     return res.status(200).send({
+//                                                         success: true,
+//                                                         message:
+//                                                             "New customer invoice created successfully.",
+//                                                     });
+//                                                 }
+//                                             );
+//                                         }
+//                                     }
+//                                 );
+//                             }
+//                         );
+//                     }
+//                 );
+//             }
+//         );
+//     } catch (error) {
+
+//         console.error(
+//             "Unexpected error:",
+//             error.message
+//         );
+
+//         return res.status(500).send({
+//             success: false,
+//             message: "An unexpected error occurred.",
+//         });
+//     }
+// };
+
+
+
+
+// =============================================================
+// SUPPLIER INVOICE PAYMENT HELPER
+// =============================================================
+
 
 const ADDcashbook = async (req, res) => {
     try {
         const {
             cashbook_id,
             customer_id,
+            supplier_id,
             order_id,
+            supplier_invoice_id,
+            allocation_type = "Customer",
             allocated,
             receipt,
         } = req.body;
+
+        // ======================================================
+        // BASIC VALIDATION
+        // ======================================================
 
         if (!cashbook_id) {
             return res.status(400).send({
@@ -434,56 +888,468 @@ const ADDcashbook = async (req, res) => {
             });
         }
 
-        // Check if cashbook exists
-        const checkCashbookQuery = `SELECT * FROM tbl_cashbook WHERE id = ?`;
-        con.query(checkCashbookQuery, [cashbook_id], (err, cashbookResult) => {
-            if (err) {
-                console.error("Error checking cashbook:", err.message);
-                return res.status(500).send({
-                    success: false,
-                    message: "Failed to check cashbook.",
+        if (!["Customer", "Supplier"].includes(allocation_type)) {
+            return res.status(400).send({
+                success: false,
+                message:
+                    "Invalid allocation type. Use Customer or Supplier.",
+            });
+        }
+
+        if (allocation_type === "Customer" && !customer_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Customer ID is required.",
+            });
+        }
+
+        if (allocation_type === "Supplier" && !supplier_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Supplier ID is required.",
+            });
+        }
+
+        if (
+            allocation_type === "Supplier" &&
+            !supplier_invoice_id
+        ) {
+            return res.status(400).send({
+                success: false,
+                message: "Supplier Invoice ID is required.",
+            });
+        }
+
+        // ======================================================
+        // HELPER: UPDATE CUSTOMER INVOICE STATUS AND BALANCE
+        // ======================================================
+
+        const updateCustomerInvoiceStatus = (
+            customerOrderId,
+            callback
+        ) => {
+            if (!customerOrderId) {
+                return callback(null, {
+                    status: null,
+                    balance: null,
+                    payment: 0,
+                    invoice_amount: 0,
                 });
             }
 
-            if (cashbookResult.length === 0) {
-                // Insert new cashbook entry if not found
-                const insertCashbookQuery = `
-                    INSERT INTO tbl_cashbook (id, customer_id, order_id, allocated, receipt)
-                    VALUES (?, ?, ?, ?, ?)
-                `;
+            const fetchCustomerPaymentQuery = `
+                SELECT
+                    COALESCE(
+                        SUM(COALESCE(receipt, 0)),
+                        0
+                    ) AS total_receipt
+                FROM tbl_cashbook
+                WHERE order_id = ?
+                  AND allocation_type = 'Customer'
+            `;
 
-                con.query(insertCashbookQuery, [cashbook_id, customer_id, order_id, "Yes", receipt], (err) => {
+            con.query(
+                fetchCustomerPaymentQuery,
+                [customerOrderId],
+                (err, receiptResult) => {
                     if (err) {
-                        console.error("Error inserting cashbook:", err.message);
-                        return res.status(500).send({
-                            success: false,
-                            message: "Failed to insert cashbook.",
-                        });
+                        return callback(err);
                     }
 
-                    return res.status(200).send({
-                        success: true,
-                        message: "New cashbook entry created successfully.",
+                    const totalReceipt =
+                        Number(
+                            receiptResult[0]?.total_receipt
+                        ) || 0;
+
+                    const fetchQuoteInvoiceQuery = `
+                        SELECT
+                            id,
+                            sumof_vatincl,
+                            sumof_finalamount,
+                            chargeable,
+                            balance,
+                            status
+                        FROM quote_invoice
+                        WHERE order_id = ?
+                          AND is_deleted = 0
+                        ORDER BY id DESC
+                        LIMIT 1
+                    `;
+
+                    con.query(
+                        fetchQuoteInvoiceQuery,
+                        [customerOrderId],
+                        (err, quoteInvoiceResult) => {
+                            if (err) {
+                                return callback(err);
+                            }
+
+                            /*
+                             * Agar quote_invoice nahi milti hai,
+                             * existing flow ko fail nahi karna hai.
+                             */
+                            if (
+                                quoteInvoiceResult.length === 0
+                            ) {
+                                return callback(null, {
+                                    status: null,
+                                    balance: null,
+                                    payment: totalReceipt,
+                                    invoice_amount: 0,
+                                });
+                            }
+
+                            const quoteInvoice =
+                                quoteInvoiceResult[0];
+
+                            /*
+                             * Primary invoice amount:
+                             * sumof_vatincl
+                             *
+                             * Fallback:
+                             * sumof_finalamount, chargeable
+                             */
+                            const invoiceAmount =
+                                Number(
+                                    quoteInvoice.sumof_vatincl
+                                ) ||
+                                Number(
+                                    quoteInvoice.sumof_finalamount
+                                ) ||
+                                Number(
+                                    quoteInvoice.chargeable
+                                ) ||
+                                0;
+
+                            const finalBalance = Math.max(
+                                invoiceAmount - totalReceipt,
+                                0
+                            );
+
+                            let invoiceStatus = "Unpaid";
+
+                            if (
+                                invoiceAmount > 0 &&
+                                totalReceipt >= invoiceAmount
+                            ) {
+                                invoiceStatus = "Paid";
+                            } else if (totalReceipt > 0) {
+                                invoiceStatus = "Part Paid";
+                            }
+
+                            const updateQuoteInvoiceQuery = `
+                                UPDATE quote_invoice
+                                SET
+                                    balance = ?,
+                                    status = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE order_id = ?
+                                  AND is_deleted = 0
+                            `;
+
+                            con.query(
+                                updateQuoteInvoiceQuery,
+                                [
+                                    finalBalance,
+                                    invoiceStatus,
+                                    customerOrderId,
+                                ],
+                                (err) => {
+                                    if (err) {
+                                        return callback(err);
+                                    }
+
+                                    return callback(null, {
+                                        status: invoiceStatus,
+                                        balance: finalBalance,
+                                        payment: totalReceipt,
+                                        invoice_amount:
+                                            invoiceAmount,
+                                    });
+                                }
+                            );
+                        }
+                    );
+                }
+            );
+        };
+
+        // ======================================================
+        // CHECK CASHBOOK
+        // ======================================================
+
+        const checkCashbookQuery = `
+            SELECT *
+            FROM tbl_cashbook
+            WHERE id = ?
+        `;
+
+        con.query(
+            checkCashbookQuery,
+            [cashbook_id],
+            (err, cashbookResult) => {
+                if (err) {
+                    console.error(
+                        "Error checking cashbook:",
+                        err.message
+                    );
+
+                    return res.status(500).send({
+                        success: false,
+                        message: "Failed to check cashbook.",
                     });
-                });
-            } else {
-                // Update existing cashbook
-                let updateQuery = "UPDATE tbl_cashbook SET ";
+                }
+
+                // =================================================
+                // CASE 1: CASHBOOK DOES NOT EXIST
+                // =================================================
+
+                if (cashbookResult.length === 0) {
+                    const insertCashbookQuery = `
+                        INSERT INTO tbl_cashbook
+                        (
+                            id,
+                            customer_id,
+                            supplier_id,
+                            supplier_invoice_id,
+                            order_id,
+                            allocated,
+                            allocation_type,
+                            receipt
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    `;
+
+                    const insertParams = [
+                        cashbook_id,
+
+                        allocation_type === "Customer"
+                            ? customer_id
+                            : null,
+
+                        allocation_type === "Supplier"
+                            ? supplier_id
+                            : null,
+
+                        allocation_type === "Supplier"
+                            ? supplier_invoice_id
+                            : null,
+
+                        allocation_type === "Customer"
+                            ? order_id
+                            : null,
+
+                        "Yes",
+                        allocation_type,
+                        receipt || 0,
+                    ];
+
+                    con.query(
+                        insertCashbookQuery,
+                        insertParams,
+                        (err) => {
+                            if (err) {
+                                console.error(
+                                    "Error inserting cashbook:",
+                                    err.message
+                                );
+
+                                return res.status(500).send({
+                                    success: false,
+                                    message:
+                                        "Failed to insert cashbook.",
+                                });
+                            }
+
+                            // -----------------------------------------
+                            // CUSTOMER
+                            // -----------------------------------------
+
+                            if (
+                                allocation_type === "Customer"
+                            ) {
+                                /*
+                                 * Existing behavior:
+                                 * New customer cashbook insert ke baad
+                                 * customer invoice processing nahi hoti thi.
+                                 *
+                                 * New requirement:
+                                 * quote_invoice ka payment status/balance
+                                 * synchronize karna hai.
+                                 * tbl_invoices.payment is refreshed from the
+                                 * cashbook total for this order as well.
+                                 */
+                                recalcOrderPayment(order_id)
+                                    .then(() => {
+                                        updateCustomerInvoiceStatus(
+                                            order_id,
+                                            (
+                                                customerErr,
+                                                customerResponse
+                                            ) => {
+                                                if (customerErr) {
+                                                    console.error(
+                                                        "Customer invoice status update error:",
+                                                        customerErr.message
+                                                    );
+
+                                                    return res.status(500).send({
+                                                        success: false,
+                                                        message:
+                                                            customerErr.message,
+                                                    });
+                                                }
+
+                                                return res.status(200).send({
+                                                    success: true,
+                                                    message:
+                                                        "New cashbook entry created successfully.",
+                                                    data: customerResponse,
+                                                });
+                                            }
+                                        );
+                                    })
+                                    .catch((customerErr) => {
+                                        console.error(
+                                            "Customer invoice refresh error:",
+                                            customerErr.message
+                                        );
+
+                                        if (!res.headersSent) {
+                                            return res.status(500).send({
+                                                success: false,
+                                                message: customerErr.message,
+                                            });
+                                        }
+                                    });
+
+                                return;
+                            }
+
+                            // -----------------------------------------
+                            // SUPPLIER
+                            // -----------------------------------------
+
+                            updateSupplierInvoicePayment(
+                                supplier_invoice_id,
+                                (
+                                    supplierErr,
+                                    supplierResponse
+                                ) => {
+                                    if (supplierErr) {
+                                        console.error(
+                                            "Supplier invoice update error:",
+                                            supplierErr.message
+                                        );
+
+                                        return res.status(500).send({
+                                            success: false,
+                                            message:
+                                                supplierErr.message,
+                                        });
+                                    }
+
+                                    return res.status(200).send({
+                                        success: true,
+                                        message:
+                                            "New cashbook entry created and supplier invoice updated successfully.",
+                                        data: supplierResponse,
+                                    });
+                                }
+                            );
+                        }
+                    );
+
+                    return;
+                }
+
+                // =================================================
+                // CASE 2: CASHBOOK ALREADY EXISTS
+                // =================================================
+
+                const previousOrderId = cashbookResult[0].order_id;
+                const previousSupplierInvoiceId = cashbookResult[0].supplier_invoice_id;
+
+                let updateQuery = `
+                    UPDATE tbl_cashbook
+                    SET
+                `;
+
                 const updateFields = [];
                 const updateParams = [];
 
+                // -----------------------------------------
+                // CUSTOMER
+                // -----------------------------------------
 
+                if (allocation_type === "Customer") {
+                    if (customer_id) {
+                        updateFields.push("customer_id = ?");
+                        updateParams.push(customer_id);
+                    }
 
-                if (customer_id) {
-                    updateFields.push("customer_id = ?");
-                    updateParams.push(customer_id);
+                    // Existing logic preserved
+                    updateFields.push("supplier_id = NULL");
+                    updateFields.push(
+                        "supplier_invoice_id = NULL"
+                    );
+
+                    updateFields.push(
+                        "allocation_type = ?"
+                    );
+                    updateParams.push("Customer");
+
+                    if (order_id) {
+                        updateFields.push("order_id = ?");
+                        updateParams.push(order_id);
+
+                        updateFields.push("allocated = ?");
+                        updateParams.push("Yes");
+                    }
+
+                    /*
+                     * Receipt ko update karna zaroori hai.
+                     * Isse existing cashbook payment amount
+                     * latest request ke amount se synchronize hoga.
+                     */
+                    if (receipt !== undefined) {
+                        updateFields.push("receipt = ?");
+                        updateParams.push(receipt || 0);
+                    }
                 }
-                if (order_id) {
-                    updateFields.push("order_id = ?");
-                    updateParams.push(order_id);
+
+                // -----------------------------------------
+                // SUPPLIER
+                // -----------------------------------------
+
+                if (allocation_type === "Supplier") {
+                    updateFields.push("supplier_id = ?");
+                    updateParams.push(supplier_id);
+
+                    updateFields.push(
+                        "supplier_invoice_id = ?"
+                    );
+                    updateParams.push(supplier_invoice_id);
+
+                    updateFields.push("customer_id = NULL");
+                    updateFields.push("order_id = NULL");
+
+                    updateFields.push(
+                        "allocation_type = ?"
+                    );
+                    updateParams.push("Supplier");
 
                     updateFields.push("allocated = ?");
                     updateParams.push("Yes");
+
+                    /*
+                     * Existing supplier flow preserve.
+                     * Receipt update only if request mein provided hai.
+                     */
+                    if (receipt !== undefined) {
+                        updateFields.push("receipt = ?");
+                        updateParams.push(receipt || 0);
+                    }
                 }
 
                 updateParams.push(cashbook_id);
@@ -491,143 +1357,706 @@ const ADDcashbook = async (req, res) => {
                 if (updateFields.length === 0) {
                     return res.status(400).send({
                         success: false,
-                        message: "No fields provided for update.",
+                        message:
+                            "No fields provided for update.",
                     });
                 }
 
-                updateQuery += updateFields.join(", ") + " WHERE id = ?";
+                updateQuery +=
+                    updateFields.join(", ") +
+                    " WHERE id = ?";
 
-                con.query(updateQuery, updateParams, (err, result) => {
-                    if (err) {
-                        console.error("Error updating cashbook:", err.message);
-                        return res.status(500).send({
-                            success: false,
-                            message: "Failed to update cashbook.",
-                        });
-                    }
-
-                    if (!order_id) {
-                        return res.status(200).send({
-                            success: true,
-                            message: "Cashbook updated successfully.",
-                        });
-                    }
-
-                    // Step 1: Get total receipt for this order_id
-                    const fetchReceiptsQuery = `SELECT SUM(receipt) AS total_receipt FROM tbl_cashbook WHERE order_id = ?`;
-                    con.query(fetchReceiptsQuery, [order_id], (err, receiptResult) => {
+                con.query(
+                    updateQuery,
+                    updateParams,
+                    (err, result) => {
                         if (err) {
-                            console.error("Error fetching receipt total:", err.message);
+                            console.error(
+                                "Error updating cashbook:",
+                                err.message
+                            );
+
                             return res.status(500).send({
                                 success: false,
-                                message: "Failed to fetch receipt total.",
+                                message:
+                                    "Failed to update cashbook.",
                             });
                         }
 
-                        const totalReceipt = receiptResult[0]?.total_receipt || 0;
+                    /*
+                     * The row may have moved off its previous order or
+                     * supplier invoice. Refresh those old links first.
+                     * The new link is refreshed by the flow below.
+                     */
+                    const nextOrderId = allocation_type === "Customer" ? (order_id || null) : null;
+                    const nextSupplierInvoiceId = allocation_type === "Supplier" ? (supplier_invoice_id || null) : null;
 
-                        // Step 2: Check if an invoice exists for this order_id
-                        const checkInvoiceQuery = `SELECT * FROM tbl_invoices WHERE order_id = ?`;
-                        con.query(checkInvoiceQuery, [order_id], (err, invoiceResult) => {
-                            if (err) {
-                                console.error("Error checking invoice:", err.message);
-                                return res.status(500).send({
-                                    success: false,
-                                    message: "Failed to check invoice.",
-                                });
-                            }
+                    const continueAllocation = () => {
 
-                            if (invoiceResult.length > 0) {
-                                // Step 3A: Update existing invoice
-                                const updatePaymentQuery = `
-                                    UPDATE tbl_invoices
-                                    SET 
-                                        payment = ?,
-                                        status = ?
-                                    WHERE order_id = ?
-                                `;
+                    // =================================================
+                    // SUPPLIER FLOW
+                    // =================================================
 
-                                con.query(updatePaymentQuery, [totalReceipt, "Part Paid", order_id], (err) => {
-                                    if (err) {
-                                        console.error("Error updating payment:", err.message);
+                    if (
+                        allocation_type === "Supplier"
+                    ) {
+                            updateSupplierInvoicePayment(
+                                supplier_invoice_id,
+                                (
+                                    supplierErr,
+                                    supplierResponse
+                                ) => {
+                                    if (supplierErr) {
+                                        console.error(
+                                            "Supplier invoice update error:",
+                                            supplierErr.message
+                                        );
+
                                         return res.status(500).send({
                                             success: false,
-                                            message: "Failed to update payment.",
-                                        });
-                                    }
-
-                                    // Fetch updated invoice details
-                                    const selectInvoiceQuery = `SELECT invoice_amt, payment FROM tbl_invoices WHERE order_id = ?`;
-                                    con.query(selectInvoiceQuery, [order_id], (err, invoiceDetails) => {
-                                        if (err) {
-                                            console.error("Error fetching invoice:", err.message);
-                                            return res.status(500).send({
-                                                success: false,
-                                                message: "Failed to fetch invoice details.",
-                                            });
-                                        }
-
-                                        const { invoice_amt, payment } = invoiceDetails[0];
-                                        const finalBalance = invoice_amt ? invoice_amt - payment : 0;
-
-                                        // Step 4A: Update balance in tbl_invoices
-                                        const updateBalanceQuery = `
-                                            UPDATE tbl_invoices
-                                            SET balance = ?
-                                            WHERE order_id = ?
-                                        `;
-
-                                        con.query(updateBalanceQuery, [finalBalance, order_id], (err) => {
-                                            if (err) {
-                                                console.error("Error updating invoice balance:", err.message);
-                                                return res.status(500).send({
-                                                    success: false,
-                                                    message: "Failed to update invoice balance.",
-                                                });
-                                            }
-
-                                            return res.status(200).send({
-                                                success: true,
-                                                message: "Invoice updated successfully.",
-                                            });
-                                        });
-                                    });
-                                });
-                            } else {
-                                // Step 3B: Insert new invoice
-                                const insertInvoiceQuery = `
-                                    INSERT INTO tbl_invoices (order_id, payment, status, balance)
-                                    VALUES (?, ?, ?, ?)
-                                `;
-
-                                con.query(insertInvoiceQuery, [order_id, totalReceipt, "Part Paid", 0], (err) => {
-                                    if (err) {
-                                        console.error("Error inserting invoice:", err.message);
-                                        return res.status(500).send({
-                                            success: false,
-                                            message: "Failed to insert invoice.",
+                                            message:
+                                                supplierErr.message,
                                         });
                                     }
 
                                     return res.status(200).send({
                                         success: true,
-                                        message: "New invoice created successfully.",
+                                        message:
+                                            "Supplier payment allocated and invoice updated successfully.",
+                                        data: supplierResponse,
                                     });
+                                }
+                            );
+
+                            return;
+                        }
+
+                        // =================================================
+                        // CUSTOMER FLOW
+                        // =================================================
+
+                        /*
+                         * Existing customer tbl_invoices logic preserved.
+                         * Pehle customer invoice update hoga.
+                         */
+
+                        if (!order_id) {
+                            return res.status(200).send({
+                                success: true,
+                                message:
+                                    "Cashbook updated successfully.",
+                            });
+                        }
+
+                        // -----------------------------------------
+                        // STEP 1:
+                        // GET TOTAL CUSTOMER RECEIPT
+                        // -----------------------------------------
+
+                        const fetchReceiptsQuery = `
+                            SELECT
+                                COALESCE(
+                                    SUM(
+                                        COALESCE(receipt, 0)
+                                    ),
+                                    0
+                                ) AS total_receipt
+                            FROM tbl_cashbook
+                            WHERE order_id = ?
+                              AND allocation_type = 'Customer'
+                        `;
+
+                        con.query(
+                            fetchReceiptsQuery,
+                            [order_id],
+                            (err, receiptResult) => {
+                                if (err) {
+                                    console.error(
+                                        "Error fetching receipt total:",
+                                        err.message
+                                    );
+
+                                    return res.status(500).send({
+                                        success: false,
+                                        message:
+                                            "Failed to fetch receipt total.",
+                                    });
+                                }
+
+                                const totalReceipt =
+                                    Number(
+                                        receiptResult[0]
+                                            ?.total_receipt
+                                    ) || 0;
+
+                                // -----------------------------------------
+                                // STEP 2:
+                                // EXISTING tbl_invoices UPDATE
+                                // -----------------------------------------
+
+                                const checkInvoiceQuery = `
+                                    SELECT *
+                                    FROM tbl_invoices
+                                    WHERE order_id = ?
+                                `;
+
+                                con.query(
+                                    checkInvoiceQuery,
+                                    [order_id],
+                                    (err, invoiceResult) => {
+                                        if (err) {
+                                            console.error(
+                                                "Error checking invoice:",
+                                                err.message
+                                            );
+
+                                            return res.status(500).send({
+                                                success: false,
+                                                message:
+                                                    "Failed to check invoice.",
+                                            });
+                                        }
+
+                                        /*
+                                         * Existing tbl_invoices flow:
+                                         * Isko change nahi kiya gaya.
+                                         */
+
+                                        if (
+                                            invoiceResult.length > 0
+                                        ) {
+                                            const updatePaymentQuery = `
+                                                UPDATE tbl_invoices
+                                                SET
+                                                    payment = ?,
+                                                    status = ?
+                                                WHERE order_id = ?
+                                            `;
+
+                                            con.query(
+                                                updatePaymentQuery,
+                                                [
+                                                    totalReceipt,
+                                                    "Part Paid",
+                                                    order_id,
+                                                ],
+                                                (err) => {
+                                                    if (err) {
+                                                        console.error(
+                                                            "Error updating payment:",
+                                                            err.message
+                                                        );
+
+                                                        return res.status(500).send({
+                                                            success: false,
+                                                            message:
+                                                                "Failed to update payment.",
+                                                        });
+                                                    }
+
+                                                    /*
+                                                     * Existing tbl_invoices
+                                                     * update ke baad new
+                                                     * quote_invoice flow.
+                                                     */
+                                                    updateCustomerInvoiceStatus(
+                                                        order_id,
+                                                        (
+                                                            customerErr,
+                                                            customerResponse
+                                                        ) => {
+                                                            if (
+                                                                customerErr
+                                                            ) {
+                                                                console.error(
+                                                                    "Customer quote invoice update error:",
+                                                                    customerErr.message
+                                                                );
+
+                                                                return res.status(500).send({
+                                                                    success: false,
+                                                                    message:
+                                                                        customerErr.message,
+                                                                });
+                                                            }
+
+                                                            /*
+                                                             * Existing invoice
+                                                             * details flow.
+                                                             */
+                                                            const selectInvoiceQuery = `
+                                                                SELECT
+                                                                    invoice_amt,
+                                                                    payment
+                                                                FROM tbl_invoices
+                                                                WHERE order_id = ?
+                                                            `;
+
+                                                            con.query(
+                                                                selectInvoiceQuery,
+                                                                [order_id],
+                                                                (
+                                                                    err,
+                                                                    invoiceDetails
+                                                                ) => {
+                                                                    if (err) {
+                                                                        console.error(
+                                                                            "Error fetching invoice:",
+                                                                            err.message
+                                                                        );
+
+                                                                        return res.status(500).send({
+                                                                            success: false,
+                                                                            message:
+                                                                                "Failed to fetch invoice details.",
+                                                                        });
+                                                                    }
+
+                                                                    if (
+                                                                        invoiceDetails.length ===
+                                                                        0
+                                                                    ) {
+                                                                        return res.status(404).send({
+                                                                            success: false,
+                                                                            message:
+                                                                                "Invoice not found.",
+                                                                        });
+                                                                    }
+
+                                                                    const invoiceAmt =
+                                                                        Number(
+                                                                            invoiceDetails[0]
+                                                                                .invoice_amt
+                                                                        ) || 0;
+
+                                                                    const payment =
+                                                                        Number(
+                                                                            invoiceDetails[0]
+                                                                                .payment
+                                                                        ) || 0;
+
+                                                                    const finalBalance =
+                                                                        invoiceAmt -
+                                                                        payment;
+
+                                                                    const updateBalanceQuery = `
+                                                                        UPDATE tbl_invoices
+                                                                        SET balance = ?
+                                                                        WHERE order_id = ?
+                                                                    `;
+
+                                                                    con.query(
+                                                                        updateBalanceQuery,
+                                                                        [
+                                                                            finalBalance,
+                                                                            order_id,
+                                                                        ],
+                                                                        (err) => {
+                                                                            if (err) {
+                                                                                console.error(
+                                                                                    "Error updating invoice balance:",
+                                                                                    err.message
+                                                                                );
+
+                                                                                return res.status(500).send({
+                                                                                    success: false,
+                                                                                    message:
+                                                                                        "Failed to update invoice balance.",
+                                                                                });
+                                                                            }
+
+                                                                            return res.status(200).send({
+                                                                                success: true,
+                                                                                message:
+                                                                                    "Customer invoice updated successfully.",
+                                                                                data: {
+                                                                                    existing_invoice: {
+                                                                                        payment,
+                                                                                        balance: finalBalance,
+                                                                                    },
+                                                                                    quote_invoice:
+                                                                                        customerResponse,
+                                                                                },
+                                                                            });
+                                                                        }
+                                                                    );
+                                                                }
+                                                            );
+                                                        }
+                                                    );
+                                                }
+                                            );
+
+                                            return;
+                                        }
+
+                                        // -----------------------------------------
+                                        // EXISTING LOGIC:
+                                        // NEW tbl_invoices RECORD
+                                        // -----------------------------------------
+
+                                        const insertInvoiceQuery = `
+                                            INSERT INTO tbl_invoices
+                                            (
+                                                order_id,
+                                                payment,
+                                                status,
+                                                balance
+                                            )
+                                            VALUES (?, ?, ?, ?)
+                                        `;
+
+                                        con.query(
+                                            insertInvoiceQuery,
+                                            [
+                                                order_id,
+                                                totalReceipt,
+                                                "Part Paid",
+                                                0,
+                                            ],
+                                            (err) => {
+                                                if (err) {
+                                                    console.error(
+                                                        "Error inserting invoice:",
+                                                        err.message
+                                                    );
+
+                                                    return res.status(500).send({
+                                                        success: false,
+                                                        message:
+                                                            "Failed to insert invoice.",
+                                                    });
+                                                }
+
+                                                /*
+                                                 * Existing new invoice
+                                                 * insertion ke baad new
+                                                 * quote_invoice update.
+                                                 */
+                                                updateCustomerInvoiceStatus(
+                                                    order_id,
+                                                    (
+                                                        customerErr,
+                                                        customerResponse
+                                                    ) => {
+                                                        if (
+                                                            customerErr
+                                                        ) {
+                                                            console.error(
+                                                                "Customer quote invoice update error:",
+                                                                customerErr.message
+                                                            );
+
+                                                            return res.status(500).send({
+                                                                success: false,
+                                                                message:
+                                                                    customerErr.message,
+                                                            });
+                                                        }
+
+                                                        return res.status(200).send({
+                                                            success: true,
+                                                            message:
+                                                                "New customer invoice created successfully.",
+                                                            data: {
+                                                                quote_invoice:
+                                                                    customerResponse,
+                                                            },
+                                                        });
+                                                    }
+                                                );
+                                            }
+                                        );
+                                    }
+                                );
+                            }
+                        );
+                    }
+
+                    Promise.resolve()
+                        .then(async () => {
+                            if (
+                                previousOrderId &&
+                                String(previousOrderId) !== String(nextOrderId || "")
+                            ) {
+                                await recalcOrderPayment(previousOrderId);
+                            }
+                            if (
+                                previousSupplierInvoiceId &&
+                                String(previousSupplierInvoiceId) !== String(nextSupplierInvoiceId || "")
+                            ) {
+                                await recalcSupplierInvoicePayment(previousSupplierInvoiceId);
+                            }
+                        })
+                        .then(() => continueAllocation())
+                        .catch((refreshErr) => {
+                            console.error(
+                                "Invoice payment refresh error:",
+                                refreshErr.message
+                            );
+                            if (!res.headersSent) {
+                                return res.status(500).send({
+                                    success: false,
+                                    message: refreshErr.message,
                                 });
                             }
                         });
+                }
+            );
+            }
+        );
+    } catch (error) {
+        console.error(
+            "Unexpected error:",
+            error.message
+        );
+
+        return res.status(500).send({
+            success: false,
+            message:
+                "An unexpected error occurred.",
+        });
+    }
+};
+
+const updateSupplierInvoicePayment = (
+    supplierInvoiceId,
+    callback
+) => {
+
+    // ---------------------------------------------------------
+    // STEP 1:
+    // GET SUPPLIER INVOICE
+    // ---------------------------------------------------------
+
+    const getSupplierInvoiceQuery = `
+        SELECT
+            id,
+            supplier_id,
+            reference_no,
+            sumof_vatincl,
+            payment,
+            balance,
+            status
+        FROM supplier_shipment_invoice
+        WHERE id = ?
+    `;
+
+    con.query(
+        getSupplierInvoiceQuery,
+        [supplierInvoiceId],
+        (err, invoiceResult) => {
+
+            if (err) {
+                return callback(
+                    new Error(
+                        "Failed to fetch supplier invoice: " +
+                        err.message
+                    )
+                );
+            }
+
+            if (invoiceResult.length === 0) {
+                return callback(
+                    new Error(
+                        "Supplier invoice not found."
+                    )
+                );
+            }
+
+            const invoice =
+                invoiceResult[0];
+
+            const invoiceAmount =
+                Number(invoice.sumof_vatincl) || 0;
+
+            // -------------------------------------------------
+            // STEP 2:
+            // GET TOTAL PAYMENT FROM CASHBOOK
+            // -------------------------------------------------
+
+            const totalPaymentQuery = `
+                SELECT
+                    SUM(receipt) AS total_payment
+                FROM tbl_cashbook
+                WHERE allocation_type = 'Supplier'
+                AND supplier_invoice_id = ?
+            `;
+
+            con.query(
+                totalPaymentQuery,
+                [supplierInvoiceId],
+                (err, paymentResult) => {
+
+                    if (err) {
+                        return callback(
+                            new Error(
+                                "Failed to fetch supplier payment total: " +
+                                err.message
+                            )
+                        );
+                    }
+
+                    const totalPayment =
+                        Number(
+                            paymentResult[0]?.total_payment
+                        ) || 0;
+
+                    // -------------------------------------------------
+                    // STEP 3:
+                    // CALCULATE BALANCE
+                    // -------------------------------------------------
+
+                    let balance =
+                        invoiceAmount -
+                        totalPayment;
+
+                    // Prevent negative balance
+                    if (balance < 0) {
+                        balance = 0;
+                    }
+
+                    // -------------------------------------------------
+                    // STEP 4:
+                    // DETERMINE STATUS
+                    // -------------------------------------------------
+
+                    let status = "unpaid";
+
+                    if (totalPayment > 0 && balance > 0) {
+                        status = "Part Paid";
+                    }
+
+                    if (balance <= 0 && totalPayment > 0) {
+                        status = "Paid";
+                    }
+
+                    // -------------------------------------------------
+                    // STEP 5:
+                    // UPDATE SUPPLIER INVOICE
+                    // -------------------------------------------------
+
+                    const updateSupplierInvoiceQuery = `
+                        UPDATE supplier_shipment_invoice
+                        SET
+                            payment = ?,
+                            balance = ?,
+                            status = ?
+                        WHERE id = ?
+                    `;
+
+                    con.query(
+                        updateSupplierInvoiceQuery,
+                        [
+                            totalPayment,
+                            balance,
+                            status,
+                            supplierInvoiceId,
+                        ],
+                        (err) => {
+
+                            if (err) {
+                                return callback(
+                                    new Error(
+                                        "Failed to update supplier invoice: " +
+                                        err.message
+                                    )
+                                );
+                            }
+
+                            return callback(
+                                null,
+                                {
+                                    supplier_invoice_id:
+                                        supplierInvoiceId,
+
+                                    reference_no:
+                                        invoice.reference_no,
+
+                                    invoice_amount:
+                                        invoiceAmount,
+
+                                    payment:
+                                        totalPayment,
+
+                                    balance:
+                                        balance,
+
+                                    status:
+                                        status,
+                                }
+                            );
+                        }
+                    );
+                }
+            );
+        }
+    );
+};
+
+const getSupplierAllInvoice = async (req, res) => {
+    try {
+        const { supplier_id } = req.query;
+
+        if (!supplier_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Supplier ID is required.",
+            });
+        }
+
+        const query = `
+            SELECT
+                id as supplier_invoice_id,
+                reference_no,
+                supplier_id,
+                sumof_vatincl,
+                payment,
+                balance,
+                status
+            FROM supplier_shipment_invoice
+            WHERE supplier_id = ?
+            AND status != 'paid'
+            ORDER BY id DESC
+        `;
+
+        con.query(
+            query,
+            [supplier_id],
+            (err, result) => {
+                if (err) {
+                    console.error(
+                        "Error fetching supplier invoices:",
+                        err.message
+                    );
+
+                    return res.status(500).json({
+                        success: false,
+                        message: "Failed to fetch supplier invoices.",
                     });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Supplier invoices fetched successfully.",
+                    data: result,
                 });
             }
-        });
+        );
+
     } catch (error) {
-        console.error("Unexpected error:", error.message);
-        return res.status(500).send({
+        console.error(
+            "Unexpected error:",
+            error.message
+        );
+
+        return res.status(500).json({
             success: false,
             message: "An unexpected error occurred.",
         });
     }
 };
+
 
 const GetClientAllInvoice = async (req, res) => {
     try {
@@ -1188,5 +2617,5 @@ const DownloadQuoteEstimatePDF = async (req, res) => {
 
 module.exports = {
     AddInvoiceDetails, ADDcashbook, GetClientAllInvoice, GetAllFreightDocs, GetByIDAllFreightDocs, AddFreightDoc, UpdateSageInvoiceDoc,
-    GetRealeseDashboard, ManageRealeseDashboard
+    GetRealeseDashboard, ManageRealeseDashboard, getSupplierAllInvoice
 }

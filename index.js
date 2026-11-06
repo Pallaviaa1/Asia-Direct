@@ -19,10 +19,12 @@ const clearance_route = require('./routes/clearanceRoute');
 const upload_route = require('./routes/uploadRoute')
 const invoice_route = require('./routes/invoiceRoute')
 const chatRoutes = require('./routes/chatRoute');
+const warehouseTrackingRoute = require('./routes/warehouseTrackingRoute');
+const verificationModule = require('./verification');
 
 // Workspace AI (optional at boot — missing folder/deps must not crash the whole app)
 let aiChatRoute = null;
-let startAiChatCleanup = () => {};
+let startAiChatCleanup = () => { };
 let demoHtmlPath = null;
 try {
   const ai = require('./ai');
@@ -41,9 +43,28 @@ app.use(cors({
   origin: '*'
 }));
 
-app.use(bodyparser.json());
-app.use(express.json());
-app.use(bodyparser.urlencoded({ extended: true }));
+// Verification routes: robust parser handling up to 50mb and auto-repairing unescaped newlines in Base64 JSON strings
+app.use(['/api/verification', '/api/v1/third-party/verification'], express.text({ type: ['application/json', 'text/*'], limit: '50mb' }), (req, res, next) => {
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try {
+      req.body = JSON.parse(req.body);
+      req._body = true;
+    } catch (e) {
+      try {
+        const cleaned = req.body.replace(/[\r\n]+/g, '');
+        req.body = JSON.parse(cleaned);
+        req._body = true;
+      } catch (err2) {
+        // If still unparseable, continue to standard error handler
+      }
+    }
+  }
+  next();
+});
+
+app.use(bodyparser.json({ limit: '50mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(bodyparser.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static('public'));
 
 // Workspace AI demo UI (lives under ai/demo; React app will replace this later)
@@ -63,7 +84,7 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   }
 });
-global.io = io; 
+global.io = io;
 // Socket logic
 require('./socket/chat.socket')(io);
 
@@ -80,7 +101,6 @@ app.get('/check', async (req, res) => {
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).send('Failed to send message');
-    
   }
 });
 
@@ -205,6 +225,8 @@ app.use('/api', clearance_route);
 app.use('/api', upload_route)
 app.use('/api', invoice_route)
 app.use('/api', chatRoutes);
+app.use('/api/warehouse', warehouseTrackingRoute);
+app.use('/api', verificationModule.router);
 if (aiChatRoute) {
   app.use('/api', aiChatRoute);
   // AI chat history: purge sessions past inactivity TTL (expires_at)
@@ -215,6 +237,15 @@ if (aiChatRoute) {
 }
 
 app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    logger.warn('Malformed JSON body received:', err.message);
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_JSON',
+      message: 'Malformed JSON payload. If you pasted a Base64 image, ensure there are no unescaped line breaks or control characters inside the string.',
+      error: err.message
+    });
+  }
   logger.error('Unhandled error:', err); // ✅ log all unhandled errors
   res.status(500).json({ message: 'Internal server error' });
 });

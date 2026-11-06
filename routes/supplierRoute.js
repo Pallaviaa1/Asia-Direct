@@ -21,6 +21,9 @@ var storage = multer.diskStorage({
         if (file.fieldname === "damage_images") {
             cb(null, path.join(__dirname, '../public/documents'));
         }
+        if (file.fieldname === "pictures") {
+            cb(null, path.join(__dirname, '../public/product_pictures'));
+        }
         if (file.fieldname === "documents") {
             cb(null, path.join(__dirname, '../public/documents'));
         }
@@ -71,8 +74,8 @@ supplier_route.post('/update-Order-And-Warehouse', upload.fields([
 supplier_route.post("/GetSupplierCreatedWarehouseOrders", supplierController.GetSupplierCreatedWarehouseOrders)
 supplier_route.get("/getSupplierWarehouses", supplierController.getSupplierWarehouses)
 
-supplier_route.post("/addSupplierWarehouseProduct", supplierController.addSupplierWarehouseProduct)
-supplier_route.post("/updateSupplierWarehouseProduct", supplierController.updateSupplierWarehouseProduct)
+supplier_route.post("/addSupplierWarehouseProduct", upload.array('pictures', 4), supplierController.addSupplierWarehouseProduct)
+supplier_route.post("/updateSupplierWarehouseProduct", upload.array('pictures', 4), supplierController.updateSupplierWarehouseProduct)
 supplier_route.get("/getSupplierWarehouseProducts", supplierController.getSupplierWarehouseProducts)
 
 supplier_route.post("/adminUpdateSupplierWarehouse", supplierController.adminUpdateSupplierWarehouse)
@@ -112,6 +115,5 @@ supplier_route.post('/add-task', supplierController.AddTask);
 supplier_route.post('/staffTaskList', supplierController.staffTaskList);
 supplier_route.post('/supplierTaskList', supplierController.supplierTaskList);
 supplier_route.post('/adminTaskList', supplierController.adminTaskList);
-
 
 module.exports = supplier_route;

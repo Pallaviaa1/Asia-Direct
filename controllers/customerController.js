@@ -7,6 +7,8 @@ const { findOrCreateFolder, uploadFile, uploadToSpecificPath, findFolderId, dele
 const { SMTP_MAIL, SMTP_PASSWORD } = process.env;
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
+const ExcelJS = require('exceljs');
+
 
 const formatTwilioWhatsAppNumber = (countryCode, phone) => {
     if (!phone || !countryCode) return null;
@@ -5274,567 +5276,6 @@ const getCommodities = async (req, res) => {
         });
     }
 };
-/* const AddShipment = async (req, res) => {
-    try {
-        const {
-            freight_id,
-            waybill,
-            carrier,
-            vessel,
-            container,
-            destination,
-            date_of_dispatch,
-            agent,
-            forwarding_agent,
-        } = req.body;
-
-        const checkWaybillQuery = `SELECT * FROM batches WHERE waybill = ? AND is_deleted = 0`;
-        con.query(checkWaybillQuery, [waybill], (err, results) => {
-            if (err) {
-                console.error("Error checking waybill:", err);
-                return res.status(500).json({ success: false, message: "Error checking waybill", error: err.message });
-            }
-
-            if (results.length > 0) {
-                return res.status(400).json({ success: false, message: "Waybill already exists." });
-            }
-
-            const insertQuery = `INSERT INTO batches 
-        (freight, waybill, carrier, vessel, container, destination, date_dispatch, agent, forwarding_agent) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-            con.query(insertQuery, [freight_id, waybill, carrier, vessel, container, destination, date_of_dispatch, agent, forwarding_agent], (err, result) => {
-                if (err) {
-                    console.error("Error inserting shipment:", err);
-                    return res.status(500).json({ success: false, message: "Error inserting shipment", error: err.message });
-                }
-
-                //  Fetch the operations team
-                const teamQuery = `
-          SELECT full_name, email, cellphone 
-          FROM tbl_users 
-          WHERE user_type = 2
-            AND FIND_IN_SET(2, assigned_roles) 
-            AND is_deleted = 0 
-            AND status = 1
-        `;
-
-                con.query(teamQuery, async (opErr, teamResults) => {
-                    if (opErr) {
-                        console.error("Error fetching team members:", opErr);
-                        return res.status(500).json({ success: false, message: "Failed to fetch operations team", error: opErr.message });
-                    }
-
-                    const mailSubject = 'New Freight Option Created';
-                    const htmlContent = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-              <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
-              <p style="font-size: 16px; color: #333;">Hi Operations Team,</p>
-              <p style="font-size: 16px; color: #333;">A new freight option has been created.</p>
-              <p style="font-size: 16px; color: #333;">
-                <strong>Waybill:</strong> ${waybill}<br>
-                <strong>Freight:</strong> ${freight_id}<br>
-                <strong>Carrier:</strong> ${carrier}<br>
-                <strong>Vessel:</strong> ${vessel}<br>
-                <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
-                <strong>Container Number:</strong> ${container}
-              </p>
-              <p style="font-size: 16px; color: #333;">Please review the freight option in the system.</p>
-              <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-              <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
-            </div>
-          `;
-
-                    const plainMessage = `*New Freight Option Created*\n\n` +
-                        `A new freight option has been created.\n\n` +
-                        `Waybill: ${waybill}\n` +
-                        `Freight: ${freight_id}\n` +
-                        `Carrier: ${carrier}\n` +
-                        `Vessel: ${vessel}\n` +
-                        `Date of Dispatch: ${date_of_dispatch}\n` +
-                        `Container Number: ${container}\n\n` +
-                        `Please review this shipment.`;
-
-                    for (const member of teamResults) {
-                        if (member.email) {
-                            sendMail(member.email, mailSubject, htmlContent);
-                        }
-
-                        if (member.cellphone) {
-                            sendWhatsApp(member.cellphone, plainMessage);
-                            sendSms(member.cellphone, plainMessage);
-                        }
-                    }
-
-                    return res.status(200).json({
-                        success: true,
-                        message: "Shipment added and notifications sent successfully",
-                    });
-                });
-            });
-        });
-    } catch (err) {
-        console.error("Unhandled error in AddShipment:", err);
-        return res.status(500).json({ success: false, message: "Server Error", error: err.message });
-    }
-};
- */
-
-// const AddShipment = (req, res) => {
-//     const {
-//         waybill,
-//         freight,
-//         carrier,
-//         vessel,
-//         ETD,
-//         ATD,
-//         date_of_dispatch,
-//         status,
-//         origin_agent,
-//         port_of_loading,
-//         port_of_discharge,
-//         destination_agent,
-//         load,
-//         release_type,
-//         container,
-//         seal,
-//         origin_country_id,
-//         des_country_id,
-//         details,
-//         documentName
-//     } = req.body;
-
-//     console.log(req.body);
-//     console.log(req.files);
-//     const detailALL = details ? JSON.parse(details) : null;
-//     let detailALL1;
-//     if (details !== undefined && details !== '') {
-//         const detailsArray = JSON.parse(details);
-//         detailALL1 = detailsArray.join(',');
-//     }
-
-//     const shipmentQuery = `
-//         INSERT INTO tbl_shipments 
-//         (waybill, freight, carrier, vessel, ETD, ATD, date_of_dispatch, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal,
-//          origin_country_id, des_country_id)
-//         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-//     `;
-
-//     const shipmentValues = [
-//         waybill || null,
-//         freight || null,
-//         carrier || null,
-//         vessel || null,
-//         ETD || null,
-//         ATD || null,
-//         date_of_dispatch || null,
-//         status || null,
-//         origin_agent || null,
-//         port_of_loading || null,
-//         port_of_discharge || null,
-//         destination_agent || null,
-//         load || null,
-//         release_type || null,
-//         container || null,
-//         seal || null,
-//         origin_country_id || null,
-//         des_country_id || null,
-//     ];
-
-//     con.query(shipmentQuery, shipmentValues, (shipmentErr, shipmentResult) => {
-//         if (shipmentErr) {
-//             return res.status(500).send({
-//                 success: false,
-//                 message: "Failed to insert shipment",
-//                 error: shipmentErr.message,
-//                 data: req.body
-//             });
-//         }
-
-//         const shipmentId = shipmentResult.insertId;
-//         if (req.files && req.files.document) {
-//             con.query(`update tbl_shipments set document='${req.files.document[0].filename}' where id='${shipmentId}'`, (err, data) => {
-//                 if (err) throw err;
-//             })
-//         }
-
-
-//         if (detailALL && Array.isArray(detailALL) && detailALL.length > 0) {
-//             const detailsQuery = `
-//                 INSERT INTO shipment_details (shipment_id, order_id, batch_id)
-//                 VALUES ?
-//             `;
-
-//             const detailsValues = detailALL.map((data) => [
-//                 shipmentId,
-//                 data.order_id,
-//                 data.batch_id || null,
-//             ]);
-
-//             con.query(detailsQuery, [detailsValues], async (detailsErr) => {
-//                 if (detailsErr) {
-//                     return res.status(500).send({
-//                         success: false,
-//                         message: "Failed to insert shipment details",
-//                         error: detailsErr.message,
-//                     });
-//                 }
-//                 /*  if (req.files && req.files.document && req.files.document.length > 0) {
-//                      // console.log("hii");
-//                      const file = req.files.document[0];
-//                      const documentName = req.body.documentName;
-
-//                      for (const order of detailALL) {
-//                          const freightId = await new Promise((resolve, reject) => {
-//                              con.query(
-//                                  `SELECT freight_id FROM tbl_orders WHERE id = ?`,
-//                                  [order.order_id],
-//                                  (err, result) => {
-//                                      if (err) return reject(err);
-//                                      if (result.length === 0) return reject(new Error("No freight_id found for order"));
-//                                      resolve(result[0].freight_id);
-//                                  }
-//                              );
-//                          });
-
-//                          const freightNumber = await new Promise((resolve, reject) => {
-//                              con.query(
-//                                  `SELECT freight_number FROM tbl_freight WHERE id = ?`,
-//                                  [freightId],
-//                                  (err, result) => {
-//                                      if (err) return reject(err);
-//                                      if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
-//                                      resolve(result[0].freight_number);
-//                                  }
-//                              );
-//                          });
-
-//                          const freightFolderId = await findOrCreateFolder(freightNumber);
-//                          const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
-
-//                          await new Promise((resolve, reject) => {
-//                              con.query(
-//                                  `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`,
-//                                  [freightId, 1, documentName, file.filename],
-//                                  (err) => {
-//                                      if (err) return reject(err);
-//                                      resolve();
-//                                  }
-//                              );
-//                          });
-//                      }
-//                  } */
-
-//                 if (req.files && Object.keys(req.files).length > 0) {
-//                     // Loop over all fieldnames (e.g. "Waybills", "Supporting Documents", etc.)
-//                     for (const fieldName of Object.keys(req.files)) {
-//                         const filesArray = req.files[fieldName];
-
-//                         for (const file of filesArray) {
-//                             const documentName = fieldName;
-
-//                             // Insert into shipment_documents
-//                             await new Promise((resolve, reject) => {
-//                                 con.query(
-//                                     `INSERT INTO shipment_documents (shipment_id, document_name, document_file) VALUES (?, ?, ?)`,
-//                                     [shipmentId, documentName, file.filename],
-//                                     (err) => {
-//                                         if (err) return reject(err);
-//                                         resolve();
-//                                     }
-//                                 );
-//                             });
-
-//                             // Process each order in detailALL
-//                             for (const order of detailALL) {
-//                                 const freightId = await new Promise((resolve, reject) => {
-//                                     con.query(
-//                                         `SELECT freight_id FROM tbl_orders WHERE id = ?`,
-//                                         [order.order_id],
-//                                         (err, result) => {
-//                                             if (err) return reject(err);
-//                                             if (result.length === 0) return reject(new Error("No freight_id found for order"));
-//                                             resolve(result[0].freight_id);
-//                                         }
-//                                     );
-//                                 });
-
-//                                 const freightNumber = await new Promise((resolve, reject) => {
-//                                     con.query(
-//                                         `SELECT freight_number FROM tbl_freight WHERE id = ?`,
-//                                         [freightId],
-//                                         (err, result) => {
-//                                             if (err) return reject(err);
-//                                             if (result.length === 0) return reject(new Error("No freight_number found for freight_id"));
-//                                             resolve(result[0].freight_number);
-//                                         }
-//                                     );
-//                                 });
-
-//                                 // Ensure freight folder exists
-//                                 // const freightFolderId = await findOrCreateFolder(freightNumber);
-
-//                                 // Upload to Google Drive folder
-//                                 const googleFileId = await uploadToMatchingFolder(file, documentName, freightNumber);
-
-//                                 // Save to freight_doc
-//                                 await new Promise((resolve, reject) => {
-//                                     con.query(
-//                                         `INSERT INTO freight_doc (freight_id, uploaded_by, document_name, document) VALUES (?, ?, ?, ?)`,
-//                                         [freightId, 1, documentName, file.filename],
-//                                         (err) => {
-//                                             if (err) return reject(err);
-//                                             resolve();
-//                                         }
-//                                     );
-//                                 });
-//                             }
-//                         }
-//                     }
-//                 }
-
-//                 // Update orders and batches
-//                 detailALL.forEach((data) => {
-//                     // Update tbl_orders
-
-//                     const updateOrderTrack =
-//                         `INSERT INTO order_track (order_id, batch_id, status, description) VALUES (?, ?, ?, ?)`
-//                         ;
-//                     con.query(updateOrderTrack, [data.order_id, data.batch_id || null, status, null], (updateErr) => {
-//                         if (updateErr) {
-//                             console.error("Failed to update order delivery details:", updateErr.message);
-//                         }
-//                     });
-
-//                     const updateOrderQuery = `
-//                         UPDATE tbl_orders 
-//                         SET track_status = ?, assign_to_shipment = ?
-//                         WHERE id = ?
-//                     `;
-
-//                     con.query(updateOrderQuery, [status, 1, data.order_id], (orderErr) => {
-//                         if (orderErr) {
-//                             console.error("Failed to update order:", orderErr.message);
-//                         }
-//                     });
-//                     const selectDeliveryQuery = `
-//     SELECT * FROM order_delivery_details
-//     WHERE order_id = ?
-// `;
-
-//                     con.query(selectDeliveryQuery, [data.order_id], (selectErr, data1) => {
-//                         if (selectErr) {
-//                             console.error("Failed to fetch order delivery details:", selectErr.message);
-//                             return;
-//                         }
-
-//                         if (data1.length > 0) {
-//                             // Update existing delivery details
-//                             const updateDeliveryQuery = `
-//             UPDATE order_delivery_details 
-//             SET actual_delivery_date = ?, date_dispatched=?, vessel = ?, container_no = ?, seal_no = ? , Carrier=?
-//             WHERE order_id = ?
-//         `;
-
-//                             con.query(updateDeliveryQuery, [ATD, date_of_dispatch, vessel, container, seal, carrier, data.order_id], (updateErr) => {
-//                                 if (updateErr) {
-//                                     console.error("Failed to update order delivery details:", updateErr.message);
-//                                 } else {
-//                                     console.log("Order delivery details updated successfully for order_id:", data.order_id);
-//                                 }
-//                             });
-//                         } else {
-//                             // Insert new delivery details
-//                             const insertDeliveryQuery = `
-//     INSERT INTO order_delivery_details 
-//     (order_id, client_id, actual_delivery_date, date_dispatched, vessel, container_no, seal_no, Carrier) 
-//     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-// `;
-
-//                             con.query(
-//                                 insertDeliveryQuery,
-//                                 [data.order_id, data.client_id, ATD, date_of_dispatch, vessel, container, seal, carrier],
-//                                 (insertErr) => {
-//                                     if (insertErr) {
-//                                         console.error("Failed to insert order delivery details:", insertErr.message);
-//                                     } else {
-//                                         console.log("Order delivery details inserted successfully for order_id:", data.order_id);
-//                                     }
-//                                 }
-//                             );
-
-//                         }
-//                     });
-//                     // Fetch batch ID for the order
-//                     const batchQuery = `
-//                         SELECT batch_id 
-//                         FROM freight_assig_to_batch 
-//                         WHERE order_id = ?
-//                     `;
-
-//                     con.query(batchQuery, [data.order_id], (batchErr, batchResult) => {
-//                         if (batchErr || !batchResult.length) {
-//                             console.error("Failed to fetch batch_id:", batchErr ? batchErr.message : "Batch not found");
-//                             return;
-//                         }
-
-//                         const batchId = batchResult[0].batch_id;
-//                         const updateBatchQuery = `
-//                             UPDATE batches 
-//                             SET waybill = ?, vessel = ?, container_no = ?, carrier=?, track_status=?
-//                             WHERE id = ?
-//                         `;
-
-//                         con.query(updateBatchQuery, [waybill, vessel, container, carrier, status, batchId], (updateBatchErr) => {
-//                             if (updateBatchErr) {
-//                                 console.error("Failed to update batch:", updateBatchErr.message);
-//                             }
-//                         });
-
-//                         // Fetch all orders in the batch
-//                         const fetchBatchOrdersQuery = `
-//                             SELECT order_id 
-//                             FROM freight_assig_to_batch 
-//                             WHERE batch_id = ? and is_assign_shipment = ?
-//                         `;
-
-//                         con.query(fetchBatchOrdersQuery, [batchId, 0], (fetchErr, batchOrders) => {
-//                             if (fetchErr || !batchOrders.length) {
-//                                 console.error("Failed to fetch batch orders:", fetchErr ? fetchErr.message : "No batch orders found");
-//                                 return;
-//                             }
-
-//                             const batchOrderIds = batchOrders.map((order) => order.order_id);
-
-//                             // Check if all orders in the batch are assigned to shipment
-//                             const allOrdersAssigned = batchOrderIds.every((orderId) =>
-//                                 detailALL.some((detail) => detail.order_id === orderId)
-//                             );
-
-//                             if (allOrdersAssigned) {
-//                                 const updateBatchQuery = `
-//                                     UPDATE batches 
-//                                     SET assign_to_shipment = ? 
-//                                     WHERE id = ?
-//                                 `;
-
-//                                 con.query(updateBatchQuery, [1, batchId], (updateBatchErr) => {
-//                                     if (updateBatchErr) {
-//                                         console.error("Failed to update batch:", updateBatchErr.message);
-//                                     } else {
-//                                         console.log(`Batch ${batchId} updated successfully.`);
-//                                     }
-//                                 });
-//                             } else {
-//                                 const updateBatchQuery = `
-//                                     UPDATE batches 
-//                                     SET assign_to_shipment = ? 
-//                                     WHERE id = ?
-//                                 `;
-
-//                                 con.query(updateBatchQuery, [0, batchId], (updateBatchErr) => {
-//                                     if (updateBatchErr) {
-//                                         console.error("Failed to update batch:", updateBatchErr.message);
-//                                     } else {
-//                                         console.log(`Batch ${batchId} updated successfully.`);
-//                                     }
-//                                 });
-//                             }
-//                             const updateBatchOrder = `
-//                     UPDATE freight_assig_to_batch 
-//                     SET is_assign_shipment = ?
-//                     WHERE order_id = ?
-//                 `;
-//                             con.query(
-//                                 updateBatchOrder,
-//                                 [1, data.order_id],
-//                                 (deliveryErr) => {
-//                                     if (deliveryErr) {
-//                                         console.error(
-//                                             "Failed to update order delivery details:",
-//                                             deliveryErr.message
-//                                         );
-//                                     }
-//                                 }
-//                             );
-//                         });
-//                     });
-//                 });
-
-//                 res.status(200).send({
-//                     success: true,
-//                     message: "Shipment added successfully",
-//                     detailALL
-//                 });
-//             });
-//         } else {
-//             const teamQuery = `
-//           SELECT full_name, email, cellphone 
-//           FROM tbl_users 
-//           WHERE user_type = 2
-//             AND FIND_IN_SET(2, assigned_roles) 
-//             AND is_deleted = 0 
-//             AND status = 1
-//         `;
-//             con.query(teamQuery, async (opErr, teamResults) => {
-//                 if (opErr) {
-//                     console.error("Error fetching team members:", opErr);
-//                     return res.status(500).json({ success: false, message: "Failed to fetch operations team", error: opErr.message });
-//                 }
-
-//                 const mailSubject = 'New Freight Option Created';
-//                 const htmlContent = `
-//             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
-//               <h2 style="color: #2c3e50; border-bottom: 1px solid #ccc; padding-bottom: 10px;">New Freight Option Created</h2>
-//               <p style="font-size: 16px; color: #333;">Hi Operations Team,</p>
-//               <p style="font-size: 16px; color: #333;">A new freight option has been created.</p>
-//               <p style="font-size: 16px; color: #333;">
-//                 <strong>Waybill:</strong> ${waybill}<br>
-//                 <strong>Freight:</strong> ${freight}<br>
-//                 <strong>Carrier:</strong> ${carrier}<br>
-//                 <strong>Vessel:</strong> ${vessel}<br>
-//                 <strong>Date of Dispatch:</strong> ${date_of_dispatch}<br>
-//                 <strong>Container Number:</strong> ${container}
-//               </p>
-//               <p style="font-size: 16px; color: #333;">Please review the freight option in the system.</p>
-//               <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-//               <p style="font-size: 14px; color: #777;">Regards,<br><strong>Management System</strong></p>
-//             </div>
-//           `;
-
-//                 const plainMessage = `*New Freight Option Created*\n\n` +
-//                     `A new freight option has been created.\n\n` +
-//                     `Waybill: ${waybill}\n` +
-//                     `Freight: ${freight}\n` +
-//                     `Carrier: ${carrier}\n` +
-//                     `Vessel: ${vessel}\n` +
-//                     `Date of Dispatch: ${date_of_dispatch}\n` +
-//                     `Container Number: ${container}\n\n` +
-//                     `Please review this shipment.`;
-//                 console.log(teamResults);
-
-//                 for (const member of teamResults) {
-//                     if (member.email) {
-//                         sendMail(member.email, mailSubject, htmlContent);
-//                     }
-//                     // 05-06-2025
-//                     if (member.cellphone) {
-//                         //sendWhatsApp(member.cellphone, plainMessage);
-//                         sendSms(member.cellphone, plainMessage);
-//                     }
-//                 }
-
-
-//             });
-//             res.status(200).send({
-//                 success: true,
-//                 message: "Shipment added successfully with no details.",
-//                 detailALL,
-//                 detailALL1
-//             });
-//         }
-//     });
-// };
 
 const AddShipment = (req, res) => {
     const {
@@ -5856,6 +5297,7 @@ const AddShipment = (req, res) => {
         seal,
         origin_country_id,
         des_country_id,
+        added_by,
         details,
         documentName
     } = req.body;
@@ -5880,8 +5322,8 @@ const AddShipment = (req, res) => {
     const shipmentQuery = `
         INSERT INTO tbl_shipments 
         (waybill, freight, carrier, vessel, ETD, ATD, date_of_dispatch, status, origin_agent, port_of_loading, port_of_discharge, destination_agent, \`load\`, release_type, container, seal,
-         origin_country_id, des_country_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         origin_country_id, des_country_id, added_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const shipmentValues = [
@@ -5903,7 +5345,7 @@ const AddShipment = (req, res) => {
         seal || null,
         origin_country_id || null,
         des_country_id || null,
-    ];
+        added_by || null];
 
     con.query(shipmentQuery, shipmentValues, (shipmentErr, shipmentResult) => {
         if (shipmentErr) {
@@ -6473,12 +5915,15 @@ const getShipment = async (req, res) => {
             SELECT 
                 tbl_shipments.*,
                 c.name AS des_country_name,
-                co.name AS origin_country_name
+                co.name AS origin_country_name,
+                tu.full_name AS added_by_name
             FROM tbl_shipments
             LEFT JOIN countries AS c 
                 ON c.id = tbl_shipments.des_country_id
             LEFT JOIN countries AS co 
                 ON co.id = tbl_shipments.origin_country_id
+            LEFT JOIN tbl_users AS tu 
+                ON tu.id = tbl_shipments.added_by
             WHERE 1=1 ${condition}
             ${getOrderClause()}
             LIMIT ? OFFSET ?
@@ -6646,6 +6091,556 @@ const GetShipmentDetails = async (req, res) => {
     }
 };
 
+const exportShipmentReport = async (req, res) => {
+    try {
+        const {
+            search,
+            type,
+            start_date,
+            end_date,
+            freight,      // Filter: Sea, Air, Road
+            origin,       // Filter: Origin Country ID / Name
+            destination,  // Filter: Destination Country ID / Name
+            load_type,    // Filter: FCL, LCL
+            format = 'json'
+        } = req.body;
+
+        /* ==================== BUILD FILTERS ==================== */
+        let condition = '';
+        let params = [];
+
+        // Search filter
+        if (search) {
+            condition += `
+                AND (
+                    s.id LIKE ? OR s.waybill LIKE ? OR s.vessel LIKE ? 
+                    OR s.carrier LIKE ? OR s.container LIKE ? OR s.status LIKE ?
+                    OR oc.name LIKE ? OR dc.name LIKE ?
+                )
+            `;
+            const searchValue = `%${search}%`;
+            params.push(searchValue, searchValue, searchValue, searchValue, searchValue, searchValue, searchValue, searchValue);
+        }
+
+        // Status filter
+        if (type === "active") {
+            condition += ` AND LOWER(s.status) != 'customs released' `;
+        } else if (type === "released") {
+            condition += ` AND LOWER(s.status) = 'customs released' `;
+        }
+
+        // Freight filter (Sea, Air, Road)
+        if (freight) {
+            condition += ` AND LOWER(s.freight) = LOWER(?) `;
+            params.push(freight);
+        }
+
+        // Origin filter
+        if (origin) {
+            condition += ` AND (s.origin_country_id = ? OR oc.name LIKE ?) `;
+            params.push(origin, `%${origin}%`);
+        }
+
+        // Destination filter
+        if (destination) {
+            condition += ` AND (s.des_country_id = ? OR dc.name LIKE ?) `;
+            params.push(destination, `%${destination}%`);
+        }
+
+        // Load Type filter (FCL, LCL)
+        if (load_type) {
+            condition += ` AND LOWER(s.load) = LOWER(?) `;
+            params.push(load_type);
+        }
+
+        // Date range filter
+        if (start_date && end_date) {
+            condition += ` AND DATE(s.created_at) BETWEEN ? AND ? `;
+            params.push(start_date, end_date);
+        }
+
+        /* ==================== REPORT QUERY ==================== */
+        const reportQuery = `
+            SELECT 
+                s.id,
+                COALESCE(s.waybill, s.id) AS bill_number,
+                COALESCE(s.container, '-') AS container_number,
+                COALESCE(s.carrier, s.vessel, '-') AS carrier,
+                COALESCE(s.freight, '-') AS freight,
+                COALESCE(s.load, '-') AS load_type,
+                COALESCE(oc.name, '-') AS origin,
+                COALESCE(dc.name, '-') AS destination,
+                DATE_FORMAT(COALESCE(s.ETD, s.date_of_dispatch), '%d/%m/%Y') AS eta,
+                'FAK' AS commodity,
+                'NO' AS hazardous,
+                s.status,
+
+                -- Aggregated Client Names directly from tbl_users (Orders & Clearance)
+                COUNT(DISTINCT NULLIF(TRIM(COALESCE(u.full_name, cl_u.full_name)), '')) AS client_count,
+                GROUP_CONCAT(DISTINCT NULLIF(TRIM(COALESCE(u.full_name, cl_u.full_name)), '') SEPARATOR ', ') AS client_names,
+
+                -- Aggregated Goods Descriptions
+                COUNT(DISTINCT NULLIF(TRIM(COALESCE(f.nature_of_goods, cl.nature_of_goods)), '')) AS goods_count,
+                GROUP_CONCAT(DISTINCT NULLIF(TRIM(COALESCE(f.nature_of_goods, cl.nature_of_goods)), '') SEPARATOR ', ') AS goods_descriptions,
+
+                -- Aggregated Weight & Dimensions
+                ROUND(SUM(COALESCE(o.weight, f.weight, cl.total_weight, 0)), 2) AS total_weight,
+                ROUND(SUM(COALESCE(o.dimensions, f.dimension, cl.total_dimension, 0)), 2) AS total_dims
+
+            FROM tbl_shipments s
+            LEFT JOIN countries oc ON oc.id = s.origin_country_id
+            LEFT JOIN countries dc ON dc.id = s.des_country_id
+            LEFT JOIN shipment_details sd ON sd.shipment_id = s.id
+            LEFT JOIN tbl_orders o ON o.id = sd.order_id
+            LEFT JOIN tbl_freight f ON f.id = o.freight_id
+            LEFT JOIN tbl_users u ON u.id = o.client_id
+            LEFT JOIN tbl_clearance cl ON cl.id = sd.clearance_id AND cl.is_deleted = 0
+            LEFT JOIN tbl_users cl_u ON cl_u.id = cl.user_id
+            WHERE 1=1 ${condition}
+            GROUP BY s.id
+            ORDER BY s.id DESC
+        `;
+
+        const rows = await new Promise((resolve, reject) => {
+            con.query(reportQuery, params, (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
+
+        // Map aggregated results to match the exact Excel format
+        const reportData = rows.map(r => ({
+            "Bill Number": r.bill_number,
+            "Container #": r.container_number,
+            "Carrier": r.carrier,
+            "Client Name": r.client_count > 1 ? "Multiple" : (r.client_names || "N/A"),
+            "Goods description": r.goods_count > 1 ? "Various" : (r.goods_descriptions || "Various"),
+            "Freight": r.freight,
+            "Type": r.load_type,
+            "load_type": r.load_type, // <-- Added explicitly in response object
+            "Weight (Kgs)": Number(r.total_weight) || 0,
+            "Dims (Cbm)": Number(r.total_dims) || 0,
+            "Origin": r.origin,
+            "Destination": r.destination,
+            "ETA": r.eta || "-",
+            "Commodity": r.commodity,
+            "Hazardous": r.hazardous,
+            "Status": r.status
+        }));
+
+        // Return JSON format
+        if (format === 'json') {
+            return res.status(200).json({
+                success: true,
+                total: reportData.length,
+                data: reportData
+            });
+        }
+
+        // Return Excel Download format (.xlsx)
+        if (format === 'excel') {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Shipments');
+
+            worksheet.columns = [
+                { header: 'Bill Number', key: 'Bill Number', width: 15 },
+                { header: 'Container #', key: 'Container #', width: 18 },
+                { header: 'Carrier', key: 'Carrier', width: 20 },
+                { header: 'Client Name', key: 'Client Name', width: 25 },
+                { header: 'Goods description', key: 'Goods description', width: 25 },
+                { header: 'Freight', key: 'Freight', width: 12 },
+                { header: 'Type', key: 'Type', width: 10 },
+                { header: 'Weight (Kgs)', key: 'Weight (Kgs)', width: 15 },
+                { header: 'Dims (Cbm)', key: 'Dims (Cbm)', width: 15 },
+                { header: 'Origin', key: 'Origin', width: 18 },
+                { header: 'Destination', key: 'Destination', width: 18 },
+                { header: 'ETA', key: 'ETA', width: 15 },
+                { header: 'Commodity', key: 'Commodity', width: 15 },
+                { header: 'Hazardous', key: 'Hazardous', width: 12 },
+                { header: 'Status', key: 'Status', width: 16 }
+            ];
+
+            worksheet.getRow(1).font = { bold: true };
+            reportData.forEach(item => worksheet.addRow(item));
+
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename=Shipments_Report_${Date.now()}.xlsx`);
+
+            await workbook.xlsx.write(res);
+            return res.end();
+        }
+
+    } catch (error) {
+        console.error("ExportShipmentReport error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+const exportFreightAdminReport = async (req, res) => {
+    try {
+        const {
+            status,
+            priority,
+            origin,
+            destination,
+            startDate,
+            endDate,
+            freightType,
+            freightSpeed,
+            format = 'json' // 'json' or 'excel'
+        } = req.body;
+
+        /* ==================== BASE CONDITION ==================== */
+        let condition = `
+            WHERE tbl_freight.is_deleted = 0
+            AND tbl_freight.added_by = 1
+        `;
+        let params = [];
+
+        /* ==================== OPTIONAL FILTERS ==================== */
+        if (status !== undefined && status !== null && status !== '') {
+            condition += ' AND tbl_freight.status = ?';
+            params.push(status);
+        }
+
+        if (priority) {
+            condition += ' AND tbl_freight.priority = ?';
+            params.push(priority);
+        }
+
+        if (origin) {
+            condition += ' AND tbl_freight.collection_from = ?';
+            params.push(origin);
+        }
+
+        if (destination) {
+            condition += ' AND tbl_freight.delivery_to = ?';
+            params.push(destination);
+        }
+
+        if (startDate && endDate) {
+            condition += ' AND tbl_freight.date BETWEEN ? AND ?';
+            params.push(startDate, endDate);
+        }
+
+        if (freightType) {
+            condition += ' AND tbl_freight.freight = ?';
+            params.push(freightType);
+        }
+
+        if (freightSpeed) {
+            condition += ' AND tbl_freight.type = ?';
+            params.push(freightSpeed);
+        }
+
+        /* ==================== REPORT QUERY ==================== */
+        const query = `
+            SELECT
+                DATE_FORMAT(tbl_freight.date, '%Y-%m-%d') AS report_date,
+                COALESCE(tbl_freight.freight_number, tbl_freight.id) AS report_freight_number,
+                COALESCE(tbl_users.full_name, 'N/A') AS report_client_name,
+                COALESCE(tbl_freight.product_desc, 'Various') AS report_goods_desc,
+                COALESCE(tbl_freight.freight, '-') AS report_freight,
+                COALESCE(tbl_freight.fcl_lcl, tbl_freight.type, '-') AS report_type,
+                COALESCE(tbl_freight.weight, 0) AS report_weight,
+                COALESCE(tbl_freight.dimension, 0) AS report_dimension,
+                COALESCE(co.name, '-') AS report_origin,
+                COALESCE(c.name, '-') AS report_destination,
+                COALESCE(tbl_freight.incoterm, '-') AS report_terms,
+                COALESCE(cm.name, tbl_freight.commodity, 'FAK') AS report_commodity,
+                COALESCE(tbl_freight.hazardous, 'No') AS report_hazardous,
+                
+                -- Status mapping as per requirements
+                CASE 
+                    WHEN tbl_freight.status = '0' THEN 'Pending'
+                    WHEN tbl_freight.status = '1' THEN 'Accepted'
+                    WHEN tbl_freight.status = '2' THEN 'Declined'
+                    WHEN tbl_freight.status = '4' THEN 'Estimated'
+                    ELSE COALESCE(tbl_freight.status, '-')
+                END AS report_status,
+
+                COALESCE(NULLIF(TRIM(fqsh.track_status), ''), 'Draft') AS report_quote_status,
+
+                COALESCE(ss.full_name, '-') AS report_sales_rep
+            FROM tbl_freight
+            LEFT JOIN tbl_users ON tbl_users.id = tbl_freight.client_id
+            LEFT JOIN tbl_users AS ss ON ss.id = tbl_freight.sales_representative
+            LEFT JOIN countries AS c ON c.id = tbl_freight.delivery_to
+            LEFT JOIN countries AS co ON co.id = tbl_freight.collection_from
+            LEFT JOIN tbl_commodity AS cm ON cm.id = tbl_freight.commodity
+            LEFT JOIN freight_quote_status_history AS fqsh ON fqsh.id = (
+                SELECT MAX(h.id)
+                FROM freight_quote_status_history h
+                WHERE (h.freight_id = tbl_freight.id AND h.freight_id > 0)
+                   OR (tbl_freight.freight_quote_estimate_id IS NOT NULL AND h.freight_quote_estimate_id = tbl_freight.freight_quote_estimate_id)
+            )
+            ${condition}
+            ORDER BY tbl_freight.created_at DESC
+        `;
+
+        const rows = await new Promise((resolve, reject) => {
+            con.query(query, params, (err, data) => {
+                if (err) return reject(err);
+                resolve(data);
+            });
+        });
+
+        const reportData = rows.map(r => ({
+            "Date": r.report_date || '-',
+            "Freight Number": r.report_freight_number,
+            "Client Name": r.report_client_name,
+            "Goods description": r.report_goods_desc,
+            "Freight": r.report_freight,
+            "Type": r.report_type,
+            "Weight (Kgs)": Number(r.report_weight) || 0,
+            "Dims (Cbm)": Number(r.report_dimension) || 0,
+            "Origin": r.report_origin,
+            "Destination": r.report_destination,
+            "Terms": r.report_terms,
+            "Commodity": r.report_commodity,
+            "Hazardous": r.report_hazardous,
+            "Status": r.report_status,
+            "Quote status": r.report_quote_status || 'Draft',
+            "Sales rep": r.report_sales_rep
+        }));
+
+        if (format === 'json') {
+            return res.status(200).json({
+                success: true,
+                total: reportData.length,
+                data: reportData
+            });
+        }
+
+        if (format === 'excel') {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Sheet1');
+
+            worksheet.columns = [
+                { header: 'Date', key: 'Date', width: 15 },
+                { header: 'Freight Number', key: 'Freight Number', width: 18 },
+                { header: 'Client Name', key: 'Client Name', width: 25 },
+                { header: 'Goods description', key: 'Goods description', width: 25 },
+                { header: 'Freight', key: 'Freight', width: 12 },
+                { header: 'Type', key: 'Type', width: 12 },
+                { header: 'Weight (Kgs)', key: 'Weight (Kgs)', width: 15 },
+                { header: 'Dims (Cbm)', key: 'Dims (Cbm)', width: 15 },
+                { header: 'Origin', key: 'Origin', width: 18 },
+                { header: 'Destination', key: 'Destination', width: 18 },
+                { header: 'Terms', key: 'Terms', width: 12 },
+                { header: 'Commodity', key: 'Commodity', width: 15 },
+                { header: 'Hazardous', key: 'Hazardous', width: 12 },
+                { header: 'Status', key: 'Status', width: 16 },
+                { header: 'Quote status', key: 'Quote status', width: 18 },
+                { header: 'Sales rep', key: 'Sales rep', width: 25 }
+            ];
+
+            worksheet.getRow(1).font = { bold: true };
+            reportData.forEach(row => worksheet.addRow(row));
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                `attachment; filename=Freight_Admin_Report_${Date.now()}.xlsx`
+            );
+
+            await workbook.xlsx.write(res);
+            return res.end();
+        }
+
+    } catch (error) {
+        console.error("exportFreightAdminReport error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const exportFreightOrdersReport = async (req, res) => {
+    try {
+        const {
+            origin,
+            destination,
+            startDate,
+            endDate,
+            freightType,
+            freightSpeed,
+            format = 'json' // 'json' ya 'excel'
+        } = req.body;
+
+        /* ==================== BUILD DYNAMIC CONDITIONS ==================== */
+        let condition = ' WHERE 1=1 ';
+        let params = [];
+
+        if (origin) {
+            condition += ' AND f.collection_from = ? ';
+            params.push(origin);
+        }
+
+        if (destination) {
+            condition += ' AND f.delivery_to = ? ';
+            params.push(destination);
+        }
+
+        if (startDate && endDate) {
+            condition += ' AND DATE(tbl_orders.created_at) BETWEEN ? AND ? ';
+            params.push(startDate, endDate);
+        }
+
+        if (freightType) {
+            condition += ' AND f.freight = ? ';
+            params.push(freightType);
+        }
+
+        if (freightSpeed) {
+            condition += ' AND f.type = ? ';
+            params.push(freightSpeed);
+        }
+
+        /* ==================== SQL QUERY ==================== */
+        const query = `
+            SELECT
+                DATE_FORMAT(tbl_orders.created_at, '%Y-%m-%d') AS report_date,
+                COALESCE(f.freight_number, '-') AS report_freight_number,
+                CONCAT('OR000', tbl_orders.id) AS report_order_number,
+                CASE
+                    WHEN tbl_orders.client_id = 0 THEN tbl_orders.client_name
+                    ELSE COALESCE(tbl_users.full_name, tbl_orders.client_name, 'N/A')
+                END AS report_client_name,
+                COALESCE(f.product_desc, 'Various') AS report_goods_desc,
+                COALESCE(f.freight, '-') AS report_freight,
+                COALESCE(f.fcl_lcl, f.type, '-') AS report_type,
+                COALESCE(tbl_orders.weight, f.weight, 0) AS report_weight,
+                COALESCE(tbl_orders.dimensions, f.dimension, 0) AS report_dimensions,
+                COALESCE(c.name, '-') AS report_origin,
+                COALESCE(co.name, '-') AS report_destination,
+                COALESCE(f.incoterm, '-') AS report_terms,
+                COALESCE(cm.name, f.commodity, 'FAK') AS report_commodity,
+                COALESCE(f.hazardous, 'No') AS report_hazardous,
+
+                -- Track status check: NULL ya empty hone par 'Accepted', warna track_status value
+                CASE 
+                    WHEN tbl_orders.track_status IS NULL OR TRIM(tbl_orders.track_status) = '' THEN 'Accepted'
+                    ELSE tbl_orders.track_status
+                END AS report_status,
+
+                COALESCE(NULLIF(TRIM(fqsh.track_status), ''), 'Draft') AS report_quote_status,
+
+                COALESCE(ss.full_name, '-') AS report_sales_rep
+            FROM tbl_orders
+            LEFT JOIN tbl_users ON tbl_users.id = tbl_orders.client_id
+            LEFT JOIN tbl_freight AS f ON tbl_orders.freight_id = f.id
+            LEFT JOIN tbl_users AS ss ON ss.id = f.sales_representative
+            LEFT JOIN order_delivery_details AS o ON o.order_id = tbl_orders.id
+            LEFT JOIN countries AS c ON c.id = f.collection_from
+            LEFT JOIN countries AS co ON co.id = f.delivery_to
+            LEFT JOIN tbl_commodity AS cm ON cm.id = f.commodity
+            LEFT JOIN freight_quote_status_history AS fqsh ON fqsh.id = (
+                SELECT MAX(h.id)
+                FROM freight_quote_status_history h
+                WHERE (h.freight_id = tbl_orders.freight_id AND h.freight_id > 0)
+                   OR (f.freight_quote_estimate_id IS NOT NULL AND h.freight_quote_estimate_id = f.freight_quote_estimate_id)
+            )
+            ${condition}
+            GROUP BY tbl_orders.id
+            ORDER BY tbl_orders.id DESC
+        `;
+
+        const rows = await new Promise((resolve, reject) => {
+            con.query(query, params, (err, data) => {
+                if (err) return reject(err);
+                resolve(data);
+            });
+        });
+
+        // Map to exact Excel report format
+        const reportData = rows.map(r => ({
+            "Date": r.report_date || '-',
+            "Freight Number": r.report_freight_number,
+            "Client Name": r.report_client_name,
+            "Goods description": r.report_goods_desc,
+            "Freight": r.report_freight,
+            "Type": r.report_type,
+            "Weight (Kgs)": Number(r.report_weight) || 0,
+            "Dims (Cbm)": Number(r.report_dimensions) || 0,
+            "Origin": r.report_origin,
+            "Destination": r.report_destination,
+            "Terms": r.report_terms,
+            "Commodity": r.report_commodity,
+            "Hazardous": r.report_hazardous,
+            "Status": r.report_status,
+            "Quote status": r.report_quote_status || 'Draft',
+            "Sales rep": r.report_sales_rep,
+            "Freight Order": r.report_order_number
+        }));
+
+        // JSON Response
+        if (format === 'json') {
+            return res.status(200).json({
+                success: true,
+                total: reportData.length,
+                data: reportData
+            });
+        }
+
+        // Excel Download Response (.xlsx)
+        if (format === 'excel') {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Sheet1');
+
+            worksheet.columns = [
+                { header: 'Date', key: 'Date', width: 15 },
+                { header: 'Freight Number', key: 'Freight Number', width: 18 },
+                { header: 'Client Name', key: 'Client Name', width: 25 },
+                { header: 'Goods description', key: 'Goods description', width: 25 },
+                { header: 'Freight', key: 'Freight', width: 12 },
+                { header: 'Type', key: 'Type', width: 12 },
+                { header: 'Weight (Kgs)', key: 'Weight (Kgs)', width: 15 },
+                { header: 'Dims (Cbm)', key: 'Dims (Cbm)', width: 15 },
+                { header: 'Origin', key: 'Origin', width: 18 },
+                { header: 'Destination', key: 'Destination', width: 18 },
+                { header: 'Terms', key: 'Terms', width: 12 },
+                { header: 'Commodity', key: 'Commodity', width: 15 },
+                { header: 'Hazardous', key: 'Hazardous', width: 12 },
+                { header: 'Status', key: 'Status', width: 18 },
+                { header: 'Quote status', key: 'Quote status', width: 18 },
+                { header: 'Sales rep', key: 'Sales rep', width: 25 },
+                { header: 'Freight Order', key: 'Freight Order', width: 18 }
+            ];
+
+            worksheet.getRow(1).font = { bold: true };
+            reportData.forEach(row => worksheet.addRow(row));
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                `attachment; filename=Freight_Orders_Report_${Date.now()}.xlsx`
+            );
+
+            await workbook.xlsx.write(res);
+            return res.end();
+        }
+
+    } catch (error) {
+        console.error("exportFreightOrdersReport error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 const UpdateShipment = async (req, res) => {
     try {
         const {
@@ -6666,6 +6661,7 @@ const UpdateShipment = async (req, res) => {
             release_type,
             container,
             seal,
+            added_by,
             origin_country_id,
             des_country_id,
             details, // Details for shipment_details update
@@ -6703,7 +6699,7 @@ const UpdateShipment = async (req, res) => {
                 waybill = ?, freight = ?, carrier = ?, vessel = ?, ETD = ?, ATD = ?, date_of_dispatch=?, 
                 status = ?, origin_agent = ?, port_of_loading = ?, port_of_discharge = ?, 
                 destination_agent = ?, \`load\` = ?, release_type = ?, container = ?, seal = ?, 
-                origin_country_id = ?, des_country_id = ?
+                origin_country_id = ?, des_country_id = ?, added_by = ?
             WHERE id = ?
         `;
         const shipmentValues = [
@@ -6725,6 +6721,7 @@ const UpdateShipment = async (req, res) => {
             seal || null,
             origin_country_id || null,
             des_country_id || null,
+            added_by || null,
             shipment_id,
         ];
 
@@ -8866,5 +8863,6 @@ module.exports = {
     uploadClrearanceDOC, CleranceOrderList, addQueries, getContactUs, addContactUs, updateQuery, getQueries, getQueriesByUserId, deleteQueries, addCommodity,
     getCommodities, getFreightDropdown, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
     UpdateShipment, DeleteShipment, addWareProductByUser, AssignFreightToClearing, AssignToClearing, CopyShipment, DeleteShipmentDetails, GetShipmentDetails, getShipmentbyid, AssignBatchOrdersToClearing,
-    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus, addNewEstimateClearance
+    DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus, addNewEstimateClearance, exportShipmentReport,
+    exportFreightAdminReport, exportFreightOrdersReport
 }

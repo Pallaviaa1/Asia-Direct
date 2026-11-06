@@ -28,6 +28,7 @@ var upload = multer({ storage: storage })
 invoice_route.post('/AddInvoiceDetails', invoiceController.AddInvoiceDetails);
 invoice_route.post('/ADDcashbook', invoiceController.ADDcashbook)
 invoice_route.post("/GetClientAllInvoice", invoiceController.GetClientAllInvoice)
+invoice_route.get("/getSupplierAllInvoice", invoiceController.getSupplierAllInvoice)
 invoice_route.get("/GetAllFreightDocs", invoiceController.GetAllFreightDocs)
 invoice_route.post("/GetByIDAllFreightDocs", invoiceController.GetByIDAllFreightDocs)
 invoice_route.post("/AddFreightDoc", upload.single('document'), invoiceController.AddFreightDoc)

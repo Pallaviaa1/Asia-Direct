@@ -1,4 +1,6 @@
 const con = require('../config/database');
+const fs = require('fs');
+const path = require('path');
 const { validationResult, Result } = require('express-validator');
 const bcrypt = require('bcryptjs');
 async function hashPassword(password) {
@@ -3307,13 +3309,28 @@ const addSupplierWarehouseProduct = async (req, res) => {
             added_by
         } = req.body;
 
-        //  Validation
+        // Validation
         if (!supplier_warehouse_id) {
             return res.status(400).json({
                 success: false,
                 message: "supplier_warehouse_id required"
             });
         }
+
+        // Pictures handling (req.files array from multer)
+        let picturesArray = [];
+        if (req.files && req.files.length > 0) {
+            if (req.files.length > 4) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Maximum 4 pictures allowed"
+                });
+            }
+            // Filename ya relative path store karein
+            picturesArray = req.files.map(file => file.filename);
+        }
+
+        const picturesData = picturesArray.length > 0 ? JSON.stringify(picturesArray) : null;
 
         const sql = `
             INSERT INTO supplier_warehouse_products (
@@ -3336,7 +3353,8 @@ const addSupplierWarehouseProduct = async (req, res) => {
                 waybill_ref,
                 supplier_email, supplier_contact,
 
-                added_by
+                added_by,
+                pictures
             )
             VALUES (?,?,?,?,?,?,?,?,
                     ?,?,?,
@@ -3345,6 +3363,7 @@ const addSupplierWarehouseProduct = async (req, res) => {
                     ?,?,?,
                     ?,?,?,
                     ?,?,?,
+                    ?,
                     ?)
         `;
 
@@ -3383,11 +3402,11 @@ const addSupplierWarehouseProduct = async (req, res) => {
             supplier_email || null,
             supplier_contact || null,
 
-            added_by || 1
+            added_by || 1,
+            picturesData
         ];
 
         con.query(sql, values, (err, result) => {
-
             if (err) {
                 console.error(err);
                 return res.status(500).json({
@@ -3399,7 +3418,8 @@ const addSupplierWarehouseProduct = async (req, res) => {
             return res.status(200).json({
                 success: true,
                 message: "Supplier warehouse product added",
-                id: result.insertId
+                id: result.insertId,
+                pictures: picturesArray
             });
         });
 
@@ -3413,9 +3433,8 @@ const addSupplierWarehouseProduct = async (req, res) => {
 
 const updateSupplierWarehouseProduct = async (req, res) => {
     try {
-
         const {
-            id, //  product id (IMPORTANT)
+            id, // product id (IMPORTANT)
             product_description,
             hazardous,
             date_received,
@@ -3451,7 +3470,7 @@ const updateSupplierWarehouseProduct = async (req, res) => {
             added_by
         } = req.body;
 
-        //  Validation
+        // Validation
         if (!id) {
             return res.status(400).json({
                 success: false,
@@ -3459,96 +3478,162 @@ const updateSupplierWarehouseProduct = async (req, res) => {
             });
         }
 
-        const sql = `
-            UPDATE supplier_warehouse_products SET
-                product_description=?,
-                hazardous=?,
-                date_received=?,
+        // Check karein new pictures upload hui hain ya nahi
+        const hasNewPictures = req.files && req.files.length > 0;
 
-                package_type=?,
-                packages=?,
-                dimension=?,
-                weight=?,
+        if (hasNewPictures && req.files.length > 4) {
+            // Agar 4 se zyada images aayi hain to uploaded files ko server se delete karein
+            req.files.forEach(file => {
+                const filePath = path.join('uploads/warehouse_products', file.filename);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            });
 
-                warehouse_ref=?,
-                freight=?,
-                groupage_batch_ref=?,
+            return res.status(400).json({
+                success: false,
+                message: "Maximum 4 pictures allowed"
+            });
+        }
 
-                supplier=?,
-                warehouse_receipt_number=?,
-                tracking_number=?,
-                date_dispatched=?,
-
-                supplier_address=?,
-
-                warehouse_collect=?,
-                costs_to_collect=?,
-                port_of_loading=?,
-
-                warehouse_dispatch=?,
-                warehouse_cost=?,
-                cost_to_dispatch=?,
-
-                waybill_ref=?,
-                supplier_email=?,
-                supplier_contact=?,
-
-                added_by=?
-
-            WHERE id=?
-        `;
-
-        const values = [
-            product_description || null,
-            hazardous || 0,
-            date_received || null,
-
-            package_type || null,
-            packages || 0,
-            dimension || null,
-            weight || 0,
-
-            warehouse_ref || null,
-            freight || null,
-            groupage_batch_ref || null,
-
-            supplier || null,
-            warehouse_receipt_number || null,
-            tracking_number || null,
-            date_dispatched || null,
-
-            supplier_address || null,
-
-            warehouse_collect || 0,
-            costs_to_collect || 0,
-            port_of_loading || null,
-
-            warehouse_dispatch || 0,
-            warehouse_cost || 0,
-            cost_to_dispatch || 0,
-
-            waybill_ref || null,
-            supplier_email || null,
-            supplier_contact || null,
-
-            added_by || 1,
-
-            id //  WHERE condition
-        ];
-
-        con.query(sql, values, (err, result) => {
-
-            if (err) {
-                console.error(err);
+        // Database se current product ki purani pictures fetch karein
+        const getOldSql = `SELECT pictures FROM supplier_warehouse_products WHERE id = ?`;
+        con.query(getOldSql, [id], (fetchErr, rows) => {
+            if (fetchErr) {
+                console.error(fetchErr);
                 return res.status(500).json({
                     success: false,
-                    message: "Update failed"
+                    message: "Database fetch error"
                 });
             }
 
-            return res.status(200).json({
-                success: true,
-                message: "Supplier warehouse product updated"
+            if (rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Product not found"
+                });
+            }
+
+            let newPicturesData = rows[0].pictures; // By default purani pictures hi rahengi
+
+            // Agar user ne nayi pictures upload ki hain
+            if (hasNewPictures) {
+                // 1. Purani pictures ko server folder se delete karein
+                if (rows[0].pictures) {
+                    try {
+                        const oldImagesList = JSON.parse(rows[0].pictures);
+                        if (Array.isArray(oldImagesList)) {
+                            oldImagesList.forEach(fileName => {
+                                const oldFilePath = path.join('uploads/warehouse_products', fileName);
+                                if (fs.existsSync(oldFilePath)) {
+                                    fs.unlinkSync(oldFilePath);
+                                }
+                            });
+                        }
+                    } catch (parseError) {
+                        console.error("Error in Deleting Previous Images:", parseError);
+                    }
+                }
+
+                // 2. Nayi images ka array prepare karein
+                const newFilesArray = req.files.map(file => file.filename);
+                newPicturesData = JSON.stringify(newFilesArray);
+            }
+
+            // Update Query
+            const sql = `
+                UPDATE supplier_warehouse_products SET
+                    product_description=?,
+                    hazardous=?,
+                    date_received=?,
+
+                    package_type=?,
+                    packages=?,
+                    dimension=?,
+                    weight=?,
+
+                    warehouse_ref=?,
+                    freight=?,
+                    groupage_batch_ref=?,
+
+                    supplier=?,
+                    warehouse_receipt_number=?,
+                    tracking_number=?,
+                    date_dispatched=?,
+
+                    supplier_address=?,
+
+                    warehouse_collect=?,
+                    costs_to_collect=?,
+                    port_of_loading=?,
+
+                    warehouse_dispatch=?,
+                    warehouse_cost=?,
+                    cost_to_dispatch=?,
+
+                    waybill_ref=?,
+                    supplier_email=?,
+                    supplier_contact=?,
+
+                    added_by=?,
+                    pictures=?
+
+                WHERE id=?
+            `;
+
+            const values = [
+                product_description || null,
+                hazardous || 0,
+                date_received || null,
+
+                package_type || null,
+                packages || 0,
+                dimension || null,
+                weight || 0,
+
+                warehouse_ref || null,
+                freight || null,
+                groupage_batch_ref || null,
+
+                supplier || null,
+                warehouse_receipt_number || null,
+                tracking_number || null,
+                date_dispatched || null,
+
+                supplier_address || null,
+
+                warehouse_collect || 0,
+                costs_to_collect || 0,
+                port_of_loading || null,
+
+                warehouse_dispatch || 0,
+                warehouse_cost || 0,
+                cost_to_dispatch || 0,
+
+                waybill_ref || null,
+                supplier_email || null,
+                supplier_contact || null,
+
+                added_by || 1,
+                newPicturesData,
+
+                id // WHERE condition
+            ];
+
+            con.query(sql, values, (err, result) => {
+                if (err) {
+                    console.error(err);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Update failed"
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Supplier warehouse product updated successfully",
+                    pictures: hasNewPictures ? JSON.parse(newPicturesData) : undefined
+                });
             });
         });
 
@@ -3562,7 +3647,6 @@ const updateSupplierWarehouseProduct = async (req, res) => {
 
 const getSupplierWarehouseProducts = async (req, res) => {
     try {
-
         const { supplier_warehouse_id } = req.query;
 
         if (!supplier_warehouse_id) {
@@ -3609,6 +3693,7 @@ const getSupplierWarehouseProducts = async (req, res) => {
                 supplier_contact,
 
                 added_by,
+                pictures,
                 created_at
 
             FROM supplier_warehouse_products
@@ -3617,7 +3702,6 @@ const getSupplierWarehouseProducts = async (req, res) => {
         `;
 
         con.query(sql, [supplier_warehouse_id], (err, rows) => {
-
             if (err) {
                 console.error(err);
                 return res.status(500).json({
@@ -3626,12 +3710,28 @@ const getSupplierWarehouseProducts = async (req, res) => {
                 });
             }
 
-            return res.status(200).json({
-                success: true,
-                total: rows.length,
-                data: rows
+            const formattedData = rows.map(item => {
+                let parsedPictures = [];
+                if (item.pictures) {
+                    try {
+                        const parsed = JSON.parse(item.pictures);
+                        // Har image filename ke aage product_pictures/ lagayein
+                        parsedPictures = (Array.isArray(parsed) ? parsed : []).map(img => `product_pictures/${img}`);
+                    } catch (e) {
+                        parsedPictures = [];
+                    }
+                }
+                return {
+                    ...item,
+                    pictures: parsedPictures
+                };
             });
 
+            return res.status(200).json({
+                success: true,
+                total: formattedData.length,
+                data: formattedData
+            });
         });
 
     } catch (error) {
@@ -3641,7 +3741,6 @@ const getSupplierWarehouseProducts = async (req, res) => {
         });
     }
 };
-
 
 const getSupplierWarehouses = async (req, res) => {
     try {
