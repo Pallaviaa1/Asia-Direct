@@ -8,6 +8,11 @@ const { SMTP_MAIL, SMTP_PASSWORD } = process.env;
 const { sendSms, sendWhatsApp } = require('../helpers/twilioService');
 const cron = require('node-cron');
 const ExcelJS = require('exceljs');
+const {
+    recordQueryLodged,
+    recordQueryUpdate,
+    getQueryTimelineView,
+} = require('../services/data/queryTimeline');
 
 
 const formatTwilioWhatsAppNumber = (countryCode, phone) => {
@@ -4729,7 +4734,7 @@ const addQueries = async (req, res) => {
             con.query(
                 "INSERT INTO tbl_queries (Dispute_ID, user_id, name, freight_no, nature_of_Heading, subject, message, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [disputeId, user_id, name, freight_no, nature_of_Heading, subject, message, "Pending"],
-                (insertErr) => {
+                (insertErr, insertResult) => {
                     if (insertErr) {
                         return res.status(500).send({
                             success: false,
@@ -4737,6 +4742,14 @@ const addQueries = async (req, res) => {
                             error: insertErr.message,
                         });
                     }
+
+                    recordQueryLodged({
+                        queryId: insertResult.insertId,
+                        message,
+                        userId: user_id,
+                    }).catch((timelineErr) => {
+                        console.error('Query timeline lodged event failed:', timelineErr.message);
+                    });
 
                     const emailSubject = `New Dispute Lodged - ${disputeId}`;
                     const emailContent = `
@@ -5054,7 +5067,7 @@ const getContactUs = async (req, res) => {
 
 const updateQuery = async (req, res) => {
     try {
-        const { id, outcome, resolution } = req.body;
+        const { id, outcome, resolution, stage, note, updated_by, staff_id } = req.body;
 
         if (!id) {
             return res.status(400).send({
@@ -5068,15 +5081,30 @@ const updateQuery = async (req, res) => {
              SET outcome = ?, resolution = ?
              WHERE id = ?`,
             [outcome, resolution, id],
-            (err, result) => {
+            async (err, result) => {
                 if (err) {
-                    throw err;
+                    return res.status(500).send({
+                        success: false,
+                        message: err.message
+                    });
                 }
                 if (result.affectedRows === 0) {
                     return res.status(404).send({
                         success: false,
                         message: "Query not found"
                     });
+                }
+                try {
+                    await recordQueryUpdate({
+                        queryId: id,
+                        outcome,
+                        resolution,
+                        stage,
+                        note,
+                        updatedBy: updated_by || staff_id || null,
+                    });
+                } catch (timelineErr) {
+                    console.error('Query timeline update failed:', timelineErr.message);
                 }
                 return res.status(200).send({
                     success: true,
@@ -5086,6 +5114,44 @@ const updateQuery = async (req, res) => {
         );
     } catch (error) {
         res.status(500).send({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getQueryDetails = async (req, res) => {
+    try {
+        const { id, query_id, Dispute_ID, dispute_id } = req.body;
+        const lookupId = id || query_id;
+        const disputeKey = Dispute_ID || dispute_id;
+
+        if (!lookupId && !disputeKey) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide id or Dispute_ID"
+            });
+        }
+
+        const rows = lookupId
+            ? await getQueryAsync('SELECT * FROM tbl_queries WHERE id = ? LIMIT 1', [lookupId])
+            : await getQueryAsync('SELECT * FROM tbl_queries WHERE Dispute_ID = ? LIMIT 1', [disputeKey]);
+
+        if (!rows.length) {
+            return res.status(404).send({
+                success: false,
+                message: "Query not found"
+            });
+        }
+
+        const data = await getQueryTimelineView(rows[0]);
+        return res.status(200).send({
+            success: true,
+            message: "Query details fetched",
+            data
+        });
+    } catch (error) {
+        return res.status(500).send({
             success: false,
             message: error.message
         });
@@ -5200,18 +5266,25 @@ const getQueriesByUserId = async (req, res) => {
 const deleteQueries = async (req, res) => {
     try {
         const { query_id } = req.body;
-        con.query(`DELETE from tbl_queries Where id='${query_id}'`, (err, result) => {
+        if (!query_id) {
+            return res.status(400).send({
+                success: false,
+                message: "Please provide query id"
+            });
+        }
+        con.query(`DELETE FROM tbl_queries WHERE id = ?`, [query_id], (err) => {
             if (err) throw err;
+            con.query(`DELETE FROM tbl_query_timeline WHERE query_id = ?`, [query_id], () => {});
             res.status(200).send({
                 success: true,
                 message: "Query Deleted Successfully"
-            })
-        })
+            });
+        });
     } catch (error) {
         res.status(500).send({
             success: false,
             message: error.message
-        })
+        });
     }
 }
 
@@ -8860,7 +8933,7 @@ module.exports = {
     AddfreightByCustomer, UpdatefreightByCustomer, GetNotificationUser, updateNotificationSeen, deleteOneNotification,
     DeleteAllNotification, UpdateClientProfile, AddClearingByCustomer, GetClearingClient, AcceptQuotation,
     GetShipEstimate, RejectQuotation, orderDetails, UserforgotPassword, UserResetPassword, findHsCode, getListClearanceQuotation,
-    uploadClrearanceDOC, CleranceOrderList, addQueries, getContactUs, addContactUs, updateQuery, getQueries, getQueriesByUserId, deleteQueries, addCommodity,
+    uploadClrearanceDOC, CleranceOrderList, addQueries, getContactUs, addContactUs, updateQuery, getQueryDetails, getQueries, getQueriesByUserId, deleteQueries, addCommodity,
     getCommodities, getFreightDropdown, AllFreightOrderNumbers, AllBatchNumbers, getAssignShipmentList, AddShipment, getShipment,
     UpdateShipment, DeleteShipment, addWareProductByUser, AssignFreightToClearing, AssignToClearing, CopyShipment, DeleteShipmentDetails, GetShipmentDetails, getShipmentbyid, AssignBatchOrdersToClearing,
     DeleteShipmentDetailsByClearance, AssignClearanceToSupplier, GetAllAssignedClearances, updateSupplierStatusOfClearance, UpdateShipmentStatus, addNewEstimateClearance, exportShipmentReport,

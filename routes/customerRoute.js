@@ -141,6 +141,7 @@ customer_route.post("/addContactUs", customerController.addContactUs)
 customer_route.post("/getContactUs", customerController.getContactUs)
 
 customer_route.post("/updateQuery", customerController.updateQuery)
+customer_route.post("/getQueryDetails", customerController.getQueryDetails)
 customer_route.post("/getQueries", customerController.getQueries)
 customer_route.post("/getQueriesByUserId", customerController.getQueriesByUserId)
 customer_route.post("/deleteQueries", customerController.deleteQueries)
